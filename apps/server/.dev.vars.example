@@ -1,0 +1,6 @@
+# Copied to .dev.vars by `bun run dev` if missing (.dev.vars is gitignored).
+CONNECTOR_PASSWORD=devpass
+# VIEWER_KEY=
+# GENUI_PROVIDER=anthropic
+# ANTHROPIC_API_KEY=
+# AI_GATEWAY_API_KEY=

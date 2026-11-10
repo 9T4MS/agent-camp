@@ -1,0 +1,22 @@
+{
+  "name": "@agent-office/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run scripts/ensure-dev-vars.ts && wrangler dev --port 8787",
+    "dev:bun": "bun run src/dev/bun-server.ts",
+    "deploy": "wrangler deploy",
+    "test": "bun test test/unit",
+    "smoke": "bun run test/smoke.e2e.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.core.json"
+  },
+  "dependencies": {
+    "@agent-office/protocol": "workspace:*",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251101.0",
+    "wrangler": "^4"
+  }
+}

@@ -141,7 +141,13 @@ export type ServerToConnector = z.infer<typeof ServerToConnector>;
 // ---- server -> viewer ---------------------------------------------------------------------
 export const OfficeSnapshot = msg(
   "office.snapshot",
-  z.object({ officeName: z.string(), serverTime: EpochMs, people: z.array(PersonView) }),
+  z.object({
+    officeName: z.string(),
+    serverTime: EpochMs,
+    people: z.array(PersonView),
+    /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
+    timezone: z.string().max(64).optional(),
+  }),
 );
 export const PersonJoined = msg("person.joined", z.object({ person: PersonView }));
 export const PersonLeft = msg("person.left", z.object({ personId: PersonId }));

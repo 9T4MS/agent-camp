@@ -1,0 +1,3 @@
+.dev-office.sqlite*
+.dev.vars
+.wrangler/

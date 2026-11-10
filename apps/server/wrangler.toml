@@ -1,0 +1,37 @@
+# Agent Office: one Worker + one SQLite-backed Durable Object ("office").
+name = "agent-office"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+
+# install.sh is bundled into the Worker as a text module
+rules = [{ type = "Text", globs = ["**/*.sh"], fallthrough = true }]
+
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash" # /stats -> stats.html, /timelapse -> timelapse.html
+not_found_handling = "none"
+run_worker_first = ["/ws/*", "/api/*", "/healthz", "/install.sh"]
+
+[[durable_objects.bindings]]
+name = "OFFICE"
+class_name = "Office"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Office"]
+
+[vars]
+OFFICE_NAME = "Agent Office"
+OFFICE_TIMEZONE = "Europe/Vienna"
+GENUI_PROVIDER = "off"
+GENUI_MAX_CALLS_PER_DAY = "200"
+LATEST_CONNECTOR_VERSION = "0.0.0-dev"
+MIN_CONNECTOR_VERSION = "0.0.0"
+
+# Secrets (wrangler secret put ...; locally in .dev.vars):
+#   CONNECTOR_PASSWORD   shared connector password (required)
+#   VIEWER_KEY           optional ?key= for /ws/viewer
+#   ANTHROPIC_API_KEY    for GENUI_PROVIDER=anthropic
+#   AI_GATEWAY_API_KEY   for GENUI_PROVIDER=jev
+# Optional vars: GENUI_MODEL, SERVER_VERSION, DEV_MODE ("1" = password defaults to "devpass")
