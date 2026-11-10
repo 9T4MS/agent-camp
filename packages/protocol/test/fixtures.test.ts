@@ -1,0 +1,201 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  AvatarSpec,
+  avatarFromSeed,
+  CONNECTOR_TO_SERVER_TYPES,
+  coerceAvatar,
+  compareVersions,
+  envelope,
+  type ParseResult,
+  parseConnectorMessage,
+  parseServerToConnector,
+  parseViewerMessage,
+  personIdFromName,
+  SERVER_TO_CONNECTOR_TYPES,
+  SERVER_TO_VIEWER_TYPES,
+  sessionVariation,
+  ulid,
+  ulidTime,
+} from "../src/index.ts";
+
+const FIXTURES = join(import.meta.dir, "..", "fixtures");
+const load = (type: string): unknown =>
+  JSON.parse(readFileSync(join(FIXTURES, `${type}.json`), "utf8"));
+
+const parserFor = (type: string): ((x: unknown) => ParseResult<{ type: string }>) => {
+  if ((CONNECTOR_TO_SERVER_TYPES as string[]).includes(type)) return parseConnectorMessage;
+  if ((SERVER_TO_CONNECTOR_TYPES as string[]).includes(type)) return parseServerToConnector;
+  if ((SERVER_TO_VIEWER_TYPES as string[]).includes(type)) return parseViewerMessage;
+  throw new Error(`no parser for ${type}`);
+};
+
+const ALL_TYPES = [
+  ...CONNECTOR_TO_SERVER_TYPES,
+  ...SERVER_TO_CONNECTOR_TYPES,
+  ...SERVER_TO_VIEWER_TYPES,
+];
+
+describe("fixtures", () => {
+  test("there is exactly one fixture per message type", () => {
+    const files = readdirSync(FIXTURES)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.replace(/\.json$/, ""))
+      .sort();
+    expect(files).toEqual([...ALL_TYPES].sort());
+  });
+
+  for (const type of ALL_TYPES) {
+    test(`${type} parses with its channel parser`, () => {
+      const raw = load(type);
+      const r = parserFor(type)(raw);
+      if (!r.ok) throw new Error(r.error);
+      expect(r.msg.type).toBe(type);
+      // and also from a raw JSON string
+      expect(parserFor(type)(JSON.stringify(raw)).ok).toBe(true);
+    });
+  }
+
+  test("messages are rejected on the wrong channel", () => {
+    expect(parseViewerMessage(load("connector.hello")).ok).toBe(false);
+    expect(parseConnectorMessage(load("office.snapshot")).ok).toBe(false);
+    expect(parseServerToConnector(load("presence.snapshot")).ok).toBe(false);
+  });
+});
+
+describe("negative parsing", () => {
+  const hello = load("connector.hello") as Record<string, unknown> & {
+    data: Record<string, unknown>;
+  };
+  test("wrong protocol version", () => {
+    const r = parseConnectorMessage({ ...hello, v: 2 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("version");
+  });
+  test("unknown type", () => {
+    expect(parseConnectorMessage({ ...hello, type: "connector.dance" }).ok).toBe(false);
+  });
+  test("missing fields", () => {
+    const { password: _pw, ...data } = hello.data;
+    expect(parseConnectorMessage({ ...hello, data }).ok).toBe(false);
+    const { id: _id, ...noId } = hello;
+    expect(parseConnectorMessage(noId).ok).toBe(false);
+  });
+  test("garbage never throws", () => {
+    for (const g of [null, undefined, 42, "nope", "{", "[]", [], {}, { v: 1 }]) {
+      expect(parseConnectorMessage(g).ok).toBe(false);
+      expect(parseViewerMessage(g).ok).toBe(false);
+      expect(parseServerToConnector(g).ok).toBe(false);
+    }
+  });
+  test("bad session info", () => {
+    const snap = load("presence.snapshot") as { data: { sessions: Record<string, unknown>[] } };
+    const s0 = snap.data.sessions[0]!;
+    const bad = [
+      { ...s0, agent: "gemini" },
+      { ...s0, activity: "dancing" },
+      { ...s0, subagents: -1 },
+      { ...s0, subagents: 1.5 },
+      { ...s0, sessionKey: "short" },
+      { ...s0, project: "x".repeat(81) },
+    ];
+    for (const s of bad) {
+      expect(parseConnectorMessage({ ...snap, data: { sessions: [s] } }).ok).toBe(false);
+    }
+  });
+  test("invalid avatar in avatar.updated", () => {
+    const m = load("avatar.updated") as { data: { avatar: Record<string, unknown> } };
+    const avatar = { ...m.data.avatar, hairStyle: "afro-unicorn" };
+    expect(parseViewerMessage({ ...m, data: { ...m.data, avatar } }).ok).toBe(false);
+  });
+});
+
+describe("envelope()", () => {
+  test("builds a message that round-trips through the parser", () => {
+    const m = envelope("presence.snapshot", {
+      sessions: [
+        {
+          sessionKey: "abcdef0123456789",
+          agent: "claude",
+          activity: "thinking",
+          subagents: 0,
+          startedAt: 1,
+        },
+      ],
+    });
+    expect(m.v).toBe(1);
+    expect(m.id).toHaveLength(26);
+    const r = parseConnectorMessage(JSON.stringify(m));
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("avatars", () => {
+  test("avatarFromSeed is deterministic and valid", () => {
+    for (let i = 0; i < 300; i++) {
+      const seed = `person-${i}`;
+      const a = avatarFromSeed(seed);
+      expect(avatarFromSeed(seed)).toEqual(a);
+      expect(AvatarSpec.safeParse(a).success).toBe(true);
+    }
+  });
+  test("avatarFromSeed varies across seeds", () => {
+    const styles = new Set(
+      Array.from({ length: 100 }, (_, i) => avatarFromSeed(`p${i}`).hairStyle),
+    );
+    expect(styles.size).toBeGreaterThan(4);
+    expect(avatarFromSeed("anna")).not.toEqual(avatarFromSeed("martin"));
+  });
+  test("coerceAvatar falls back on garbage", () => {
+    expect(coerceAvatar({ hairStyle: "nope" }, "anna")).toEqual(avatarFromSeed("anna"));
+    const good = avatarFromSeed("x");
+    expect(coerceAvatar(good, "anna")).toEqual(good);
+  });
+  test("duplicate or too many desk props are invalid", () => {
+    const a = avatarFromSeed("anna");
+    expect(AvatarSpec.safeParse({ ...a, deskProps: ["mug", "mug"] }).success).toBe(false);
+    expect(
+      AvatarSpec.safeParse({ ...a, deskProps: ["mug", "plant", "lamp", "books"] }).success,
+    ).toBe(false);
+  });
+  test("sessionVariation is deterministic", () => {
+    const v = sessionVariation("abcdef0123456789");
+    expect(sessionVariation("abcdef0123456789")).toEqual(v);
+    expect([-1, 0, 1]).toContain(v.hairShade);
+    const shades = new Set(
+      Array.from({ length: 50 }, (_, i) => sessionVariation(`k${i}`).hairShade),
+    );
+    expect(shades.size).toBe(3);
+  });
+});
+
+describe("helpers", () => {
+  test("compareVersions", () => {
+    expect(compareVersions("0.1.9", "0.1.10")).toBe(-1);
+    expect(compareVersions("0.1.10", "0.1.9")).toBe(1);
+    expect(compareVersions("0.1.5", "0.1.5")).toBe(0);
+    expect(compareVersions("v0.2.0", "0.1.99")).toBe(1);
+    expect(compareVersions("0.1", "0.1.0")).toBe(0);
+    expect(compareVersions("0.1.3-dev", "0.1.3")).toBe(0);
+    expect(compareVersions("garbage", "0.0.0")).toBe(0);
+  });
+  test("personIdFromName", () => {
+    expect(personIdFromName("Anna")).toBe("anna");
+    expect(personIdFromName("  Anna Müller ")).toBe("anna-muller");
+    expect(personIdFromName("ANNA")).toBe(personIdFromName("anna"));
+    expect(personIdFromName("Jean-Luc O'Neil!")).toBe("jean-luc-o-neil");
+    const emoji = personIdFromName("🤖🤖");
+    expect(emoji).toMatch(/^p-[0-9a-z]+$/);
+    expect(personIdFromName("🤖🤖")).toBe(emoji);
+    expect(personIdFromName("x".repeat(100)).length).toBeLessThanOrEqual(40);
+  });
+  test("ulid uniqueness and sortability", () => {
+    const ids = Array.from({ length: 5000 }, () => ulid());
+    expect(new Set(ids).size).toBe(ids.length);
+    expect([...ids].sort()).toEqual(ids);
+    for (const id of ids.slice(0, 10)) expect(id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(ulid(1000) < ulid(2000)).toBe(true);
+    expect(ulidTime(ulid(1793174400000))).toBe(1793174400000);
+  });
+});

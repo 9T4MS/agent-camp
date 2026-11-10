@@ -1,1 +1,33 @@
-{"v":1,"type":"presence.snapshot","id":"01KD8QZ0000000000000000001","ts":1793174401000,"data":{"sessions":[{"sessionKey":"5f2a9c1e7d3b4a60","agent":"claude","project":"agent-office","activity":"typing","subagents":2,"startedAt":1793173800000},{"sessionKey":"a1b2c3d4e5f60718","agent":"codex","project":"codex-thing","activity":"waiting","subagents":0,"startedAt":1793170000000},{"sessionKey":"0badc0ffee123456","agent":"pi","activity":"idle","subagents":0,"startedAt":1793174000000}]}}
+{
+  "v": 1,
+  "type": "presence.snapshot",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "sessions": [
+      {
+        "sessionKey": "5f2a9c1e7d3b4a60",
+        "agent": "claude",
+        "project": "agent-office",
+        "activity": "typing",
+        "subagents": 2,
+        "startedAt": 1793173800000
+      },
+      {
+        "sessionKey": "a1b2c3d4e5f60718",
+        "agent": "codex",
+        "project": "codex-thing",
+        "activity": "waiting",
+        "subagents": 0,
+        "startedAt": 1793170000000
+      },
+      {
+        "sessionKey": "0badc0ffee123456",
+        "agent": "pi",
+        "activity": "idle",
+        "subagents": 0,
+        "startedAt": 1793174000000
+      }
+    ]
+  }
+}

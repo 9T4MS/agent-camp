@@ -1,1 +1,7 @@
-{"v":1,"type":"subagent.finished","id":"01KD8QZ0000000000000000001","ts":1793174401000,"data":{"personId":"anna","sessionId":"c-anna-mbp:5f2a9c1e7d3b4a60","count":2}}
+{
+  "v": 1,
+  "type": "subagent.finished",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": { "personId": "anna", "sessionId": "c-anna-mbp:5f2a9c1e7d3b4a60", "count": 2 }
+}

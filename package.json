@@ -2,7 +2,11 @@
   "name": "agent-office",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*", "tools/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tools/*"
+  ],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "biome check .",

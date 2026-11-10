@@ -1,1 +1,14 @@
-{"v":1,"type":"connector.hello","id":"01KD8QZ0000000000000000001","ts":1793174401000,"data":{"name":"Anna","password":"hunter2","clientId":"c-anna-mbp","connectorVersion":"0.1.42","selfDescription":"curly red hair, round glasses, always in headphones","platform":"darwin-arm64"}}
+{
+  "v": 1,
+  "type": "connector.hello",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "name": "Anna",
+    "password": "hunter2",
+    "clientId": "c-anna-mbp",
+    "connectorVersion": "0.1.42",
+    "selfDescription": "curly red hair, round glasses, always in headphones",
+    "platform": "darwin-arm64"
+  }
+}

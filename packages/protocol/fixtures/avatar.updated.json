@@ -1,1 +1,19 @@
-{"v":1,"type":"avatar.updated","id":"01KD8QZ0000000000000000001","ts":1793174401000,"data":{"personId":"anna","avatar":{"hairStyle":"curly","hairColor":"auburn","skinTone":"light","glasses":"round","facialHair":"none","accessory":"headphones","deskProps":["plant","mug"],"deskMess":1}}}
+{
+  "v": 1,
+  "type": "avatar.updated",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "personId": "anna",
+    "avatar": {
+      "hairStyle": "curly",
+      "hairColor": "auburn",
+      "skinTone": "light",
+      "glasses": "round",
+      "facialHair": "none",
+      "accessory": "headphones",
+      "deskProps": ["plant", "mug"],
+      "deskMess": 1
+    }
+  }
+}
