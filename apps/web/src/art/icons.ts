@@ -53,6 +53,55 @@ const ICON_ROWS = {
     ".b............b.",
     ".b............b.",
   ],
+  // agent kinds (agent card): Claude sunburst, Codex terminal, Pi glyph, unknown "?"
+  claude: [
+    ".......r........",
+    "...r...r...r....",
+    "....r..r..r.....",
+    ".....r.r.r......",
+    "......rrr.......",
+    ".rrrrrrcrrrrrr..",
+    "......rrr.......",
+    ".....r.r.r......",
+    "....r..r..r.....",
+    "...r...r...r....",
+    ".......r........",
+  ],
+  codex: [
+    "................",
+    ".kkkkkkkkkkkkkk.",
+    ".kbbbbbbbbbbbbk.",
+    ".kbcbbbbbbbbbbk.",
+    ".kbbcbbbbbbbbbk.",
+    ".kbbbcbbbbbbbbk.",
+    ".kbbcbbbbbbbbbk.",
+    ".kbcbbbllllbbbk.",
+    ".kbbbbbbbbbbbbk.",
+    ".kkkkkkkkkkkkkk.",
+  ],
+  pi: [
+    "................",
+    "..aaaaaaaaaaaa..",
+    "..aaaaaaaaaaaa..",
+    "....aa....aa....",
+    "....aa....aa....",
+    "....aa....aa....",
+    "....aa....aa....",
+    "...aa.....aa....",
+    "..aa......aaa...",
+  ],
+  unknown: [
+    ".....wwwwww.....",
+    "....ww....ww....",
+    "..........ww....",
+    ".........ww.....",
+    "........ww......",
+    ".......ww.......",
+    ".......ww.......",
+    "................",
+    ".......ww.......",
+    ".......ww.......",
+  ],
 } as const;
 
 const COLORS: Record<string, string> = {
@@ -69,15 +118,27 @@ const COLORS: Record<string, string> = {
   a: C.leaf,
   t: C.sand,
   d: C.wood,
+  r: C.rust,
+  o: C.clay,
+};
+const AGENT_ICON_COLORS: Partial<Record<string, Record<string, string>>> = {
+  claude: { ...COLORS, c: C.lemon, r: C.clay },
+  pi: { ...COLORS, a: C.leaf },
+  unknown: { ...COLORS, w: C.silver },
 };
 
 const cache = new Map<string, string>();
-export function iconUrl(name: keyof typeof ICON_ROWS): string {
+export type IconName = keyof typeof ICON_ROWS;
+export function iconUrl(name: IconName): string {
   const hit = cache.get(name);
   if (hit) return hit;
   const pc = new PixelCanvas(16, 16);
   const rows = ICON_ROWS[name].map((r) => r.replace(/ /g, "s"));
-  pc.sprite(0, 2, rows, name === "logo" ? { ...COLORS, g: C.pine, l: C.leaf, c: C.lemon } : COLORS);
+  const colors =
+    name === "logo"
+      ? { ...COLORS, g: C.pine, l: C.leaf, c: C.lemon }
+      : (AGENT_ICON_COLORS[name] ?? COLORS);
+  pc.sprite(0, 2, rows, colors);
   pc.outline();
   const url = pc.toCanvas().toDataURL("image/png");
   cache.set(name, url);

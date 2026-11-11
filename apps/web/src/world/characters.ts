@@ -21,7 +21,7 @@ import {
   lookFor,
 } from "../art/characters.ts";
 import type { MonitorState } from "../art/desk.ts";
-import { alertTextures, bubbleTexture, dotsTextures } from "../art/fx.ts";
+import { alertTextures, bubbleTexture, dotsTextures, selectArrowTextures } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
@@ -516,6 +516,29 @@ export class CharacterManager {
       c.helpers.update(dt, time);
     }
     this.scene.doorWanted = doorBusy;
+    this.updateSelection(time);
+  }
+
+  /** Session whose agent card is open: gets a bouncing arrow over its head. */
+  selected: string | null = null;
+  private selArrow: Sprite | null = null;
+
+  private updateSelection(time: number) {
+    const c = this.selected ? this.chars.get(this.selected) : undefined;
+    if (!c?.sprite.visible) {
+      if (this.selArrow) this.selArrow.visible = false;
+      return;
+    }
+    if (!this.selArrow) {
+      this.selArrow = new Sprite(selectArrowTextures()[0]!);
+      this.selArrow.anchor.set(0.5, 1);
+      this.scene.fx.addChild(this.selArrow);
+    }
+    const a = this.selArrow;
+    a.texture = selectArrowTextures()[Math.floor(time * 3) % 2]!;
+    const headY = c.y - (c.mode === "seated" || c.anim === "sitFront" ? 21 : 24);
+    a.position.set(Math.round(c.x), Math.round(headY - 5 + Math.round(Math.sin(time * 5) * 1.5)));
+    a.visible = true;
   }
 
   private setAnim(c: SessionCharacter, name: AnimName, fps: number, time: number) {

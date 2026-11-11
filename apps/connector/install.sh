@@ -4,10 +4,11 @@
 #   curl -fsSL https://<your-office>/install.sh | sh
 #
 # Downloads the connector binary for this Mac from the latest GitHub release, asks for the
-# server URL, shared password, display name and an optional look description, writes
+# server URL, shared password, display name, an optional look description and a machine
+# label, writes
 # ~/.config/agent-office/config.toml and registers a launchd agent so it runs at login.
 #
-# Non-interactive:  AO_SERVER=... AO_PASSWORD=... AO_NAME=... [AO_DESCRIPTION=...] sh install.sh
+# Non-interactive:  AO_SERVER=... AO_PASSWORD=... AO_NAME=... [AO_DESCRIPTION=...] [AO_MACHINE=...] sh install.sh
 # Other overrides:  AGENT_OFFICE_UPDATE_BASE (download base URL), AGENT_OFFICE_INSTALL_DIR
 #                   (default ~/.local/bin), AO_NONINTERACTIVE=1 (never prompt).
 set -eu
@@ -155,8 +156,17 @@ else
   DESCRIPTION="$(ask "Describe your look in one line (optional, e.g. curly hair, round glasses)" "$(existing self_description)")"
 fi
 
+# machine label on the agent card (same name on every machine = one person; this tells them apart)
+if [ -n "${AO_MACHINE+x}" ]; then
+  MACHINE="$AO_MACHINE"
+else
+  def="$(existing machine_name)"
+  [ -n "$def" ] || def="$(hostname 2>/dev/null | cut -d. -f1)"
+  MACHINE="$(ask "Name of this machine (shown on your agent cards)" "$def")"
+fi
+
 # ---- configure (agent-office writes the TOML itself, so no quoting bugs here) --------------
-set -- configure --server "$SERVER" --name "$NAME" --description "$DESCRIPTION"
+set -- configure --server "$SERVER" --name "$NAME" --description "$DESCRIPTION" --machine-name "$MACHINE"
 if [ "$SET_PASSWORD" = 1 ]; then set -- "$@" --password "$PASSWORD"; fi
 "$BIN" "$@" >/dev/null || die "could not write the config"
 say "  config written to ~/.config/agent-office/config.toml"

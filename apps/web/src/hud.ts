@@ -1,8 +1,16 @@
 /**
  * DOM HUD over the canvas: top bar (office name, people, sessions, helpers, agent split,
- * clock), join banner, person side panel, reconnect sign. Pixel-styled via theme.css.
+ * clock), join banner, side panel (person panel or agent card), reconnect sign.
+ * Pixel-styled via theme.css.
  */
-import { type ACTIVITIES, AGENT_COLORS, type AgentKind } from "@agent-office/protocol";
+import {
+  type ACTIVITIES,
+  type Activity,
+  AGENT_COLORS,
+  AGENT_PALETTES,
+  type AgentKind,
+  type PersonDayResponse,
+} from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
 import type { ConnectionStatus } from "./net/viewer.ts";
 import type { OfficeModel, OfficeStats, PersonState, SessionState } from "./state/officeModel.ts";
@@ -34,6 +42,32 @@ const ACTIVITY_LABEL: Record<(typeof ACTIVITIES)[number], string> = {
   waiting: "waiting",
   idle: "idle",
 };
+
+/** Activity colors for the agent card (dot + timeline strip). */
+export const ACTIVITY_COLORS: Record<Activity, string> = {
+  typing: "#63c74d",
+  reading: "#0099db",
+  running: "#feae34",
+  thinking: "#b55088",
+  waiting: "#e43b44",
+  idle: "#5a6988",
+};
+const AGENT_TITLE: Record<AgentKind, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  pi: "Pi",
+  unknown: "Agent",
+};
+/** Card timeline window. */
+export const TIMELINE_MS = 30 * 60_000;
+
+/** "3m", "1h 12m", "<1m" */
+export function shortDuration(ms: number): string {
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return "<1m";
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 function duration(ms: number) {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -84,8 +118,17 @@ export class Hud {
   private reconnect: HTMLElement;
   readonly minimapHost: HTMLElement;
   private panelPerson: string | null = null;
+  /** agent card: the session shown (panelPerson is its person) */
+  private panelSession: string | null = null;
   private lastStatsKey = "";
+  private days = new Map<string, { at: number; data: PersonDayResponse | null }>();
   portrait: (personId: string) => HTMLCanvasElement | null = () => null;
+  /** "today" numbers for a person (GET /api/people/:id); null = not available (demo) */
+  fetchDay: (personId: string) => Promise<PersonDayResponse | null> = async () => null;
+  /** the panel opened, closed or switched between person and agent card */
+  onPanelChange: () => void = () => {};
+  /** a session row in the person panel was clicked */
+  onOpenSession: (sessionId: string) => void = (id) => this.openSession(id);
 
   constructor(
     host: HTMLElement,
@@ -112,8 +155,16 @@ export class Hud {
     this.minimapHost = el("div", "hud-minimap pixel-box");
     host.append(top, this.banner, this.panel, this.reconnect, this.minimapHost);
     this.panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.panel.addEventListener("wheel", (e) => e.stopPropagation());
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.panelOpen) this.closePanel();
+    });
     this.tickClock();
     setInterval(() => this.tickClock(), 10_000);
+    // "since 3m" and the timeline strip move on even when nothing happens
+    setInterval(() => {
+      if (this.panelSession) this.renderPanel();
+    }, 5_000);
   }
 
   private tickClock() {
@@ -207,16 +258,55 @@ export class Hud {
   openPanel(personId: string) {
     if (this.opts.kiosk) return;
     this.panelPerson = personId;
+    this.panelSession = null;
     this.renderPanel();
+  }
+
+  /** Open the agent card of one session. Returns false when it does not exist (or kiosk). */
+  openSession(sessionId: string): boolean {
+    if (this.opts.kiosk) return false;
+    const s = this.model.sessions.get(sessionId);
+    if (!s) return false;
+    this.panelPerson = s.personId;
+    this.panelSession = sessionId;
+    this.loadDay(s.personId);
+    this.renderPanel();
+    return true;
   }
 
   closePanel() {
     this.panelPerson = null;
-    this.panel.classList.remove("show");
+    this.panelSession = null;
+    this.panel.classList.remove("show", "card");
+    this.onPanelChange();
   }
 
   get panelOpen() {
     return this.panelPerson !== null;
+  }
+
+  /** Session whose agent card is open, if any. */
+  get openSessionId() {
+    return this.panelSession;
+  }
+
+  /** Re-render the open panel (call after model changes). */
+  refresh() {
+    if (this.panelPerson) this.renderPanel();
+  }
+
+  private loadDay(personId: string) {
+    const hit = this.days.get(personId);
+    if (hit && Date.now() - hit.at < 60_000) return;
+    this.days.set(personId, { at: Date.now(), data: hit?.data ?? null });
+    this.fetchDay(personId)
+      .then((data) => {
+        this.days.set(personId, { at: Date.now(), data });
+        for (const [sessionId, log] of Object.entries(data?.recentActivity ?? {}))
+          this.model.mergeActivityHistory(sessionId, log);
+        if (this.panelPerson === personId && this.panelSession) this.renderPanel();
+      })
+      .catch(() => {});
   }
 
   private renderPanel() {
@@ -225,17 +315,25 @@ export class Hud {
       this.closePanel();
       return;
     }
+    if (this.panelSession) {
+      const s = this.model.sessions.get(this.panelSession);
+      if (s) return this.renderCard(p, s);
+      // the session ended: fall back to its person
+      this.panelSession = null;
+    }
     const sessions = this.model.sessionsOf(p.personId);
     const now = Date.now();
     const items = sessions
       .map(
-        (s) => `<li>
+        (
+          s,
+        ) => `<li class="session-row" data-session="${esc(s.sessionId)}" tabindex="0" role="button">
           <span class="dot" style="background:${AGENT_COLORS[s.agent]}"></span>
           <span class="proj">${esc(s.project ?? "(private)")}</span>
           <span class="act">${ACTIVITY_LABEL[s.activity]}</span>
           <span class="meta">${AGENT_LABEL[s.agent]} &middot; ${duration(now - s.startedAt)}${
             s.subagents ? ` &middot; ${s.subagents} helper${s.subagents > 1 ? "s" : ""}` : ""
-          }</span>
+          }${s.machine ? ` &middot; ${esc(s.machine)}` : ""}</span>
         </li>`,
       )
       .join("");
@@ -257,6 +355,102 @@ export class Hud {
       this.panel.querySelector(".portrait-slot")!.replaceWith(portrait);
     }
     this.panel.querySelector(".close")!.addEventListener("click", () => this.closePanel());
+    for (const row of this.panel.querySelectorAll<HTMLElement>(".session-row")) {
+      const open = () => this.onOpenSession(row.dataset.session!);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") open();
+      });
+    }
+    this.panel.classList.remove("card");
     this.panel.classList.add("show");
+    this.onPanelChange();
+  }
+
+  /** The agent card: one session in detail. */
+  private renderCard(p: PersonState, s: SessionState) {
+    const now = Date.now();
+    const pal = AGENT_PALETTES[s.agent];
+    const act = s.activity;
+    // timeline strip: last 30 min, client clock; before we saw the session = "no data"
+    const from = now - TIMELINE_MS;
+    const pct = (t: number) => ((t - from) / TIMELINE_MS) * 100;
+    const segs = this.model.timeline(s.sessionId, TIMELINE_MS, now);
+    const known = segs[0]?.from ?? now;
+    const strip =
+      (known > from
+        ? `<span class="seg unknown" style="left:0;width:${pct(known).toFixed(2)}%" title="before this page was opened"></span>`
+        : "") +
+      segs
+        .map(
+          (g) =>
+            `<span class="seg" style="left:${pct(g.from).toFixed(2)}%;width:${Math.max(0.6, pct(g.to) - pct(g.from)).toFixed(2)}%;background:${ACTIVITY_COLORS[g.activity]}" title="${g.activity} ${shortDuration(g.to - g.from)}"></span>`,
+        )
+        .join("");
+    const seen = [...new Set(segs.map((g) => g.activity))];
+    const legend = seen
+      .map(
+        (a) =>
+          `<span class="lg"><span class="sw" style="background:${ACTIVITY_COLORS[a]}"></span>${ACTIVITY_LABEL[a]}</span>`,
+      )
+      .join("");
+    const day = this.days.get(p.personId)?.data ?? null;
+    // without the server (demo) fall back to what this viewer can see right now
+    const mine = this.model.sessionsOf(p.personId);
+    const today = day
+      ? {
+          sessions: day.sessionsToday,
+          peak: day.peakParallelToday,
+          helpers: day.subagentsToday,
+        }
+      : {
+          sessions: mine.length,
+          peak: mine.length,
+          helpers: mine.reduce((a, x) => a + x.peakSubagents, 0),
+        };
+    const tile = (n: number, label: string) =>
+      `<div class="tile"><b>${n}</b><span>${label}</span></div>`;
+    const fact = (k: string, v: string) =>
+      `<div class="fact"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+    this.panel.innerHTML = `
+      <button class="pixel-btn close" aria-label="Close">&times;</button>
+      <div class="card-head">
+        <div class="agent-tile" style="--j-light:${pal.light};--j-main:${pal.main};--j-shade:${pal.shade}">
+          <img alt="" src="${iconUrl(s.agent)}">
+        </div>
+        <div class="head-text">
+          <div class="kind" style="color:${pal.light}">${AGENT_TITLE[s.agent]}</div>
+          <h2 title="${esc(s.project ?? "")}">${esc(s.project ?? "(private project)")}</h2>
+          <button class="who" type="button"><span class="portrait-mini"></span><span>${esc(p.name)}</span><span class="chev">&rsaquo;</span></button>
+        </div>
+      </div>
+      <div class="now">
+        <span class="act-dot${act === "waiting" ? " blink" : ""}" style="background:${ACTIVITY_COLORS[act]}"></span>
+        <span class="act-name" style="color:${ACTIVITY_COLORS[act]}">${ACTIVITY_LABEL[act]}</span>
+        <span class="act-since">since ${shortDuration(now - s.activitySince)}</span>
+      </div>
+      <div class="strip" role="img" aria-label="activity, last 30 minutes">${strip}</div>
+      <div class="strip-axis"><span>30 min ago</span><span>now</span></div>
+      <div class="legend">${legend}</div>
+      <div class="facts">
+        ${fact("running", shortDuration(now - (s.startedAt - this.model.clockSkew)))}
+        ${fact("helpers", `${s.subagents} now <span class="dim">&middot; peak ${s.peakSubagents}</span>`)}
+        ${fact("machine", s.machine ? esc(s.machine) : '<span class="dim">unknown</span>')}
+      </div>
+      <div class="today-title">${esc(p.name)} today</div>
+      <div class="today">
+        ${tile(today.sessions, today.sessions === 1 ? "session" : "sessions")}
+        ${tile(today.peak, "at once")}
+        ${tile(today.helpers, today.helpers === 1 ? "helper" : "helpers")}
+      </div>`;
+    const portrait = this.portrait(p.personId);
+    if (portrait) {
+      portrait.className = "portrait-mini";
+      this.panel.querySelector(".portrait-mini")!.replaceWith(portrait);
+    }
+    this.panel.querySelector(".close")!.addEventListener("click", () => this.closePanel());
+    this.panel.querySelector(".who")!.addEventListener("click", () => this.openPanel(p.personId));
+    this.panel.classList.add("show", "card");
+    this.onPanelChange();
   }
 }

@@ -10,7 +10,11 @@
  */
 import "./ui/theme.css";
 import "./ui/office.css";
-import { parseViewerMessage, type ServerToViewer } from "@agent-office/protocol";
+import {
+  type PersonDayResponse,
+  parseViewerMessage,
+  type ServerToViewer,
+} from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
 import { C } from "./art/palette.ts";
 import { Camera } from "./camera.ts";
@@ -48,6 +52,8 @@ type OfficeApi = {
     focusPerson(personId: string, zoom?: number): boolean;
   };
   injectEvent(msg: unknown): boolean;
+  /** open a session's agent card (like clicking its character); false if unknown */
+  openSession(sessionId: string): boolean;
   snapshotPng(): Promise<string | null>;
   characters(): number;
 };
@@ -148,6 +154,7 @@ async function boot() {
       chars.syncSlots();
     }
     hud.setStats(model.stats());
+    if (hud.panelOpen && changes.length > 0) hud.refresh();
     living.poke();
     afterIngest();
   };
@@ -159,9 +166,37 @@ async function boot() {
     } else camera.notify(m.x, m.y);
   };
 
+  /** Agent card + ease the camera to the character (clear of the side panel). */
+  const openSession = (sessionId: string) => {
+    if (kiosk || !hud.openSession(sessionId)) return false;
+    const c = chars.chars.get(sessionId);
+    if (c) {
+      const zoom = Math.max(camera.zoom, 3);
+      const panelW = app.screen.width > 560 ? 330 : 0;
+      camera.focus(c.x + panelW / 2 / zoom, c.y - 14, zoom);
+    }
+    return true;
+  };
+  hud.onOpenSession = (id) => void openSession(id);
+  camera.holdWhile = () => hud.panelOpen;
+  hud.onPanelChange = () => {
+    chars.selected = hud.openSessionId;
+  };
+  hud.fetchDay = async (personId): Promise<PersonDayResponse | null> => {
+    if (demo) return null;
+    const q = key ? `?key=${encodeURIComponent(key)}` : "";
+    const r = await fetch(`/api/people/${encodeURIComponent(personId)}${q}`);
+    return r.ok ? ((await r.json()) as PersonDayResponse) : null;
+  };
+
   camera.onTap = (wx, wy) => {
     const c = chars.pick(wx, wy);
-    if (c) hud.openPanel(c.personId);
+    if (c) {
+      openSession(c.sessionId);
+      return;
+    }
+    const plate = scene.pickNameplate(wx, wy);
+    if (plate) hud.openPanel(plate);
     else hud.closePanel();
   };
   camera.onDoubleTap = (wx, wy) => {
@@ -303,6 +338,7 @@ async function boot() {
       });
     },
     characters: () => chars.chars.size,
+    openSession,
   };
   window.__office = api;
   await document.fonts?.ready;

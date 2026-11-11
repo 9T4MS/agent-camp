@@ -227,7 +227,10 @@ export class AvatarService {
     return this.provider?.id ?? "off";
   }
 
-  /** Cache key: provider + hash(name + description). Used by the Hub as `avatarKey`. */
+  /**
+   * Cache key: provider + hash(name + description). Used by the Hub as `avatarKey`, which
+   * passes the personId as `name` (rows from before that used the display name).
+   */
   cacheKey = (name: string, selfDescription: string | undefined): string =>
     `${this.providerId}:${hashString(`${name}\n${selfDescription ?? ""}`).toString(36)}`;
 

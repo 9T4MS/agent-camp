@@ -13,7 +13,13 @@ import {
   type SessionInfo,
 } from "@agent-office/protocol";
 
-export type LaptopDef = { clientId: string; name: string; description?: string };
+export type LaptopDef = {
+  clientId: string;
+  name: string;
+  description?: string;
+  /** machine label sent in hello ("laptop", "devbox") */
+  machine?: string;
+};
 
 export type SessionSpec = {
   key: string;
@@ -182,6 +188,7 @@ export function helloMessage(
     platform: "sim",
   };
   if (laptop.description) data.selfDescription = laptop.description;
+  if (laptop.machine) data.machine = laptop.machine;
   return validateOutgoing(envelope("connector.hello", data, ts === undefined ? {} : { ts }));
 }
 

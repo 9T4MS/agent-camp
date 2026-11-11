@@ -177,6 +177,8 @@ export class DemoFeed {
     subagents: number,
     project?: string,
   ): SessionView {
+    // every third session runs on the devbox (no rand() call: keeps seeded demos unchanged)
+    const machine = this.sessionCounter % 3 === 2 ? "devbox" : "MacBook";
     const key = `demo${(this.sessionCounter++).toString(36).padStart(6, "0")}${Math.floor(this.rand() * 1e6)}`;
     return {
       sessionId: sessionIdOf("demo-laptop", key),
@@ -185,6 +187,7 @@ export class DemoFeed {
       activity,
       subagents,
       startedAt: this.now() - Math.floor(this.rand() * 3 * 3600_000),
+      machine,
     };
   }
 

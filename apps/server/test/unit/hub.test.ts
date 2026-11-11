@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  avatarFromSeed,
   CLOSE_BAD_MESSAGE,
   CLOSE_BAD_PASSWORD,
   CLOSE_TOO_OLD,
@@ -11,7 +12,7 @@ import {
   type SessionInfo,
   type ViewerEvent,
 } from "@agent-office/protocol";
-import { Hub, type HubConfig } from "../../src/core/hub.ts";
+import { defaultAvatarKey, Hub, type HubConfig, RECENT_ACTIVITY_MS } from "../../src/core/hub.ts";
 import { MemoryStore } from "../../src/core/store.ts";
 
 const CFG: HubConfig = {
@@ -263,6 +264,34 @@ describe("hub: liveness", () => {
   });
 });
 
+describe("hub: recent activity (agent card timeline)", () => {
+  test("logs activity changes of live sessions, prunes to 30 min, forgets ended ones", () => {
+    const { hub } = setup();
+    hub.onConnectorMessage("s1", hello("Martin", "c1"), 0);
+    hub.onConnectorMessage("s1", snap(s("a")), 1_000);
+    hub.onConnectorMessage("s1", snap(s("a", { activity: "reading" })), 2_000);
+    hub.onConnectorMessage("s1", snap(s("a", { activity: "waiting" })), 3_000);
+    const id = "c1:a-0123456789";
+    expect(hub.recentActivity("martin", 4_000)).toEqual({
+      [id]: [
+        { activity: "typing", at: 1_000 },
+        { activity: "reading", at: 2_000 },
+        { activity: "waiting", at: 3_000 },
+      ],
+    });
+    const late = 3_000 + RECENT_ACTIVITY_MS + 10;
+    // keep the heartbeat going so the connector stays alive
+    hub.onConnectorMessage("s1", snap(s("a", { activity: "typing" })), late);
+    expect(hub.recentActivity("martin", late)[id]!.map((e) => e.activity)).toEqual([
+      "waiting",
+      "typing",
+    ]);
+    hub.onConnectorMessage("s1", snap(), late + 1);
+    expect(hub.recentActivity("martin", late + 2)).toEqual({});
+    expect(hub.recentActivity("nobody", 0)).toEqual({});
+  });
+});
+
 describe("hub: persistence + history", () => {
   test("restore after restart emits nothing and keeps sessions", () => {
     const { hub, store } = setup();
@@ -364,5 +393,122 @@ describe("hub: persistence + history", () => {
     expect(m.data.timezone).toBe("Europe/Vienna");
     expect(m.data.serverTime).toBe(99);
     expect(m.data.people[0]!.sessions).toHaveLength(1);
+  });
+});
+
+describe("hub: same name on two machines = one persona", () => {
+  const two = () => {
+    const ctx = setup();
+    const { hub } = ctx;
+    const a = hub.onConnectorMessage(
+      "s1",
+      hello("Martin", "laptop", { selfDescription: "beard, hoodie", machine: "laptop" }),
+      0,
+    );
+    const b = hub.onConnectorMessage("s2", hello(" martin", "devbox", { machine: "devbox" }), 5);
+    return { ...ctx, a, b };
+  };
+
+  test("one person, sessions from both machines, one avatar job", () => {
+    const { hub, a, b } = two();
+    expect(a.avatarJob).toMatchObject({ personId: "martin", selfDescription: "beard, hoodie" });
+    expect(b.avatarJob).toBeUndefined();
+    expect(types(b.events)).toEqual([]);
+    hub.onConnectorMessage("s1", snap(s("a")), 10);
+    hub.onConnectorMessage("s2", snap(s("b"), s("c", { agent: "codex" })), 10);
+    const people = hub.state().people;
+    expect(people).toHaveLength(1);
+    expect(people[0]!.name).toBe("Martin");
+    const machines = people[0]!.sessions.map((x) => x.machine).sort();
+    expect(machines).toEqual(["devbox", "devbox", "laptop"]);
+  });
+
+  test("reconnecting either machine issues no new job, name does not flip", () => {
+    const { hub, a } = two();
+    hub.setAvatar("martin", hub.state().people[0]!.avatar, a.avatarJob!.key, 6);
+    for (let i = 0; i < 3; i++) {
+      const r1 = hub.onConnectorMessage(`x${i}`, hello("martin ", "devbox"), 100 + i);
+      const r2 = hub.onConnectorMessage(
+        `y${i}`,
+        hello("Martin", "laptop", { selfDescription: "beard, hoodie" }),
+        100 + i,
+      );
+      expect(r1.avatarJob).toBeUndefined();
+      expect(r2.avatarJob).toBeUndefined();
+      expect(hub.state().people[0]!.name).toBe("Martin");
+    }
+  });
+
+  test("no job even while the first one is still running", () => {
+    const { hub } = two();
+    expect(hub.onConnectorMessage("s3", hello("MARTIN", "devbox"), 50).avatarJob).toBeUndefined();
+    expect(
+      hub.onConnectorMessage(
+        "s4",
+        hello("Martin", "laptop", { selfDescription: "beard, hoodie" }),
+        51,
+      ).avatarJob,
+    ).toBeUndefined();
+  });
+
+  test("a changed non-empty description issues exactly one new job", () => {
+    const { hub, a } = two();
+    hub.setAvatar("martin", hub.state().people[0]!.avatar, a.avatarJob!.key, 6);
+    const r = hub.onConnectorMessage(
+      "s3",
+      hello("martin", "devbox", { selfDescription: "bald" }),
+      20,
+    );
+    expect(r.avatarJob).toMatchObject({ selfDescription: "bald" });
+    expect(r.avatarJob!.key).not.toBe(a.avatarJob!.key);
+    // the laptop (no description now) and the devbox reconnecting: nothing new
+    expect(hub.onConnectorMessage("s4", hello("Martin", "laptop"), 21).avatarJob).toBeUndefined();
+    expect(
+      hub.onConnectorMessage("s5", hello("martin", "devbox", { selfDescription: "bald" }), 22)
+        .avatarJob,
+    ).toBeUndefined();
+    // a stale result of the first job is ignored, the new one lands
+    expect(hub.setAvatar("martin", hub.state().people[0]!.avatar, a.avatarJob!.key, 23)).toEqual(
+      [],
+    );
+    hub.setAvatar("martin", hub.state().people[0]!.avatar, r.avatarJob!.key, 24);
+  });
+
+  test("person-level description survives a restart", () => {
+    const { hub, store, a } = two();
+    hub.setAvatar("martin", hub.state().people[0]!.avatar, a.avatarJob!.key, 6);
+    expect(store.getAvatar("martin")?.selfDescription).toBe("beard, hoodie");
+    for (const restore of [true, false]) {
+      const hub2 = new Hub(CFG, store);
+      if (restore) hub2.restore(1_000);
+      // the machine without a description reconnects first: look stays, no job
+      expect(hub2.onConnectorMessage("z1", hello("martin", "devbox"), 1_001).avatarJob).toBe(
+        undefined,
+      );
+      expect(
+        hub2.onConnectorMessage(
+          "z2",
+          hello("Martin", "laptop", { selfDescription: "beard, hoodie" }),
+          1_002,
+        ).avatarJob,
+      ).toBeUndefined();
+    }
+  });
+
+  test("avatar rows from before descriptions were stored are adopted, not regenerated", () => {
+    const { store } = setup();
+    const look = avatarFromSeed("someone-else");
+    // legacy row: key = defaultAvatarKey(display name, description), no description column
+    store.avatars.set("martin", { avatar: look, key: defaultAvatarKey("Martin", "beard") });
+    const hub = new Hub(CFG, store);
+    expect(hub.onConnectorMessage("a", hello("martin", "devbox"), 0).avatarJob).toBeUndefined();
+    expect(hub.state().people[0]!.avatar).toEqual(look);
+    expect(
+      hub.onConnectorMessage("b", hello("Martin", "laptop", { selfDescription: "beard" }), 1)
+        .avatarJob,
+    ).toBeUndefined();
+    expect(store.getAvatar("martin")).toMatchObject({ avatar: look, selfDescription: "beard" });
+    const hub2 = new Hub(CFG, store);
+    expect(hub2.onConnectorMessage("c", hello("martin", "devbox"), 2).avatarJob).toBeUndefined();
   });
 });

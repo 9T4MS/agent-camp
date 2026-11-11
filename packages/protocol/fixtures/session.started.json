@@ -11,7 +11,8 @@
       "project": "agent-office",
       "activity": "typing",
       "subagents": 2,
-      "startedAt": 1793173800000
+      "startedAt": 1793173800000,
+      "machine": "MacBook"
     }
   }
 }

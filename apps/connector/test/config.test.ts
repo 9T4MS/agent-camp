@@ -3,7 +3,15 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli.ts";
-import { loadConfig, parseToml, saveConfig, stringifyToml, tomlString } from "../src/config.ts";
+import {
+  defaultMachineName,
+  loadConfig,
+  machineName,
+  parseToml,
+  saveConfig,
+  stringifyToml,
+  tomlString,
+} from "../src/config.ts";
 
 describe("config.toml", () => {
   test("round-trips tricky strings and bools", () => {
@@ -20,6 +28,7 @@ describe("config.toml", () => {
         password: `p"a\\ss # not a comment\nline2\ttab 'single' \u0001`,
         name: "Anna Müller 🐙",
         self_description: 'curly hair, "round" glasses',
+        machine_name: "devbox",
         share_project_names: false,
       };
       saveConfig(path, written);
@@ -62,6 +71,37 @@ describe("config.toml", () => {
       expect(text).toContain('name = "Zoe"');
       expect(text).toContain("share_project_names = true");
       expect(text).toContain('client_id = "c_abc"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("machine name", () => {
+  test("defaults to the short hostname, config wins, max 40 chars", () => {
+    expect(defaultMachineName("martins-mbp.local")).toBe("martins-mbp");
+    expect(defaultMachineName("devbox")).toBe("devbox");
+    expect(defaultMachineName("")).toBe("");
+    expect(defaultMachineName("x".repeat(60))).toHaveLength(40);
+    expect(machineName({}, "laptop.example.com")).toBe("laptop");
+    expect(machineName({ machine_name: "  " }, "laptop.lan")).toBe("laptop");
+    expect(machineName({ machine_name: " MacBook " }, "laptop.lan")).toBe("MacBook");
+    expect(defaultMachineName().length).toBeLessThanOrEqual(40);
+  });
+
+  test("configure --machine-name writes it; --get reads it back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
+    try {
+      const main = join(import.meta.dir, "..", "src", "main.ts");
+      const env = { ...process.env, AGENT_OFFICE_CONFIG_DIR: dir };
+      const run = async (...args: string[]) => {
+        const p = Bun.spawn([process.execPath, main, ...args], { env, stdout: "pipe" });
+        const out = await new Response(p.stdout).text();
+        return { code: await p.exited, out: out.trim() };
+      };
+      expect((await run("configure", "--machine-name", "devbox")).code).toBe(0);
+      expect((await run("configure", "--get", "machine_name")).out).toBe("devbox");
+      expect((await run("configure", "--machine-name", "x".repeat(41))).code).toBe(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

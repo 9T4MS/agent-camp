@@ -4,14 +4,18 @@
  */
 import type { AvatarSpec, HistoryRow, SnapshotMeta } from "@agent-office/protocol";
 
-export type StoredAvatar = { avatar: AvatarSpec; key: string };
+/**
+ * A person's look. `selfDescription` is the person-level description the look was made
+ * for ("" = none); missing on rows written before it was stored.
+ */
+export type StoredAvatar = { avatar: AvatarSpec; key: string; selfDescription?: string };
 
 export interface Store {
   appendHistory(rows: readonly HistoryRow[]): void;
   /** All rows with ts >= since, oldest first. */
   history(since?: number): HistoryRow[];
   getAvatar(personId: string): StoredAvatar | null;
-  putAvatar(personId: string, avatar: AvatarSpec, key: string): void;
+  putAvatar(personId: string, avatar: AvatarSpec, key: string, selfDescription?: string): void;
   kvGet(key: string): string | null;
   kvPut(key: string, value: string): void;
   addSnapshot(ts: number, png: Uint8Array): number;
@@ -34,8 +38,12 @@ export class MemoryStore implements Store {
   getAvatar(personId: string): StoredAvatar | null {
     return this.avatars.get(personId) ?? null;
   }
-  putAvatar(personId: string, avatar: AvatarSpec, key: string): void {
-    this.avatars.set(personId, { avatar, key });
+  putAvatar(personId: string, avatar: AvatarSpec, key: string, selfDescription?: string): void {
+    this.avatars.set(personId, {
+      avatar,
+      key,
+      ...(selfDescription !== undefined ? { selfDescription } : {}),
+    });
   }
   kvGet(key: string): string | null {
     return this.kv.get(key) ?? null;
@@ -84,6 +92,20 @@ const optNum = (v: unknown) => (typeof v === "number" ? v : null);
 export class SqlStore implements Store {
   constructor(private run: SqlRun) {
     for (const s of SCHEMA) run(s);
+    // migration: the person-level look description lives next to the avatar
+    let hasDescr = false;
+    try {
+      hasDescr = run("PRAGMA table_info(avatars)").some((r) => r.name === "descr");
+    } catch {
+      // PRAGMA not allowed: just try the ALTER
+    }
+    if (!hasDescr) {
+      try {
+        run("ALTER TABLE avatars ADD COLUMN descr TEXT");
+      } catch {
+        // already there
+      }
+    }
   }
   appendHistory(rows: readonly HistoryRow[]): void {
     for (const r of rows) {
@@ -112,21 +134,27 @@ export class SqlStore implements Store {
     }));
   }
   getAvatar(personId: string): StoredAvatar | null {
-    const r = this.run("SELECT spec, key FROM avatars WHERE person = ?", personId)[0];
+    const r = this.run("SELECT spec, key, descr FROM avatars WHERE person = ?", personId)[0];
     if (!r) return null;
     try {
-      return { avatar: JSON.parse(String(r.spec)) as AvatarSpec, key: String(r.key) };
+      const desc = optStr(r.descr);
+      return {
+        avatar: JSON.parse(String(r.spec)) as AvatarSpec,
+        key: String(r.key),
+        ...(desc !== null ? { selfDescription: desc } : {}),
+      };
     } catch {
       return null;
     }
   }
-  putAvatar(personId: string, avatar: AvatarSpec, key: string): void {
+  putAvatar(personId: string, avatar: AvatarSpec, key: string, selfDescription?: string): void {
     this.run(
-      "INSERT OR REPLACE INTO avatars (person, spec, key, updated) VALUES (?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO avatars (person, spec, key, updated, descr) VALUES (?, ?, ?, ?, ?)",
       personId,
       JSON.stringify(avatar),
       key,
       Date.now(),
+      selfDescription ?? null,
     );
   }
   kvGet(key: string): string | null {

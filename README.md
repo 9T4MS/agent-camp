@@ -17,9 +17,9 @@ for everyone.
 curl -fsSL https://<your-server>/install.sh | sh
 ```
 
-It asks four things: **server URL** (already filled in), the **shared password**, your
-**name**, and an optional **description** of yourself ("curly hair, round glasses") that
-shapes your avatar. Done: the connector runs in the background (launchd) and starts at login.
+It asks five things: **server URL** (already filled in), the **shared password**, your
+**name**, an optional **description** of yourself ("curly hair, round glasses") that
+shapes your avatar, and a **name for this machine** (defaults to its short hostname). Done: the connector runs in the background (launchd) and starts at login.
 Re-run the same line any time to change answers. It updates itself.
 
 ```sh
@@ -30,12 +30,23 @@ agent-office uninstall   # stop and remove everything
 
 ![Installer and status](screenshots/10-terminal-install.png)
 
+### Two machines, one you
+
+Run the connector on every machine you code on (laptop, remote devbox, ...) and give it the
+**same name** everywhere: the office matches people by name (case and extra spaces don't
+matter), so you stay one character with one look, and the sessions from all your machines
+sit side by side in your pod. The description only needs to be set on one machine; a machine
+without one never changes your look, and the last description you set wins. The machine
+name (`agent-office configure --machine-name devbox`, or `AO_MACHINE=` for the installer)
+shows up on the agent card so you can tell the sessions apart.
+
 ### Privacy
 
 Sent: agent kind (Claude/Codex/Pi), a salted hash of the session id, the project **folder
 name** (turn off with `share_project_names = false` in `~/.config/agent-office/config.toml`),
 an activity verb (typing/reading/thinking/running/waiting/idle), the subagent count, when the
-session started, and the connector version.
+session started, the connector version, and the **machine name** you chose (`machine_name`,
+defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like).
 
 Never sent: prompts, responses, code, file contents or paths, commands, tool output, or
 anything else from a transcript. A unit test feeds a transcript containing a fake secret and
@@ -46,13 +57,15 @@ project folder name, subagent counts), never content.
 
 | URL                  | What                                                                  |
 | -------------------- | --------------------------------------------------------------------- |
-| `/`                  | The office. Drag to pan, wheel/pinch to zoom, click someone for details. |
+| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
 
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?nohud=1`, `?demo=busy` (no
 server needed). If the server sets `VIEWER_KEY`, add `?key=…`.
+
+![Agent card](screenshots/11-agent-card-laptop.png)
 
 | Stats | Timelapse |
 | ----- | --------- |
