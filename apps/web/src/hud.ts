@@ -14,6 +14,7 @@ import {
 } from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
 import type { ConnectionStatus } from "./net/viewer.ts";
+import { installMode, onInstallChange, promptInstall } from "./pwa.ts";
 import type { OfficeModel, OfficeStats, PersonState, SessionState } from "./state/officeModel.ts";
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
@@ -149,6 +150,7 @@ export class Hud {
     joins?: string[];
   }[] = [];
   private panel: HTMLElement;
+  private menu: HTMLElement;
   private reconnect: HTMLElement;
   readonly minimapHost: HTMLElement;
   private panelPerson: string | null = null;
@@ -176,11 +178,14 @@ export class Hud {
   ) {
     this.root = host;
     const top = el("div", "hud-top");
+    // the logo opens the menu (stats, timelapse, install, log out): an installed app has no
+    // address bar to type /stats into. The kiosk keeps a plain label.
     this.name = el(
-      "div",
+      opts.kiosk ? "div" : "button",
       "brand",
-      `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span>`,
+      `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span>${opts.kiosk ? "" : '<i class="caret" aria-hidden="true"></i>'}`,
     );
+    this.menu = el("div", "hud-menu pixel-box");
     this.chips = el("div", "chips");
     this.clock = el("div", "clock");
     top.append(this.name, this.chips, this.clock);
@@ -192,7 +197,8 @@ export class Hud {
       `<span class="blink">&#9632;</span> reconnecting&hellip;`,
     );
     this.minimapHost = el("div", "hud-minimap pixel-box");
-    host.append(top, this.banner, this.panel, this.reconnect, this.minimapHost);
+    host.append(top, this.menu, this.banner, this.panel, this.reconnect, this.minimapHost);
+    if (!opts.kiosk) this.setupMenu();
     this.panel.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.panel.addEventListener("wheel", (e) => e.stopPropagation());
     window.addEventListener("keydown", (e) => {
@@ -204,6 +210,71 @@ export class Hud {
     setInterval(() => {
       if (this.panelSession) this.renderPanel();
     }, 5_000);
+  }
+
+  private setupMenu() {
+    const btn = this.name as HTMLButtonElement;
+    btn.type = "button";
+    btn.title = "Menu";
+    btn.setAttribute("aria-haspopup", "menu");
+    btn.setAttribute("aria-expanded", "false");
+    const markInstall = () => btn.classList.toggle("can-install", installMode() === "prompt");
+    markInstall();
+    onInstallChange(() => {
+      markInstall();
+      if (this.menuOpen) this.renderMenu();
+    });
+    btn.addEventListener("click", () => (this.menuOpen ? this.closeMenu() : this.openMenu()));
+    for (const ev of ["pointerdown", "wheel"] as const)
+      this.menu.addEventListener(ev, (e) => e.stopPropagation());
+    document.addEventListener("pointerdown", (e) => {
+      if (this.menuOpen && !this.menu.contains(e.target as Node) && !btn.contains(e.target as Node))
+        this.closeMenu();
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.menuOpen) this.closeMenu();
+    });
+  }
+
+  get menuOpen() {
+    return this.menu.classList.contains("show");
+  }
+
+  openMenu() {
+    this.renderMenu();
+    this.menu.classList.add("show");
+    this.name.setAttribute("aria-expanded", "true");
+  }
+
+  closeMenu() {
+    this.menu.classList.remove("show", "ios-tip");
+    this.name.setAttribute("aria-expanded", "false");
+  }
+
+  private renderMenu() {
+    const key = new URLSearchParams(location.search).get("key");
+    const q = key ? `?key=${encodeURIComponent(key)}` : "";
+    const mode = installMode();
+    const install =
+      mode === "prompt"
+        ? `<button type="button" class="pixel-btn install" role="menuitem">Install app</button>`
+        : mode === "ios"
+          ? `<button type="button" class="pixel-btn ios" role="menuitem">Add to Home Screen</button>
+             <p class="tip">Tap <b>Share</b> <span class="share-icon" aria-hidden="true"></span> in Safari, then <b>Add to Home Screen</b>.</p>`
+          : "";
+    this.menu.setAttribute("role", "menu");
+    this.menu.innerHTML = `
+      <a class="pixel-btn" role="menuitem" href="./stats${q}">Stats</a>
+      <a class="pixel-btn" role="menuitem" href="./timelapse${q}">Timelapse</a>
+      ${install}
+      <form method="post" action="/api/logout"><button class="pixel-btn" type="submit" role="menuitem">Log out</button></form>`;
+    this.menu.querySelector(".install")?.addEventListener("click", () => {
+      this.closeMenu();
+      void promptInstall();
+    });
+    this.menu
+      .querySelector(".ios")
+      ?.addEventListener("click", () => this.menu.classList.toggle("ios-tip"));
   }
 
   private tickClock() {

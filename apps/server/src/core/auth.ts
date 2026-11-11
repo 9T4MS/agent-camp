@@ -18,6 +18,10 @@ const PUBLIC_EXACT = new Set([
   "/api/login",
   "/api/logout",
   "/manifest.webmanifest",
+  "/manifest-kiosk.webmanifest",
+  // the installed app's service worker; it holds no office data, and its update check must
+  // not bounce to the login page once a session has expired
+  "/sw.js",
   "/favicon.ico",
 ]);
 const PUBLIC_PREFIX = ["/fonts/", "/icons/"];
@@ -85,6 +89,42 @@ export async function isAuthorized(req: Request, env: AppEnv, now = Date.now()):
   if (env.VIEWER_KEY && key && safeEqual(key, env.VIEWER_KEY)) return true;
   const token = cookieValue(req, SESSION_COOKIE);
   return !!token && (await verifySessionToken(pw, token, now));
+}
+
+/** A session cookie with less than this left is renewed on the next page load. */
+export const SESSION_RENEW_BELOW_MS = 15 * 86_400_000;
+
+/**
+ * Sliding session: when a page is loaded with a valid cookie that runs out within 15 days,
+ * returns a fresh Set-Cookie header, so an installed app that is opened now and then never
+ * lands on the login page. Null otherwise (no cookie, bearer/key auth, plenty of time left).
+ */
+export async function renewedSessionCookie(
+  req: Request,
+  env: AppEnv,
+  now = Date.now(),
+): Promise<string | null> {
+  const pw = connectorPassword(env);
+  if (!pw || req.method.toUpperCase() !== "GET") return null;
+  if (!(req.headers.get("accept") ?? "").includes("text/html")) return null;
+  const token = cookieValue(req, SESSION_COOKIE);
+  if (!token || !(await verifySessionToken(pw, token, now))) return null;
+  if (Number(token.split(".")[0]) - now >= SESSION_RENEW_BELOW_MS) return null;
+  return sessionCookie(req, await makeSessionToken(pw, now), SESSION_TTL_MS / 1000);
+}
+
+/** Adds a renewed session cookie (see renewedSessionCookie) to a page response. */
+export async function withRenewedSession(
+  req: Request,
+  env: AppEnv,
+  res: Response,
+  now = Date.now(),
+): Promise<Response> {
+  const cookie = await renewedSessionCookie(req, env, now);
+  if (!cookie) return res;
+  const out = new Response(res.body, res);
+  out.headers.append("set-cookie", cookie);
+  return out;
 }
 
 /** Only same-site relative paths, so `next` can't bounce the user elsewhere. */
@@ -166,6 +206,11 @@ function loginPage(error: boolean, next: string, unconfigured: boolean): Respons
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#181425">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Agent Office">
 <title>Agent Office</title>
 <link rel="icon" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">

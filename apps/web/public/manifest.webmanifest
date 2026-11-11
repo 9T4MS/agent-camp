@@ -1,16 +1,41 @@
 {
+  "id": "/",
   "name": "Agent Office",
   "short_name": "Office",
   "description": "A cozy pixel-art office where every teammate and every coding agent shows up live.",
-  "start_url": "./?kiosk=1&recorder=1",
-  "scope": "./",
-  "display": "fullscreen",
-  "orientation": "landscape",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "orientation": "any",
   "background_color": "#181425",
   "theme_color": "#181425",
+  "categories": ["productivity", "developer tools"],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Stats",
+      "url": "/stats",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Timelapse",
+      "url": "/timelapse",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Wall mode",
+      "url": "/?kiosk=1",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }

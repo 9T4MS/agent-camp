@@ -12,7 +12,7 @@ import { join, normalize } from "node:path";
 import { CLOSE_BAD_MESSAGE } from "@agent-office/protocol";
 import type { ServerWebSocket } from "bun";
 import { type AppEnv, OfficeApp, serverVersion } from "../core/app.ts";
-import { gate } from "../core/auth.ts";
+import { gate, withRenewedSession } from "../core/auth.ts";
 import { SqlStore } from "../core/store.ts";
 
 type WsData = { role: "connector" | "viewer"; socketId: string };
@@ -104,7 +104,7 @@ const server = Bun.serve<WsData>({
     }
     const api = await app.handleHttp(req);
     if (api) return api;
-    return serveStatic(path === "/" ? "/index.html" : path);
+    return withRenewedSession(req, env, serveStatic(path === "/" ? "/index.html" : path));
   },
   websocket: {
     open(ws) {

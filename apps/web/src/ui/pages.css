@@ -38,7 +38,8 @@ select:focus-visible {
   align-items: center;
   gap: 12px;
   min-height: 44px;
-  padding: 6px 12px;
+  padding: calc(6px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 6px
+    max(12px, env(safe-area-inset-left, 0px));
   background: var(--night);
   border-bottom: 2px solid var(--cocoa);
   box-shadow: 0 2px 0 rgba(24, 20, 37, 0.5);

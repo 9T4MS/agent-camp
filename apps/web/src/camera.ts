@@ -17,8 +17,8 @@ export type CameraOptions = {
   kiosk: boolean;
   /** disable auto-pilot until the user interacts (e.g. ?zoom=fit screenshots) */
   holdAuto?: boolean;
-  /** HUD height at the top, kept clear when fitting */
-  topInset?: number;
+  /** HUD height at the top (px, or read live: it grows by the notch inset), kept clear when fitting */
+  topInset?: number | (() => number);
 };
 
 export class Camera {
@@ -60,10 +60,15 @@ export class Camera {
     return this.opts.kiosk || performance.now() - this.lastInput > IDLE_BEFORE_AUTO_MS;
   }
 
+  private inset() {
+    const t = this.opts.topInset;
+    return typeof t === "function" ? t() : (t ?? 0);
+  }
+
   fitZoom() {
     const s = this.screen();
     const w = this.worldSize();
-    const inset = this.opts.topInset ?? 0;
+    const inset = this.inset();
     return Math.min(s.width / w.width, (s.height - inset) / w.height);
   }
 
@@ -76,7 +81,7 @@ export class Camera {
     t.zoom = Math.min(MAX_ZOOM, Math.max(this.minZoom(), t.zoom));
     const s = this.screen();
     const w = this.worldSize();
-    const inset = this.opts.topInset ?? 0;
+    const inset = this.inset();
     // the HUD covers the top `inset` px: the usable view is centered below it
     const shiftY = inset / 2 / t.zoom;
     const halfW = s.width / 2 / t.zoom;
@@ -104,7 +109,7 @@ export class Camera {
 
   zoomToFit(instant = false) {
     const w = this.worldSize();
-    const inset = this.opts.topInset ?? 0;
+    const inset = this.inset();
     const z = this.fitZoom();
     this.set({ x: w.width / 2, y: w.height / 2 - inset / 2 / z, zoom: z }, instant);
     this.fitted = true;
@@ -275,7 +280,10 @@ export class Camera {
       "garden",
       "all",
     ];
-    const stop = stops[this.tourIdx++ % stops.length]!;
+    let stop = stops[this.tourIdx++ % stops.length]!;
+    // a portrait phone would show the whole office as a thin strip: stay on the desks
+    const s = this.screen();
+    if (stop === "all" && s.height > s.width * 1.15) stop = "desks";
     this.tourT = TOUR_STOP_S;
     if (stop === "desks") {
       // pan across the desk floor in thirds
