@@ -5,6 +5,10 @@ heading if it isn't there yet), written for the people in the office, not for th
 section is what "What's new" in the menu shows; a new line there also brings up the "New version!"
 banner after a deploy.
 
+## 2026-11-12
+
+- 🙂 "Who are you?" in the top bar: confirm once with a code from your Mac, then your portrait sits there with Customize look and your desk; office games and pokes now go out as you
+
 ## 2026-11-11
 
 - Sharper office at every zoom: name tags and signs stay readable on wall screens and phones

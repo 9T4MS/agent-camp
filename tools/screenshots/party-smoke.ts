@@ -209,6 +209,8 @@ try {
   if (refused >= 0) errors.splice(refused, 1);
   await page.locator(".claim-send").click();
   for (let i = 0; i < 50 && !macCodes.has("Player One"); i++) await pause(100);
+  await page.locator(".claim-form input").waitFor();
+  await page.screenshot({ path: `${out}/me-claim-desktop.png` });
   assert(!macCodes.has("Player Two"), "the code only goes to that person's Mac");
   const code = macCodes.get("Player One")!;
   assert(await page.locator(".claim-send").isDisabled(), "resend counts down");
@@ -240,6 +242,7 @@ try {
   await other.evaluate(() => window.__office.openPerson("player-two"));
   assert.equal(await other.locator(".hud-panel .this-is-me").count(), 1, "spectators can claim");
   await other.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
   const openStudio = async () => {
     await page.locator(".me-chip").click();
     await page.getByRole("button", { name: "Customize look", exact: false }).click();
