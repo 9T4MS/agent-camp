@@ -58,7 +58,7 @@ jobs:
 
       - name: Install Playwright Chromium
         if: steps.shots.outputs.enabled == 'true'
-        run: bun run --cwd tools/screenshots install-browsers  # use the pinned playwright version
+        run: bun run --cwd tools/screenshots install-browsers # use the pinned playwright version
 
       - name: Screenshots
         if: steps.shots.outputs.enabled == 'true'
