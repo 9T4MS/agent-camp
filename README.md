@@ -152,8 +152,9 @@ Open `https://<worker-url>/?kiosk=1&recorder=1` on the office iPad.
 **4. Optional extras** (same Variables and Secrets page): `VIEWER_KEY` (secret; watching then
 needs `?key=…`), and AI avatars from descriptions with `GENUI_PROVIDER=anthropic` +
 secret `ANTHROPIC_API_KEY`, or `GENUI_PROVIDER=jev` + secret `AI_GATEWAY_API_KEY` (Vercel AI
-Gateway). Everything works with `GENUI_PROVIDER=off`. Plain variables you set in the dashboard
-are reset to `wrangler.toml` on the next deploy, so change those in `wrangler.toml`; secrets stay.
+Gateway); `GENUI_PROVIDER` is a plain *Text* variable. Everything works without them (AI off).
+Deploys keep what you add there; only the variables listed in `apps/server/wrangler.toml` are
+reset to its values.
 
 **Other ways to deploy**
 

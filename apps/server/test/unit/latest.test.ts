@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { envelope } from "@agent-office/protocol";
-import { OfficeApp, serverVersion } from "../../src/core/app.ts";
+import { OfficeApp, type SocketAction, serverVersion } from "../../src/core/app.ts";
 import {
   cleanTag,
   isAutoVersion,
@@ -43,6 +43,9 @@ const hello = (clientId: string) =>
     }),
   );
 
+const announced = (a: SocketAction) =>
+  a.reply?.type === "connector.welcomed" ? a.reply.data.latestConnectorVersion : undefined;
+
 describe("latest connector version", () => {
   test("auto values and tag cleaning", () => {
     for (const v of [undefined, "", " auto ", "auto", "0.0.0-dev"])
@@ -77,9 +80,8 @@ describe("latest connector version", () => {
     expect(await l.refreshIfStale()).toBe("0.1.5");
     expect(l.current).toBe("0.1.5");
     expect(gh.calls[0]?.url).toBe("https://api.github.com/repos/o/r/releases/latest");
-    expect((gh.calls[0]?.init.headers as Record<string, string>)["user-agent"]).toBe(
-      "agent-office-server",
-    );
+    const headers = (gh.calls[0]?.init.headers ?? {}) as Record<string, string>;
+    expect(headers["user-agent"]).toBe("agent-office-server");
 
     tag = "v0.1.6";
     now += LATEST_TTL_MS - 1;
@@ -156,14 +158,10 @@ describe("latest connector version", () => {
     const first = app.connectorMessage("s1", hello("c1"));
     // the first welcome is never delayed: it carries the last known value
     expect(first.reply?.type).toBe("connector.welcomed");
-    expect((first.reply?.data as { latestConnectorVersion: string }).latestConnectorVersion).toBe(
-      UNKNOWN_VERSION,
-    );
+    expect(announced(first)).toBe(UNKNOWN_VERSION);
     await Promise.all(pending);
     const second = app.connectorMessage("s2", hello("c2"));
-    expect((second.reply?.data as { latestConnectorVersion: string }).latestConnectorVersion).toBe(
-      "0.1.40",
-    );
+    expect(announced(second)).toBe("0.1.40");
     expect(gh.calls.filter((c) => c.url.includes("/o/r/"))).toHaveLength(1); // cached
   });
 
