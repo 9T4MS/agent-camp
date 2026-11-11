@@ -175,7 +175,12 @@ try {
   await page.locator('select[name="leftHand"]').selectOption("confetti");
   await page.locator('select[name="rightHand"]').selectOption("lightsaber");
   await saveLook();
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.locator(".hud-panel").evaluate((el) => {
+    el.scrollTop = 0;
+  });
   await page.screenshot({ path: `${out}/shared-look-editor-desktop.png` });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await other.waitForFunction(() => {
     const p = window.__office.model.people.get("player-one") as {
       avatar: { wrist: string; rightHand: string };
