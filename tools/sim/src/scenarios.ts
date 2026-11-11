@@ -111,13 +111,16 @@ const pickOne = <T>(rand: () => number, xs: readonly T[]): T | undefined =>
   xs.length === 0 ? undefined : xs[Math.floor(rand() * xs.length)];
 
 /** One realistic random change somewhere in the office. */
-function* randomChange(ctx: ScenarioContext, weights: {
-  activity: number;
-  burst: number;
-  finish: number;
-  churn: number;
-  wait: number;
-}): Script {
+function* randomChange(
+  ctx: ScenarioContext,
+  weights: {
+    activity: number;
+    burst: number;
+    finish: number;
+    churn: number;
+    wait: number;
+  },
+): Script {
   const { rand, world, opts } = ctx;
   const live = world.liveSessions();
   const kind = weighted(rand, [
@@ -299,7 +302,13 @@ function* join(ctx: ScenarioContext): Script {
   for (let i = BUSY.length; ; i++) {
     yield { op: "wait", ms: intBetween(rand, 7500, 8500) };
     const [min, max] = opts.sessionsPerPerson;
-    yield* joinPerson(rand, personAt(i), 1, intBetween(rand, Math.max(1, min), Math.min(max, 2)), 0);
+    yield* joinPerson(
+      rand,
+      personAt(i),
+      1,
+      intBetween(rand, Math.max(1, min), Math.min(max, 2)),
+      0,
+    );
   }
 }
 
@@ -352,9 +361,9 @@ function* live(ctx: ScenarioContext): Script {
   for (let i = 0; i < opts.people; i++) {
     const p = personAt(i);
     const laptops = i === 1 || (i > 2 && rand() < 0.12) ? 2 : 1;
-    const defs = yield* joinPerson(rand, p, laptops, intBetween(rand, min, max), 250);
+    const defs = yield* joinPerson(rand, p, laptops, intBetween(rand, min, max), 150);
     if (laptops > 1) for (const d of defs) multi.add(d.clientId);
-    yield { op: "wait", ms: intBetween(rand, 600, 2500) };
+    yield { op: "wait", ms: intBetween(rand, 300, 1500) };
   }
   yield { op: "settled" };
 

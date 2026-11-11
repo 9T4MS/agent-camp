@@ -155,7 +155,9 @@ export async function uploadSnapshots(
     if (!res.ok) throw new Error(`snapshot upload failed: ${res.status} ${await res.text()}`);
     const body = (await res.json().catch(() => ({}))) as { id?: number };
     if (typeof body.id === "number") ids.push(body.id);
-    log(`snapshot  ${i + 1}/${n} uploaded (${png.length} bytes${body.id ? `, id ${body.id}` : ""})`);
+    log(
+      `snapshot  ${i + 1}/${n} uploaded (${png.length} bytes${body.id ? `, id ${body.id}` : ""})`,
+    );
   }
   return ids;
 }

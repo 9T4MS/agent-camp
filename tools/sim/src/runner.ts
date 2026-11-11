@@ -5,7 +5,9 @@
 import {
   type ConnectorToServer,
   type OfficeSnapshot,
+  type SessionView,
   SNAPSHOT_DEBOUNCE_MS,
+  sessionIdOf,
   WS_CONNECTOR_PATH,
 } from "@agent-office/protocol";
 import type { z } from "zod";
@@ -16,7 +18,14 @@ import {
   type ScenarioName,
   type ScenarioOptions,
 } from "./scenarios.ts";
-import { type Action, byeMessage, helloMessage, type Step, snapshotMessage, World } from "./world.ts";
+import {
+  type Action,
+  byeMessage,
+  helloMessage,
+  type Step,
+  snapshotMessage,
+  World,
+} from "./world.ts";
 
 export type SimOptions = Partial<ScenarioOptions> & {
   /** default "live" (the free-running script driven by --people / --chaos) */
@@ -101,12 +110,31 @@ function resolveOptions(opts: SimOptions): ScenarioOptions {
   };
 }
 
-/** Does GET /api/state show exactly the people/sessions the world expects? */
+/**
+ * Does GET /api/state show what the simulated office expects? Every online laptop's sessions
+ * must be there with the same agent/activity/subagents and nothing extra; people and sessions
+ * that are not ours (other connectors, leftovers in their grace period) are ignored.
+ */
 export function stateMatches(state: z.infer<typeof OfficeSnapshot>, world: World): boolean {
-  const expected = world.expectedPeople();
-  const people = new Map(state.data.people.map((p) => [p.personId, p.sessions.length]));
-  for (const [id, n] of expected) if (people.get(id) !== n) return false;
-  return people.size === expected.size;
+  const server = new Map<string, { personId: string; s: SessionView }>();
+  for (const p of state.data.people)
+    for (const s of p.sessions) server.set(s.sessionId, { personId: p.personId, s });
+  const online = world.online();
+  const ours = new Set(online.map((l) => l.clientId));
+  let expected = 0;
+  for (const l of online) {
+    if (!state.data.people.some((p) => p.personId === l.personId)) return false;
+    for (const s of l.sessions.values()) {
+      expected++;
+      const got = server.get(sessionIdOf(l.clientId, s.key));
+      if (!got || got.personId !== l.personId) return false;
+      if (got.s.agent !== s.agent || got.s.activity !== s.activity) return false;
+      if (got.s.subagents !== s.subagents) return false;
+    }
+  }
+  let present = 0;
+  for (const id of server.keys()) if (ours.has(id.slice(0, id.indexOf(":")))) present++;
+  return present === expected;
 }
 
 /**

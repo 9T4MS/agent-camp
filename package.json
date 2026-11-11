@@ -12,7 +12,8 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "bun test",
-    "test:e2e": "AGENT_OFFICE_E2E=1 bun test tests/e2e"
+    "test:e2e": "AGENT_OFFICE_E2E=1 bun test tests/e2e",
+    "sim": "bun run tools/sim/src/main.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",

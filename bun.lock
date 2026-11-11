@@ -50,6 +50,14 @@
         "zod": "^4",
       },
     },
+    "tools/sim": {
+      "name": "@agent-office/sim",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agent-office/protocol": "workspace:*",
+        "zod": "^4",
+      },
+    },
   },
   "packages": {
     "@agent-office/connector": ["@agent-office/connector@workspace:apps/connector"],
@@ -57,6 +65,8 @@
     "@agent-office/protocol": ["@agent-office/protocol@workspace:packages/protocol"],
 
     "@agent-office/server": ["@agent-office/server@workspace:apps/server"],
+
+    "@agent-office/sim": ["@agent-office/sim@workspace:tools/sim"],
 
     "@agent-office/web": ["@agent-office/web@workspace:apps/web"],
 

@@ -7,8 +7,8 @@ import {
   backoffDelay,
   HEARTBEAT_MS,
   parseServerToConnector,
-  SNAPSHOT_DEBOUNCE_MS,
   type SessionInfo,
+  SNAPSHOT_DEBOUNCE_MS,
 } from "@agent-office/protocol";
 import { byeMessage, helloMessage, type LaptopDef, snapshotMessage } from "./world.ts";
 

@@ -3,18 +3,14 @@
  * working-hour heavy, a few late nights and weekend pokes, mostly Claude with some Codex/Pi,
  * several projects per person, parallel sessions and subagent bursts.
  */
-import {
-  type AgentKind,
-  HistoryRow,
-  personIdFromName,
-  seededRandom,
-} from "@agent-office/protocol";
+import { type AgentKind, HistoryRow, personIdFromName, seededRandom } from "@agent-office/protocol";
 import { personAt, type Weighted, weighted } from "./data.ts";
 
 export type BackfillOptions = {
   seed?: number;
   /** end of the generated range (default now); nothing is generated after it */
   now?: number;
+  /** full days before today (today up to `now` is included too), default 7 */
   days?: number;
   people?: number;
   /** office time zone the working hours are in (default Europe/Vienna, like the server) */
@@ -23,6 +19,15 @@ export type BackfillOptions = {
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+/** tie-break for rows with the same timestamp (joins first, leaves last) */
+const ORDER = [
+  "person.joined",
+  "session.started",
+  "subagent.spawned",
+  "subagent.finished",
+  "session.ended",
+  "person.left",
+];
 
 /** Offset (ms) of `tz` from UTC at instant `ts`. */
 function tzOffset(ts: number, tz: string): number {
@@ -37,7 +42,14 @@ function tzOffset(ts: number, tz: string): number {
     second: "numeric",
   }).formatToParts(new Date(ts));
   const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour") % 24,
+    get("minute"),
+    get("second"),
+  );
   return asUtc - (ts - (ts % 1000));
 }
 
@@ -124,7 +136,14 @@ export function generateWeek(opts: BackfillOptions = {}): HistoryRow[] {
         const project = p.projects[Math.floor(rand() * p.projects.length)]!;
         const dur = Math.min(end - t, (8 + rand() * 110) * MIN);
         const sEnd = t + dur;
-        rows.push({ ts: t, type: "session.started", person: p.personId, agent, project, subagents: 0 });
+        rows.push({
+          ts: t,
+          type: "session.started",
+          person: p.personId,
+          agent,
+          project,
+          subagents: 0,
+        });
         if (agent === "claude" && rand() < 0.35) {
           const k = rand() < 0.15 ? 8 : 1 + Math.floor(rand() * 5);
           const burst = t + dur * (0.1 + rand() * 0.4);
@@ -148,16 +167,27 @@ export function generateWeek(opts: BackfillOptions = {}): HistoryRow[] {
               subagents: n,
             });
         }
-        rows.push({ ts: Math.round(sEnd), type: "session.ended", person: p.personId, agent, project, subagents: 0 });
+        rows.push({
+          ts: Math.round(sEnd),
+          type: "session.ended",
+          person: p.personId,
+          agent,
+          project,
+          subagents: 0,
+        });
         active.push(sEnd);
         lastEnd = Math.max(lastEnd, sEnd);
       }
       t += (3 + rand() * 40 * intensity) * MIN;
     }
-    rows.push({ ts: Math.round(Math.max(lastEnd, end) + MIN), type: "person.left", person: p.personId });
+    rows.push({
+      ts: Math.round(Math.max(lastEnd, end) + MIN),
+      type: "person.left",
+      person: p.personId,
+    });
   };
 
-  for (let d = days - 1; d >= 0; d--) {
+  for (let d = days; d >= 0; d--) {
     const date = localDate(now - d * 24 * HOUR, tz);
     const weekend = date.weekday >= 5;
     for (const p of people) {
@@ -173,8 +203,8 @@ export function generateWeek(opts: BackfillOptions = {}): HistoryRow[] {
       }
     }
   }
-  rows.sort((a, b) => a.ts - b.ts);
-  return rows.map((r) => HistoryRow.parse(r));
+  rows.sort((a, b) => a.ts - b.ts || ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
+  return rows.map((r) => HistoryRow.parse({ ...r, ts: Math.round(r.ts) }));
 }
 
 /** POST rows to /api/history/backfill in chunks. Returns the number inserted. */

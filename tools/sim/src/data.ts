@@ -24,7 +24,11 @@ export const PEOPLE: readonly PersonDef[] = [
     description: "blonde ponytail, loves plants on her desk",
     projects: ["design-system", "website"],
   },
-  { name: "Jonas", description: "buzz cut, full beard, beanie", projects: ["data-pipeline", "infra"] },
+  {
+    name: "Jonas",
+    description: "buzz cut, full beard, beanie",
+    projects: ["data-pipeline", "infra"],
+  },
   {
     name: "Sofia",
     description: "long black hair, square glasses, rubber duck on the desk",
@@ -52,7 +56,11 @@ export const PEOPLE: readonly PersonDef[] = [
     description: "ginger curls, freckles, stack of books",
     projects: ["research-notes", "agent-office"],
   },
-  { name: "Leo", description: "tan skin, short black hair, cactus fan", projects: ["infra", "cli"] },
+  {
+    name: "Leo",
+    description: "tan skin, short black hair, cactus fan",
+    projects: ["infra", "cli"],
+  },
   { name: "Ida", description: "auburn bob, round glasses", projects: ["cli", "docs"] },
   { name: "Ben", description: "dark brown curls, beard, headphones", projects: ["mobile-app"] },
   { name: "Hanna", description: "long blonde hair, cat photo on desk", projects: ["website"] },
