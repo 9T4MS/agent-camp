@@ -47,6 +47,7 @@ import { avatarPortrait } from "./art/party.ts";
 import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
 import { CHANGELOG } from "./changelog.ts";
+import { CrispView } from "./crisp.ts";
 import { DemoFeed, parseDemoMode, parseLookParam } from "./demo/demoFeed.ts";
 import { type CatAction, Hud, type PokeResult } from "./hud.ts";
 import { keepAwake, reloadInto, watchForNewBuild } from "./kiosk.ts";
@@ -144,7 +145,7 @@ async function boot() {
     background: C.pine,
     antialias: false,
     roundPixels: true,
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    resolution: Math.min(window.devicePixelRatio || 1, 3),
     autoDensity: true,
     preference: "webgl",
   });
@@ -167,6 +168,7 @@ async function boot() {
   setArtSeason(season);
   const scene = new OfficeScene(buildOfficeMap(BASE_POD_ROWS));
   app.stage.addChild(scene.root);
+  const crisp = new CrispView(app, scene.root);
   const effects = new Effects(scene.fx);
   const chars = new CharacterManager(scene, model, effects);
   const gifs = showGifs ? new HeadGifs(scene.fx, model, chars) : null;
@@ -1121,6 +1123,7 @@ async function boot() {
     effects.update(dt);
     living.update(dt);
     camera.update(dt);
+    crisp.update();
     if (!nohud && !kiosk) minimap.update(dt);
     frames++;
     const now = performance.now();

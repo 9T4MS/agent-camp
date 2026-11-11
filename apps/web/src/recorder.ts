@@ -15,10 +15,11 @@ export async function captureSnapshot(app: Application, scene: OfficeScene): Pro
   const h = Math.round(scene.heightPx * scale);
   const rt = RenderTexture.create({ width: w, height: h, scaleMode: "nearest" });
   const root = scene.root;
-  const saved = { sx: root.scale.x, sy: root.scale.y, x: root.x, y: root.y };
+  const saved = { sx: root.scale.x, sy: root.scale.y, x: root.x, y: root.y, visible: root.visible };
   try {
     root.scale.set(scale);
     root.position.set(0, 0);
+    root.visible = true;
     app.renderer.render({ container: root, target: rt, clear: true });
     const canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
     return await new Promise<Blob | null>((resolve) =>
@@ -29,6 +30,7 @@ export async function captureSnapshot(app: Application, scene: OfficeScene): Pro
   } finally {
     root.scale.set(saved.sx, saved.sy);
     root.position.set(saved.x, saved.y);
+    root.visible = saved.visible;
     rt.destroy(true);
   }
 }

@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-11
 
+- Sharper office at every zoom: name tags and signs stay readable on wall screens and phones
 - The auto-tour comes back to the desks after every other stop and shows the pods where agents are working
 - Agents sitting on a sofa, bench or chair now sit in front of it instead of hiding behind it
 - The "New version!" popup is now a wide banner across the office that goes away by itself after 15 s
