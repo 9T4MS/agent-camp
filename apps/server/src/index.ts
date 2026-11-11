@@ -3,7 +3,7 @@
  * /healthz and /install.sh itself, and everything else from static assets (apps/web/dist).
  */
 import installScript from "../../connector/install.sh";
-import { viewerAllowed } from "./core/app.ts";
+import { serverVersion, viewerAllowed } from "./core/app.ts";
 import type { Env } from "./office.ts";
 
 export { Office } from "./office.ts";
@@ -19,7 +19,7 @@ export default {
     if (path === "/healthz") {
       return Response.json({
         ok: true,
-        version: env.SERVER_VERSION || env.LATEST_CONNECTOR_VERSION || "dev",
+        version: serverVersion(env),
       });
     }
 

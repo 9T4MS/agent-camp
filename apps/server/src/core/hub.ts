@@ -138,6 +138,11 @@ export class Hub {
 
   // ---- public API -------------------------------------------------------------------------
 
+  /** Version announced in later `connector.welcomed` replies (auto-detected from GitHub). */
+  setLatestConnectorVersion(v: string): void {
+    this.cfg.latestConnectorVersion = v;
+  }
+
   /** Restore after a DO restart / hibernation wake. Emits nothing. */
   restore(now: number, sockets: { socketId: string; binding: Binding | null }[] = []): void {
     const raw = this.store.kvGet(STATE_KEY);

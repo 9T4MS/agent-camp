@@ -1,4 +1,8 @@
 # Agent Office: one Worker + one SQLite-backed Durable Object ("office").
+# Deployed by Cloudflare Workers Builds (Git integration, see README "Deploy"): root directory =
+# repo root, build `bun install --frozen-lockfile && bun run --filter @agent-office/web build`,
+# deploy `cd apps/server && npx wrangler deploy`. All paths below are relative to this file.
+# The Worker name in the Cloudflare dashboard must match `name`.
 name = "agent-office"
 main = "src/index.ts"
 compatibility_date = "2025-10-01"
@@ -26,7 +30,10 @@ OFFICE_NAME = "Agent Office"
 OFFICE_TIMEZONE = "Europe/Vienna"
 GENUI_PROVIDER = "off"
 GENUI_MAX_CALLS_PER_DAY = "200"
-LATEST_CONNECTOR_VERSION = "0.0.0-dev"
+# "auto": the server asks GitHub for the latest release of GITHUB_REPO when a connector says
+# hello (cached 5 min). A fixed version (e.g. --var LATEST_CONNECTOR_VERSION:0.1.42) wins.
+LATEST_CONNECTOR_VERSION = "auto"
+GITHUB_REPO = "MrGatzi/agent-camp"
 MIN_CONNECTOR_VERSION = "0.0.0"
 
 # Secrets (wrangler secret put ...; locally in .dev.vars):

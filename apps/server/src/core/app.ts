@@ -7,6 +7,7 @@ import { HistoryRow, type ServerToConnector, type ViewerEvent } from "@agent-off
 import { z } from "zod";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
+import { isAutoVersion, LatestVersion } from "./latest.ts";
 import { computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
 
@@ -15,6 +16,8 @@ export type AppEnv = GenuiEnv & {
   VIEWER_KEY?: string;
   LATEST_CONNECTOR_VERSION?: string;
   MIN_CONNECTOR_VERSION?: string;
+  /** "owner/repo" whose latest GitHub release is the connector version (LATEST_CONNECTOR_VERSION=auto) */
+  GITHUB_REPO?: string;
   SERVER_VERSION?: string;
   OFFICE_NAME?: string;
   OFFICE_TIMEZONE?: string;
@@ -43,6 +46,13 @@ export const SNAPSHOT_MIN_INTERVAL_MS = 10 * 60 * 1000;
 export const BACKFILL_MAX_ROWS = 50_000;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
+/** SERVER_VERSION, else a fixed LATEST_CONNECTOR_VERSION, else "dev". */
+export function serverVersion(env: AppEnv): string {
+  if (env.SERVER_VERSION) return env.SERVER_VERSION;
+  const latest = env.LATEST_CONNECTOR_VERSION?.trim();
+  return latest && !isAutoVersion(latest) ? latest : "dev";
+}
+
 export function connectorPassword(env: AppEnv): string | undefined {
   return env.CONNECTOR_PASSWORD || (env.DEV_MODE === "1" ? "devpass" : undefined);
 }
@@ -70,6 +80,7 @@ const json = (data: unknown, init: ResponseInit = {}) =>
 export class OfficeApp {
   readonly hub: Hub;
   readonly genui: AvatarService;
+  readonly latest: LatestVersion;
   readonly timezone: string;
 
   constructor(
@@ -85,13 +96,20 @@ export class OfficeApp {
       ...(opts.fetch ? { fetch: opts.fetch } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     });
-    const latest = env.LATEST_CONNECTOR_VERSION || "0.0.0-dev";
+    this.latest = new LatestVersion(env.LATEST_CONNECTOR_VERSION, {
+      store,
+      log,
+      offline: env.DEV_MODE === "1",
+      ...(env.GITHUB_REPO ? { repo: env.GITHUB_REPO } : {}),
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+    });
     this.hub = new Hub(
       {
         password: connectorPassword(env),
         minConnectorVersion: env.MIN_CONNECTOR_VERSION || "0.0.0",
-        latestConnectorVersion: latest,
-        serverVersion: env.SERVER_VERSION || latest,
+        latestConnectorVersion: this.latest.current,
+        serverVersion: serverVersion(env),
         officeName: env.OFFICE_NAME || "Agent Office",
         timezone: this.timezone,
         avatarKey: this.genui.cacheKey,
@@ -112,7 +130,17 @@ export class OfficeApp {
   }
 
   connectorMessage(socketId: string, raw: unknown): SocketAction {
-    return this.handle(this.hub.onConnectorMessage(socketId, raw, this.now()));
+    const r = this.hub.onConnectorMessage(socketId, raw, this.now());
+    // a hello (it returns a binding) is the only thing that refreshes the latest version
+    if (r.binding) this.refreshLatest();
+    return this.handle(r);
+  }
+
+  /** Background GitHub lookup when stale; the welcome that triggered it never waits. */
+  private refreshLatest(): void {
+    const p = this.latest.refreshIfStale();
+    if (!p) return;
+    this.transport.waitUntil?.(p.then((v) => this.hub.setLatestConnectorVersion(v)));
   }
 
   connectorClosed(socketId: string): void {
