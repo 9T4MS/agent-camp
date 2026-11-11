@@ -5,8 +5,10 @@
  *   GET  /api/people/:personId -> PersonDayResponse
  *   POST /api/history/backfill <- HistoryRow[]   (Bearer CONNECTOR_PASSWORD)
  *   POST /api/interact         <- InteractRequest -> InteractResponse
+ *   PUT  /api/people/:personId/avatar <- AvatarEditRequest -> AvatarEditResponse
  */
 import { z } from "zod";
+import { AvatarSpec } from "./catalog.ts";
 import {
   Activity,
   AgentKind,
@@ -30,6 +32,24 @@ export type InteractRequest = z.infer<typeof InteractRequest>;
 
 export const InteractResponse = z.object({ ok: z.boolean(), delivered: z.number() });
 export type InteractResponse = z.infer<typeof InteractResponse>;
+
+/**
+ * A viewer picks a person's look in the look editor (catalog ids only). `avatar: null` drops
+ * the custom look and goes back to the automatic one (description / seed).
+ */
+export const AvatarEditRequest = z.object({
+  avatar: AvatarSpec.nullable(),
+  from: ViewerName.optional(),
+});
+export type AvatarEditRequest = z.infer<typeof AvatarEditRequest>;
+
+export const AvatarEditResponse = z.object({
+  ok: z.boolean(),
+  /** the look now shown (for a reset: the current one until the new automatic look lands) */
+  avatar: AvatarSpec,
+  custom: z.boolean(),
+});
+export type AvatarEditResponse = z.infer<typeof AvatarEditResponse>;
 
 /** One stored history row (one per viewer event, except activity changes). No content. */
 export const HistoryRow = z.object({

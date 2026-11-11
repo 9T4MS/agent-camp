@@ -87,11 +87,40 @@ export const ACCESSORIES = [
   { id: "headphones", label: "big headphones" },
   { id: "beanie", label: "beanie" },
   { id: "cap", label: "baseball cap" },
+  { id: "cap-mint", label: "mint / aqua baseball cap with a white logo" },
   { id: "bow", label: "hair bow" },
   { id: "earring", label: "earring" },
 ] as const satisfies readonly Entry<string>[];
 export const Accessory = z.enum(ids(ACCESSORIES));
 export type Accessory = z.infer<typeof Accessory>;
+
+/**
+ * What the character wears on top. `jacket` and `hoodie` come in the agent color; the
+ * others have their own colors and show the agent kind as a small badge on the tee (and a
+ * patch on the back, the side you see at the desk).
+ */
+export const OUTFITS = [
+  { id: "jacket", label: "open jacket over a white shirt (agent color)" },
+  { id: "hoodie", label: "hoodie (agent color)" },
+  { id: "flannel", label: "grey/teal plaid flannel over a navy tee" },
+  { id: "flannel-red", label: "red lumberjack flannel over a navy tee" },
+  { id: "tee", label: "plain navy t-shirt" },
+] as const satisfies readonly Entry<string>[];
+export const Outfit = z.enum(ids(OUTFITS));
+export type Outfit = z.infer<typeof Outfit>;
+/** Outfits drawn in the agent color (no badge needed). */
+export const AGENT_COLORED_OUTFITS: readonly Outfit[] = ["jacket", "hoodie"];
+
+/** Something the character holds. Hands are seen from the front: left = viewer's left. */
+export const HELD_ITEMS = [
+  { id: "none", label: "empty hand" },
+  { id: "beer", label: "glass of beer" },
+  { id: "joint", label: "joint" },
+  { id: "phone", label: "phone" },
+  { id: "coffee", label: "coffee cup" },
+] as const satisfies readonly Entry<string>[];
+export const HeldItem = z.enum(ids(HELD_ITEMS));
+export type HeldItem = z.infer<typeof HeldItem>;
 
 // ---- desk ---------------------------------------------------------------------------------
 export const DESK_PROPS = [
@@ -122,6 +151,10 @@ export const AvatarSpec = z.object({
   glasses: Glasses,
   facialHair: FacialHair,
   accessory: Accessory,
+  /** added later: missing in stored looks and older payloads, so they default */
+  outfit: Outfit.default("jacket"),
+  leftHand: HeldItem.default("none"),
+  rightHand: HeldItem.default("none"),
   /** 0..3 distinct props */
   deskProps: z
     .array(DeskProp)
@@ -139,6 +172,8 @@ export const AVATAR_CATALOG = {
   glasses: Glasses.options,
   facialHair: FacialHair.options,
   accessories: Accessory.options,
+  outfits: Outfit.options,
+  heldItems: HeldItem.options,
   deskProps: DeskProp.options,
   deskMess: DESK_MESS_LEVELS,
 } as const;
@@ -146,6 +181,9 @@ export const AVATAR_CATALOG = {
 /** Lookup helpers for display hints. */
 export const hairColorHex = (id: HairColor) => HAIR_COLORS.find((c) => c.id === id)!;
 export const skinToneHex = (id: SkinTone) => SKIN_TONES.find((c) => c.id === id)!;
+
+/** Accessories the seed picks from: the original list, so seeded looks never shift. */
+const SEEDED_ACCESSORIES = Accessory.options.filter((a) => a !== "cap-mint");
 
 /**
  * Deterministic avatar from any seed (normally the person's display name / personId).
@@ -157,7 +195,9 @@ export function avatarFromSeed(seed: string): AvatarSpec {
   // keep accessories/facial hair a bit rarer than "none" so the office isn't a costume party
   const facialHair = rand() < 0.6 ? "none" : pick(rand, FacialHair.options);
   const glasses = rand() < 0.5 ? "none" : pick(rand, Glasses.options);
-  const accessory = rand() < 0.45 ? "none" : pick(rand, Accessory.options);
+  const accessory = rand() < 0.45 ? "none" : pick(rand, SEEDED_ACCESSORIES);
+  // outfit / held items are not drawn from `rand`: the seeded look of everyone already in the
+  // office stays exactly as it was. They are picked by AI or in the look editor.
   const propCount = 1 + Math.floor(rand() * MAX_DESK_PROPS);
   const pool: DeskProp[] = [...DeskProp.options];
   const deskProps: DeskProp[] = [];
@@ -172,6 +212,9 @@ export function avatarFromSeed(seed: string): AvatarSpec {
     glasses,
     facialHair,
     accessory,
+    outfit: "jacket",
+    leftHand: "none",
+    rightHand: "none",
     deskProps,
     deskMess: pick(rand, DESK_MESS_LEVELS),
   };

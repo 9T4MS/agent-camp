@@ -811,3 +811,82 @@ body.kiosk .hud-reconnect {
 .hud-panel .ctx.fire .ctx-bar > span {
   background: var(--red);
 }
+
+/* ---- look editor (person panel) ---------------------------------------------------------- */
+.hud-panel .edit-look {
+  margin-top: 10px;
+  width: 100%;
+  font-size: 12px;
+}
+.hud-panel .look-editor h2 {
+  margin-bottom: 8px;
+}
+.hud-panel .look-preview {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--dusk);
+}
+.hud-panel .look-preview .look-canvas {
+  width: 64px;
+  height: 96px;
+  image-rendering: pixelated;
+}
+.hud-panel .look-note {
+  margin: 6px 0 8px;
+  font-size: 11px;
+  color: var(--grey);
+}
+.hud-panel .look-form {
+  display: grid;
+  gap: 6px;
+}
+.hud-panel .look-form > label {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--grey);
+}
+.hud-panel .look-form select {
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  background: var(--cream);
+  color: var(--night);
+  border: 2px solid var(--night);
+}
+.hud-panel .look-props {
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 2px dashed var(--dusk);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  font-size: 12px;
+  color: var(--grey);
+}
+.hud-panel .look-props legend {
+  padding: 0 4px;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+}
+.hud-panel .look-props .chk {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.hud-panel .look-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.hud-panel .look-btns .pixel-btn {
+  font-size: 12px;
+  padding: 5px 6px;
+}

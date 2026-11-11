@@ -81,3 +81,18 @@ test("sqlite: avatars table from before the descr column is migrated", () => {
   expect(s.getAvatar("old")?.selfDescription).toBe("beard");
   new SqlStore(run); // idempotent
 });
+
+test("sqlite: avatar rows from before outfits get the new fields' defaults", () => {
+  const db = new Database(":memory:");
+  const store = new SqlStore(
+    (sql, ...params) => db.query(sql).all(...(params as never[])) as Record<string, unknown>[],
+  );
+  const { outfit: _o, leftHand: _l, rightHand: _r, ...old } = avatarFromSeed("anna");
+  db.query("INSERT INTO avatars (person, spec, key, updated) VALUES (?, ?, ?, ?)").run(
+    "anna",
+    JSON.stringify(old),
+    "k",
+    1,
+  );
+  expect(store.getAvatar("anna")?.avatar).toEqual(avatarFromSeed("anna"));
+});
