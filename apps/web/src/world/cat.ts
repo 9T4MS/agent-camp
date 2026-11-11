@@ -63,7 +63,8 @@ export class OfficeCat {
       const tx = Math.floor(target.x / TILE);
       const ty = Math.floor(target.y / TILE);
       if (!this.map.isWalkable(tx, ty)) target = { x: s.x, y: s.y + 10 };
-      if (!this.map.isWalkable(Math.floor(target.x / TILE), Math.floor(target.y / TILE))) target = this.home();
+      if (!this.map.isWalkable(Math.floor(target.x / TILE), Math.floor(target.y / TILE)))
+        target = this.home();
     }
     if (!this.goTo(target)) this.timer = 5;
   }

@@ -133,7 +133,7 @@
   z-index: 5;
   cursor: pointer;
 }
-.hud-minimap canvas {
+#app .hud-minimap canvas {
   display: block;
 }
 
@@ -239,13 +239,13 @@ body.nohud .hud-top,
 body.nohud .hud-minimap,
 body.nohud .hud-banner,
 body.nohud .hud-panel {
-  display: none !important;
+  display: none;
 }
 
 /* iPad kiosk: no cursor, bigger text, no panels */
 body.kiosk,
 body.kiosk * {
-  cursor: none !important;
+  cursor: none;
 }
 body.kiosk .hud-top {
   height: 46px;
@@ -264,7 +264,7 @@ body.kiosk .hud-banner {
 }
 body.kiosk .hud-minimap,
 body.kiosk .hud-panel {
-  display: none !important;
+  display: none;
 }
 body.kiosk .hud-reconnect {
   font-size: 15px;

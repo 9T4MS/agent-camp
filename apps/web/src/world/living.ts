@@ -14,7 +14,12 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-export type Daylight = { night: number; sky: "day" | "dusk" | "night"; tint: string; alpha: number };
+export type Daylight = {
+  night: number;
+  sky: "day" | "dusk" | "night";
+  tint: string;
+  alpha: number;
+};
 
 /** Lighting for a fractional local hour (0..24). */
 export function daylight(hour: number): Daylight {

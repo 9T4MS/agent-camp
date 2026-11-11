@@ -114,8 +114,10 @@ async function boot() {
 
   // initial view
   if (zoomParam === "fit") camera.zoomToFit(true);
-  else if (zoomParam && Number(zoomParam) > 0) camera.set({ x: 25 * 16, y: 15 * 16, zoom: Number(zoomParam) }, true);
-  else if (app.screen.width / scene.widthPx > 1.6) camera.set({ x: 32 * 16, y: 15 * 16, zoom: 2 }, true);
+  else if (zoomParam && Number(zoomParam) > 0)
+    camera.set({ x: 25 * 16, y: 15 * 16, zoom: Number(zoomParam) }, true);
+  else if (app.screen.width / scene.widthPx > 1.6)
+    camera.set({ x: 32 * 16, y: 15 * 16, zoom: 2 }, true);
   else camera.set({ x: 22 * 16, y: 14 * 16, zoom: 2 }, true);
 
   // ---- events -----------------------------------------------------------------------------
@@ -125,7 +127,8 @@ async function boot() {
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     cat.setMap(scene.map);
     minimap.setTerrain(scene.terrainCanvas);
-    for (const p of model.people.values()) chars.handle({ kind: "avatarChanged", personId: p.personId });
+    for (const p of model.people.values())
+      chars.handle({ kind: "avatarChanged", personId: p.personId });
   };
 
   let snapshotSeen = false;
@@ -255,7 +258,10 @@ async function boot() {
   const api: OfficeApi = {
     ready: false,
     fps: () => Math.round(fps * 10) / 10,
-    frameMs: () => ({ update: Math.round(lastUpd * 100) / 100, render: Math.round(lastRen * 100) / 100 }),
+    frameMs: () => ({
+      update: Math.round(lastUpd * 100) / 100,
+      render: Math.round(lastRen * 100) / 100,
+    }),
     model,
     camera: {
       zoomToFit: () => camera.zoomToFit(true),

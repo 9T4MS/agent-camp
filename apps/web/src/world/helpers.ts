@@ -3,12 +3,20 @@
  * around the pod's aisle and vanish on finish. Max 5 visible, plus a "+N" badge.
  */
 import type { AgentKind } from "@agent-office/protocol";
-import { Container, Sprite } from "pixi.js";
+import { type Container, Sprite } from "pixi.js";
 import { badgeTexture, botTextures } from "../art/fx.ts";
 import type { Effects } from "./effects.ts";
 
 const MAX_VISIBLE = 5;
-type Bot = { sprite: Sprite; x: number; y: number; tx: number; ty: number; wait: number; phase: number };
+type Bot = {
+  sprite: Sprite;
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  wait: number;
+  phase: number;
+};
 export type Rect = { x: number; y: number; w: number; h: number };
 
 export class HelperSwarm {

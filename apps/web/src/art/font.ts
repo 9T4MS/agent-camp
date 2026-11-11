@@ -3,7 +3,7 @@
  * PixelCanvas so in-world text scales with the camera exactly like the art does.
  * Lowercase maps to caps; accents are stripped; unknown glyphs render as "?".
  */
-import { PixelCanvas } from "./pixel.ts";
+import type { PixelCanvas } from "./pixel.ts";
 
 const G: Record<string, string> = {
   A: ".#.|#.#|###|#.#|#.#",
@@ -44,7 +44,7 @@ const G: Record<string, string> = {
   "9": "###|#.#|###|..#|##.",
   " ": "..|..|..|..|..",
   "-": "...|...|###|...|...",
-  "_": "...|...|...|...|###",
+  _: "...|...|...|...|###",
   "+": "...|.#.|###|.#.|...",
   ".": ".|.|.|.|#",
   ",": "..|..|..|.#|#.",
@@ -75,10 +75,7 @@ for (const [ch, def] of Object.entries(G)) {
 export const FONT_HEIGHT = 5;
 
 export function normalizeText(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toUpperCase();
+  return text.normalize("NFKD").replace(/[̀-ͯ]/g, "").toUpperCase();
 }
 
 function glyph(ch: string): Glyph {

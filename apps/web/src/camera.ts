@@ -75,7 +75,9 @@ export class Camera {
     const halfH = s.height / 2 / t.zoom;
     const margin = 2 * TILE;
     const clampAxis = (v: number, half: number, size: number) =>
-      half * 2 >= size + margin * 2 ? size / 2 : Math.min(size + margin - half, Math.max(half - margin, v));
+      half * 2 >= size + margin * 2
+        ? size / 2
+        : Math.min(size + margin - half, Math.max(half - margin, v));
     t.x = clampAxis(t.x, halfW, w.width);
     t.y = clampAxis(t.y, halfH, w.height);
   }
@@ -136,7 +138,13 @@ export class Camera {
   attach(el: HTMLElement) {
     el.addEventListener("pointerdown", (e) => {
       el.setPointerCapture?.(e.pointerId);
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() });
+      this.pointers.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+        sx: e.clientX,
+        sy: e.clientY,
+        t: performance.now(),
+      });
       if (this.pointers.size === 2) this.pinchDist = this.pinchDistance();
     });
     el.addEventListener("pointermove", (e) => {
@@ -177,9 +185,13 @@ export class Camera {
         const rect = el.getBoundingClientRect();
         const w = this.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
         const now = performance.now();
-        if (now - this.lastTap.t < 320 && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 24) {
+        if (
+          now - this.lastTap.t < 320 &&
+          Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 24
+        ) {
           this.touch();
-          if (!this.onDoubleTap(w.x, w.y)) this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, 1.6);
+          if (!this.onDoubleTap(w.x, w.y))
+            this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, 1.6);
           this.lastTap.t = 0;
         } else {
           this.lastTap = { t: now, x: e.clientX, y: e.clientY };
@@ -238,7 +250,16 @@ export class Camera {
     }
     this.tourT -= dt;
     if (this.tourT > 0) return;
-    const stops: (AreaName | "all")[] = ["desks", "lounge", "desks", "meeting", "game", "desks", "garden", "all"];
+    const stops: (AreaName | "all")[] = [
+      "desks",
+      "lounge",
+      "desks",
+      "meeting",
+      "game",
+      "desks",
+      "garden",
+      "all",
+    ];
     const stop = stops[this.tourIdx++ % stops.length]!;
     this.tourT = TOUR_STOP_S;
     if (stop === "desks") {

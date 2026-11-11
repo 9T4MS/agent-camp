@@ -3,9 +3,9 @@
 // Without --url it runs `vite preview` on the existing dist/ (run `bun run build` first).
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -76,7 +76,9 @@ async function main() {
         const fps = await page.evaluate(() => window.__office.fps());
         const ms = await page.evaluate(() => window.__office.frameMs());
         results[`${name}-${vpName}`] = { fps, ms, errors: errors.slice(0, 3) };
-        console.log(`${name}-${vpName}: fps=${fps} upd=${ms.update}ms render=${ms.render}ms${errors.length ? ` errors=${errors.join(" | ")}` : ""}`);
+        console.log(
+          `${name}-${vpName}: fps=${fps} upd=${ms.update}ms render=${ms.render}ms${errors.length ? ` errors=${errors.join(" | ")}` : ""}`,
+        );
         await page.close();
       }
       await ctx.close();
@@ -97,7 +99,9 @@ async function main() {
         sessions: window.__office.model.sessions.size,
         characters: window.__office.characters(),
       }));
-      console.log(`fps busy ${info.people}p/${info.sessions}s (${info.characters} chars): ${samples.join(", ")}`);
+      console.log(
+        `fps busy ${info.people}p/${info.sessions}s (${info.characters} chars): ${samples.join(", ")}`,
+      );
       await ctx.close();
     }
   } finally {

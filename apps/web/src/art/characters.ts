@@ -88,7 +88,14 @@ type Arms =
   | "wave0"
   | "wave1"
   | "rest";
-type FrameSpec = { view: View; seat: Seat; phase: number; arms: Arms; bob: number; mirror?: number };
+type FrameSpec = {
+  view: View;
+  seat: Seat;
+  phase: number;
+  arms: Arms;
+  bob: number;
+  mirror?: number;
+};
 
 const F = (view: View, seat: Seat, phase: number, arms: Arms, bob = 0): FrameSpec => ({
   view,
@@ -425,7 +432,21 @@ const FACIAL: Record<Exclude<AvatarSpec["facialHair"], "none">, Record<"down" | 
       "....hhhhhhhh....",
       ".....hhhhhh.....",
     ],
-    left: ["", "", "", "", "", "", "", "", "", "........h.......", "....h..hhh......", ".....hhhhh......", "......hhh......."],
+    left: [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "........h.......",
+      "....h..hhh......",
+      ".....hhhhh......",
+      "......hhh.......",
+    ],
   },
   mustache: {
     down: ["", "", "", "", "", "", "", "", "", "", "......hhhh......"],
@@ -476,17 +497,69 @@ const ACC: Record<Exclude<AvatarSpec["accessory"], "none">, Record<View, Layer>>
       ".PQ..........QP.",
       ".PP..........PP.",
     ],
-    left: ["", ".......KKK......", "........K.......", "........K.......", "........K.......", "........K.......", ".......PPP......", ".......PQP......", ".......PPP......"],
+    left: [
+      "",
+      ".......KKK......",
+      "........K.......",
+      "........K.......",
+      "........K.......",
+      "........K.......",
+      ".......PPP......",
+      ".......PQP......",
+      ".......PPP......",
+    ],
   },
   beanie: {
-    down: [".......pp.......", ".....BBBBBB.....", "....BBBBBBBB....", "...BBBBBBBBBB...", "..bbbbbbbbbbbb..", "..bbbbbbbbbbbb.."],
-    up: [".......pp.......", ".....BBBBBB.....", "....BBBBBBBB....", "...BBBBBBBBBB...", "..bbbbbbbbbbbb..", "..bbbbbbbbbbbb.."],
-    left: ["........pp......", ".....BBBBBB.....", "....BBBBBBBB....", "....BBBBBBBBB...", "...bbbbbbbbbbb..", "...bbbbbbbbbbb.."],
+    down: [
+      ".......pp.......",
+      ".....BBBBBB.....",
+      "....BBBBBBBB....",
+      "...BBBBBBBBBB...",
+      "..bbbbbbbbbbbb..",
+      "..bbbbbbbbbbbb..",
+    ],
+    up: [
+      ".......pp.......",
+      ".....BBBBBB.....",
+      "....BBBBBBBB....",
+      "...BBBBBBBBBB...",
+      "..bbbbbbbbbbbb..",
+      "..bbbbbbbbbbbb..",
+    ],
+    left: [
+      "........pp......",
+      ".....BBBBBB.....",
+      "....BBBBBBBB....",
+      "....BBBBBBBBB...",
+      "...bbbbbbbbbbb..",
+      "...bbbbbbbbbbb..",
+    ],
   },
   cap: {
-    down: ["", ".....AAAAAA.....", "....AaAAAAAA....", "...AAAAAAAAAA...", "...AAAAAAAAAA...", "..NNNNNNNNNNNN.."],
-    up: ["", ".....AAAAAA.....", "....AaAAAAAA....", "...AAAAAAAAAA...", "...AAAAAAAAAA...", "...AAN....NAA..."],
-    left: ["", ".....AAAAAA.....", "....AaAAAAAAA...", "....AAAAAAAAAA..", "....AAAAAAAAAA..", ".NNNNNN........."],
+    down: [
+      "",
+      ".....AAAAAA.....",
+      "....AaAAAAAA....",
+      "...AAAAAAAAAA...",
+      "...AAAAAAAAAA...",
+      "..NNNNNNNNNNNN..",
+    ],
+    up: [
+      "",
+      ".....AAAAAA.....",
+      "....AaAAAAAA....",
+      "...AAAAAAAAAA...",
+      "...AAAAAAAAAA...",
+      "...AAN....NAA...",
+    ],
+    left: [
+      "",
+      ".....AAAAAA.....",
+      "....AaAAAAAAA...",
+      "....AAAAAAAAAA..",
+      "....AAAAAAAAAA..",
+      ".NNNNNN.........",
+    ],
   },
   bow: {
     down: ["", "", "..........RRrRR.", "..........R.r.R."],
@@ -546,7 +619,10 @@ function drawHead(pc: PixelCanvas, look: Look, view: View, dy: number) {
     }
   }
   const hv = view;
-  layer(pc, HAIR[look.hairStyle][hv], dy, { ...hairC, L: look.hairStyle === "bald" ? s.light : hairC.L });
+  layer(pc, HAIR[look.hairStyle][hv], dy, {
+    ...hairC,
+    L: look.hairStyle === "bald" ? s.light : hairC.L,
+  });
   if (view !== "up") {
     const fv = view === "left" ? "left" : "down";
     if (look.facialHair !== "none") {

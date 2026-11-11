@@ -4,18 +4,18 @@
  *
  * Layers (bottom to top): floor, decals, objects (y-sorted), night overlay, glows, fx.
  */
-import { type AvatarSpec, AGENT_PALETTES } from "@agent-office/protocol";
+import { AGENT_PALETTES, type AvatarSpec } from "@agent-office/protocol";
 import { Container, Sprite, type Texture } from "pixi.js";
 import {
   chairTexture,
   deskTexture,
+  doorTextures,
   MONITOR,
   type MonitorState,
   messTextures,
   monitorTextures,
   nameplateTexture,
   propTexture,
-  doorTextures,
 } from "../art/desk.ts";
 import { furnitureFrames, furnitureMeta } from "../art/furniture.ts";
 import { glowTexture, pixelTexture, whiteboardTexture } from "../art/fx.ts";
@@ -33,7 +33,13 @@ import {
   TILE,
 } from "./map.ts";
 
-type Anim = { sprite: Sprite; frames: Texture[]; fps: number; phase: number; kind: "loop" | "arcade" | "neon" };
+type Anim = {
+  sprite: Sprite;
+  frames: Texture[];
+  fps: number;
+  phase: number;
+  kind: "loop" | "arcade" | "neon";
+};
 type Glow = { sprite: Sprite; base: number; kind: "lamp" | "window" };
 
 export type DeskView = {
@@ -90,7 +96,9 @@ export class OfficeScene {
 
   /** Rebuild everything static (used when the desk floor grows). Characters re-attach. */
   rebuild(map: OfficeMap) {
-    const keepChars = this.objects.children.filter((c) => c.label === "character" || c.label === "actor");
+    const keepChars = this.objects.children.filter(
+      (c) => c.label === "character" || c.label === "actor",
+    );
     for (const c of keepChars) this.objects.removeChild(c);
     for (const layer of [this.floor, this.decals, this.objects, this.glows]) {
       for (const c of layer.removeChildren()) c.destroy();
@@ -131,7 +139,14 @@ export class OfficeScene {
     this.objects.addChild(this.door);
   }
 
-  private addGlow(x: number, y: number, r: number, color: string, base: number, kind: Glow["kind"]) {
+  private addGlow(
+    x: number,
+    y: number,
+    r: number,
+    color: string,
+    base: number,
+    kind: Glow["kind"],
+  ) {
     const s = new Sprite(glowTexture(r, color));
     s.anchor.set(0.5);
     s.position.set(Math.round(x), Math.round(y));
@@ -149,7 +164,10 @@ export class OfficeScene {
     const fx = ob.x * TILE;
     const bottom = (ob.y + fp.h) * TILE + meta.dy;
     const s = new Sprite(frames[0]!);
-    s.position.set(fx + Math.round((fp.w * TILE - meta.w) / 2) - meta.pad, bottom - meta.h - meta.pad);
+    s.position.set(
+      fx + Math.round((fp.w * TILE - meta.w) / 2) - meta.pad,
+      bottom - meta.h - meta.pad,
+    );
     s.zIndex = bottom + meta.z;
     this.objects.addChild(s);
     const left = s.x + meta.pad;
@@ -184,7 +202,14 @@ export class OfficeScene {
         break;
       case "arcade":
       case "tv":
-        this.addGlow(left + meta.w / 2, top + 10, 16, ob.kind === "tv" ? C.sky : C.berry, 0.6, "lamp");
+        this.addGlow(
+          left + meta.w / 2,
+          top + 10,
+          16,
+          ob.kind === "tv" ? C.sky : C.berry,
+          0.6,
+          "lamp",
+        );
         break;
       default:
         break;
@@ -231,7 +256,10 @@ export class OfficeScene {
   }
 
   /** Show the owner's name + desk props on a pod (null clears it). */
-  setPodOwner(pod: number, owner: { personId: string; name: string; avatar: AvatarSpec; accent: string } | null) {
+  setPodOwner(
+    pod: number,
+    owner: { personId: string; name: string; avatar: AvatarSpec; accent: string } | null,
+  ) {
     const p = this.pods[pod];
     if (!p) return;
     if (p.nameplate) {
@@ -303,7 +331,8 @@ export class OfficeScene {
     for (const a of this.anims) {
       let idx: number;
       if (a.kind === "arcade") idx = this.gameLit ? 1 + (Math.floor(time * 3 + a.phase) % 2) : 0;
-      else if (a.kind === "neon") idx = this.gameLit ? 1 : Math.floor(time * 0.5 + a.phase) % 7 === 0 ? 1 : 0;
+      else if (a.kind === "neon")
+        idx = this.gameLit ? 1 : Math.floor(time * 0.5 + a.phase) % 7 === 0 ? 1 : 0;
       else idx = Math.floor(time * a.fps + a.phase) % a.frames.length;
       const tex = a.frames[idx]!;
       if (a.sprite.texture !== tex) a.sprite.texture = tex;
@@ -318,7 +347,8 @@ export class OfficeScene {
       const frames = MONITOR[d.state];
       const tex = monitorTextures()[frames[(blink + d.desk) % frames.length]!]!;
       if (d.monitor.texture !== tex) d.monitor.texture = tex;
-      d.glow.alpha = d.state === "run" ? 0.55 + 0.15 * Math.sin(time * 4 + d.desk) : 0.35 * this.night;
+      d.glow.alpha =
+        d.state === "run" ? 0.55 + 0.15 * Math.sin(time * 4 + d.desk) : 0.35 * this.night;
       d.glow.visible = d.glow.alpha > 0.01;
     }
     // coffee steam
@@ -331,7 +361,8 @@ export class OfficeScene {
     }
     // main door eases open/closed
     const target = this.doorWanted ? 3 : 0;
-    this.doorOpen += Math.sign(target - this.doorOpen) * Math.min(Math.abs(target - this.doorOpen), dt * 10);
+    this.doorOpen +=
+      Math.sign(target - this.doorOpen) * Math.min(Math.abs(target - this.doorOpen), dt * 10);
     const tex = doorTextures()[Math.round(this.doorOpen)]!;
     if (this.door.texture !== tex) this.door.texture = tex;
   }

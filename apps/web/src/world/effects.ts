@@ -1,5 +1,5 @@
 /** Short-lived effects: puffs and confetti. Pooled sprites, no per-frame allocation. */
-import { Container, Sprite } from "pixi.js";
+import { type Container, Sprite } from "pixi.js";
 import { CONFETTI_COLORS, pixelTexture, puffTextures } from "../art/fx.ts";
 import { hexNum } from "../art/palette.ts";
 
@@ -47,7 +47,13 @@ export class Effects {
       s.position.set(x, y);
       const a = -Math.PI / 2 + (rand() - 0.5) * 2.2;
       const v = 50 + rand() * 70;
-      this.bits.push({ sprite: s, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1.4 + rand(), t: 0 });
+      this.bits.push({
+        sprite: s,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v,
+        life: 1.4 + rand(),
+        t: 0,
+      });
     }
   }
 

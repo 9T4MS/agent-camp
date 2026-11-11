@@ -191,7 +191,7 @@ export class DemoFeed {
   }
 
   private emit(msg: ServerToViewer) {
-    if (!this.stopped) this.sink(msg);
+    if (!this.stopped) this.sink({ ...msg, ts: this.now() });
   }
 
   private snapshot(people: PersonView[]) {
@@ -271,7 +271,9 @@ export class DemoFeed {
       const ns = this.makeSession(this.agent(), "thinking", 0);
       ns.startedAt = this.now();
       p.sessions.push(ns);
-      this.emit(envelope("session.started", { personId: p.personId, session: structuredClone(ns) }));
+      this.emit(
+        envelope("session.started", { personId: p.personId, session: structuredClone(ns) }),
+      );
     }
   }
 }

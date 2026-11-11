@@ -2,7 +2,7 @@
  * DOM HUD over the canvas: top bar (office name, people, sessions, helpers, agent split,
  * clock), join banner, person side panel, reconnect sign. Pixel-styled via theme.css.
  */
-import { ACTIVITIES, type AgentKind, AGENT_COLORS } from "@agent-office/protocol";
+import { type ACTIVITIES, AGENT_COLORS, type AgentKind } from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
 import type { ConnectionStatus } from "./net/viewer.ts";
 import type { OfficeModel, OfficeStats, PersonState, SessionState } from "./state/officeModel.ts";
@@ -15,9 +15,17 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
 };
 
 const esc = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  s.replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  );
 
-const AGENT_LABEL: Record<AgentKind, string> = { claude: "Claude", codex: "Codex", pi: "Pi", unknown: "Agent" };
+const AGENT_LABEL: Record<AgentKind, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  pi: "Pi",
+  unknown: "Agent",
+};
 const ACTIVITY_LABEL: Record<(typeof ACTIVITIES)[number], string> = {
   typing: "typing",
   reading: "reading",
@@ -35,7 +43,11 @@ function duration(ms: number) {
 }
 
 /** Fun client-side badges for the side panel. */
-export function badgesFor(person: PersonState, sessions: SessionState[], now = Date.now()): string[] {
+export function badgesFor(
+  person: PersonState,
+  sessions: SessionState[],
+  now = Date.now(),
+): string[] {
   const out: string[] = [];
   const claudes = sessions.filter((s) => s.agent === "claude").length;
   if (claudes >= 2) out.push(`${claudes} Claudes at once`);
@@ -77,13 +89,21 @@ export class Hud {
   ) {
     this.root = host;
     const top = el("div", "hud-top");
-    this.name = el("div", "brand", `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span>`);
+    this.name = el(
+      "div",
+      "brand",
+      `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span>`,
+    );
     this.chips = el("div", "chips");
     this.clock = el("div", "clock");
     top.append(this.name, this.chips, this.clock);
     this.banner = el("div", "hud-banner pixel-box");
     this.panel = el("div", "hud-panel pixel-box");
-    this.reconnect = el("div", "hud-reconnect pixel-box", `<span class="blink">&#9632;</span> reconnecting&hellip;`);
+    this.reconnect = el(
+      "div",
+      "hud-reconnect pixel-box",
+      `<span class="blink">&#9632;</span> reconnecting&hellip;`,
+    );
     this.minimapHost = el("div", "hud-minimap pixel-box");
     host.append(top, this.banner, this.panel, this.reconnect, this.minimapHost);
     this.panel.addEventListener("pointerdown", (e) => e.stopPropagation());

@@ -3,11 +3,24 @@ import { AGENTS, avatarFromSeed, sessionVariation } from "@agent-office/protocol
 import { type Application, Container, Sprite } from "pixi.js";
 import { characterSheet, lookFor } from "../art/characters.ts";
 import { chairTexture, deskTexture, monitorTextures, propTexture } from "../art/desk.ts";
-import { alertTextures, botTextures, bubbleTexture, catTextures, dotsTextures } from "../art/fx.ts";
 import { ART, furnitureFrames } from "../art/furniture.ts";
+import { alertTextures, botTextures, bubbleTexture, catTextures, dotsTextures } from "../art/fx.ts";
 import type { ObjectKind } from "../world/map.ts";
 
-const NAMES = ["anna", "martin", "lea", "jonas", "sofia", "max", "mia", "felix", "clara", "paul", "nora", "elias"];
+const NAMES = [
+  "anna",
+  "martin",
+  "lea",
+  "jonas",
+  "sofia",
+  "max",
+  "mia",
+  "felix",
+  "clara",
+  "paul",
+  "nora",
+  "elias",
+];
 
 export function showGallery(app: Application) {
   const root = new Container();
@@ -15,7 +28,9 @@ export function showGallery(app: Application) {
   app.stage.addChild(root);
   NAMES.forEach((n, row) => {
     const agent = AGENTS[row % AGENTS.length]!;
-    const sheet = characterSheet(lookFor(avatarFromSeed(n), agent, row % 3 === 2 ? sessionVariation(n) : null));
+    const sheet = characterSheet(
+      lookFor(avatarFromSeed(n), agent, row % 3 === 2 ? sessionVariation(n) : null),
+    );
     sheet.frames.forEach((f, i) => {
       const s = new Sprite(f);
       s.position.set(4 + i * 17, 4 + row * 26);

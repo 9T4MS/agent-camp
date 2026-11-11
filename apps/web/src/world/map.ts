@@ -128,7 +128,7 @@ export function seatPoint(pod: number, desk: number): Point {
 /** Pixel rect of the floor strip in front of a pod (nameplate + aisle), for helper bots. */
 export function podAisle(pod: number): { x: number; y: number; w: number; h: number } {
   const o = podOrigin(pod);
-  return { x: o.x * TILE, y: (o.y + 3) * TILE + 2, w: DESKS_PER_POD * 2 * TILE, h: 2 * TILE + 6 };
+  return { x: o.x * TILE, y: (o.y + 4) * TILE + 4, w: DESKS_PER_POD * 2 * TILE, h: TILE + 6 };
 }
 export function podRowsFor(podCount: number): number {
   return Math.max(BASE_POD_ROWS, Math.ceil(podCount / POD_COLS));
@@ -271,7 +271,10 @@ const poi = (
   face: Facing,
   pose: PoiPose,
   spot?: Point,
-): Poi => (spot ? { id, area, tile: { x: tx, y: ty }, face, pose, spot } : { id, area, tile: { x: tx, y: ty }, face, pose });
+): Poi =>
+  spot
+    ? { id, area, tile: { x: tx, y: ty }, face, pose, spot }
+    : { id, area, tile: { x: tx, y: ty }, face, pose };
 
 const BASE_POIS: readonly Poi[] = [
   poi("coffee", "kitchen", 37, 4, "up", "play"),
@@ -342,7 +345,9 @@ export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
   const pois = BASE_POIS.map((p) => ({
     ...p,
     tile: { x: p.tile.x, y: shift(p.tile.y) },
-    ...(p.spot ? { spot: { x: p.spot.x, y: p.spot.y + (p.spot.y >= GROW_AT * TILE ? extra * TILE : 0) } } : {}),
+    ...(p.spot
+      ? { spot: { x: p.spot.x, y: p.spot.y + (p.spot.y >= GROW_AT * TILE ? extra * TILE : 0) } }
+      : {}),
   }));
   const deskBottom = POD_Y0 + podRows * POD_H; // exclusive
   const areas: Area[] = [

@@ -73,7 +73,12 @@ export function monitorTextures(): Texture[] {
       for (let r = 0; r < 4; r++) {
         const len = [9, 5, 11, 7, 4, 10][(r + shift) % 6]!;
         const ind = [0, 2, 2, 0, 4, 2][(r + shift) % 6]!;
-        pc.hline(sx + 1 + ind, sy + 1 + r * 2, Math.min(len, sw - 2 - ind), cols[(r + shift) % cols.length]!);
+        pc.hline(
+          sx + 1 + ind,
+          sy + 1 + r * 2,
+          Math.min(len, sw - 2 - ind),
+          cols[(r + shift) % cols.length]!,
+        );
       }
     };
     switch (i) {
@@ -107,7 +112,8 @@ export function monitorTextures(): Texture[] {
         break;
       default:
         pc.rect(sx, sy, sw, sh, C.cream);
-        for (let r = 0; r < 4; r++) pc.hline(sx + 2, sy + 1 + r * 2, 10 - ((r + i) % 3) * 2, C.grey);
+        for (let r = 0; r < 4; r++)
+          pc.hline(sx + 2, sy + 1 + r * 2, 10 - ((r + i) % 3) * 2, C.grey);
         break;
     }
     pc.at(0, 0);

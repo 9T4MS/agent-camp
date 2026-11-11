@@ -271,7 +271,8 @@ export function renderTerrain(map: OfficeMap): TerrainArt {
   }
   // lounge rug + doormat + pod rugs
   for (const ob of map.objects) {
-    if (ob.kind === "rug") drawRug(pc, ob.x * TILE + 4, ob.y * TILE + 4, 5 * TILE - 8, 3 * TILE - 8);
+    if (ob.kind === "rug")
+      drawRug(pc, ob.x * TILE + 4, ob.y * TILE + 4, 5 * TILE - 8, 3 * TILE - 8);
     if (ob.kind === "doormat") {
       const x = ob.x * TILE + 4;
       const y = ob.y * TILE + 4;

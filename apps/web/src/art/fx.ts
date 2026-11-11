@@ -2,7 +2,7 @@
  * Small animated bits: speech bubbles with activity icons, "!" and "..." bubbles,
  * puff clouds, confetti, helper bots, the office cat, glows and badges.
  */
-import { AGENT_PALETTES, type Activity, type AgentKind } from "@agent-office/protocol";
+import { type Activity, AGENT_PALETTES, type AgentKind } from "@agent-office/protocol";
 import { Rectangle, Texture } from "pixi.js";
 import { drawText, FONT_HEIGHT, fitText, measureText } from "./font.ts";
 import { C } from "./palette.ts";
@@ -327,20 +327,25 @@ export function zzzTextures(): Texture[] {
 }
 
 /** Whiteboard content: today's numbers + a tiny bar chart of the last readings. */
-export function whiteboardTexture(now: number, peak: number, started: number, history: number[]): Texture {
+export function whiteboardTexture(
+  now: number,
+  peak: number,
+  started: number,
+  history: number[],
+): Texture {
   const w = 44;
-  const h = 18;
+  const h = 19;
   const pc = new PixelCanvas(w, h);
   drawText(pc, 1, 1, "TODAY", C.red);
   drawText(pc, 1, 7, `NOW ${now}`, C.navy);
-  drawText(pc, 1, 13 - 1, `PEAK ${peak}`, C.moss);
+  drawText(pc, 1, 13, `PEAK ${peak}`, C.moss);
   void started;
   const bars = history.slice(-8);
   const max = Math.max(1, ...bars);
   bars.forEach((v, i) => {
     const bh = Math.max(1, Math.round((v / max) * 12));
-    pc.rect(30 + i * 2, 16 - bh, 1, bh, i === bars.length - 1 ? C.red : C.sky);
+    pc.rect(30 + i * 2, 17 - bh, 1, bh, i === bars.length - 1 ? C.red : C.sky);
   });
-  pc.hline(29, 17, 15, C.grey);
+  pc.hline(29, 18, 15, C.grey);
   return Texture.from(pc.toCanvas());
 }

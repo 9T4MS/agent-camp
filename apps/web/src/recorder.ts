@@ -21,7 +21,9 @@ export async function captureSnapshot(app: Application, scene: OfficeScene): Pro
     root.position.set(0, 0);
     app.renderer.render({ container: root, target: rt, clear: true });
     const canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
-    return await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
+    return await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/png"),
+    );
   } catch {
     return null;
   } finally {

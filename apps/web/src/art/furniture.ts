@@ -368,7 +368,12 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
         "#....#....#...#..#.",
         "#....####.#...#..#.",
       ];
-      pc.sprite(4, 4, P.map((r) => r.replace(/#/g, "a")), { a });
+      pc.sprite(
+        4,
+        4,
+        P.map((r) => r.replace(/#/g, "a")),
+        { a },
+      );
       pc.hline(26, 6, 18, b);
       pc.hline(26, 9, 14, b);
       pc.set(44, 9, b);

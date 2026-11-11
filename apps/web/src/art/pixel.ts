@@ -129,8 +129,7 @@ export class PixelCanvas {
     for (let y = ry; y < ry + rh; y++) {
       for (let x = rx; x < rx + rw; x++) {
         if (src[y * w + x]! >>> 24 > 0) continue;
-        let hit =
-          opaque(x - 1, y) || opaque(x + 1, y) || opaque(x, y - 1) || opaque(x, y + 1);
+        let hit = opaque(x - 1, y) || opaque(x + 1, y) || opaque(x, y - 1) || opaque(x, y + 1);
         if (!hit && diagonal) {
           hit =
             opaque(x - 1, y - 1) ||

@@ -312,12 +312,24 @@ export class OfficeModel {
       const previous = s.activity;
       s.activity = sv.activity;
       s.activitySince = this.now();
-      out.push({ kind: "activityChanged", personId, sessionId: s.sessionId, activity: s.activity, previous });
+      out.push({
+        kind: "activityChanged",
+        personId,
+        sessionId: s.sessionId,
+        activity: s.activity,
+        previous,
+      });
     }
     if (s.subagents !== sv.subagents) {
       const previous = s.subagents;
       s.subagents = sv.subagents;
-      out.push({ kind: "subagentsChanged", personId, sessionId: s.sessionId, count: s.subagents, previous });
+      out.push({
+        kind: "subagentsChanged",
+        personId,
+        sessionId: s.sessionId,
+        count: s.subagents,
+        previous,
+      });
     }
   }
 

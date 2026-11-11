@@ -29,8 +29,8 @@ import {
   chairTile,
   DESKS_PER_POD,
   type Facing,
-  type Point,
   type Poi,
+  type Point,
   podAisle,
   TILE,
 } from "./map.ts";
@@ -40,7 +40,12 @@ import { findPath } from "./pathing.ts";
 const WALK_SPEED = 44;
 const BUBBLE_SECONDS = 3.5;
 
-export type Moment = { kind: "joined" | "started" | "waiting" | "left"; x: number; y: number; name: string };
+export type Moment = {
+  kind: "joined" | "started" | "waiting" | "left";
+  x: number;
+  y: number;
+  name: string;
+};
 
 type Mode = "queued" | "walking" | "seated" | "poi" | "waving" | "leaving";
 type Goal = "desk" | "poi" | "exit";
@@ -142,7 +147,12 @@ export class CharacterManager {
           const s = this.model.sessions.get(c.sessionId);
           if (s) c.sheet = this.sheetFor(p, s);
         }
-        this.scene.setPodOwner(p.pod, { personId: p.personId, name: p.name, avatar: p.avatar, accent: C.leaf });
+        this.scene.setPodOwner(p.pod, {
+          personId: p.personId,
+          name: p.name,
+          avatar: p.avatar,
+          accent: C.leaf,
+        });
         break;
       }
       case "sessionAdded":
@@ -159,7 +169,10 @@ export class CharacterManager {
         if (s.activity === "waiting") {
           this.onMoment({ kind: "waiting", x: c.x, y: c.y - 16, name: this.nameOf(c.personId) });
         }
-        if (s.activity !== "idle" && (c.mode === "poi" || (c.mode === "walking" && c.goal === "poi"))) {
+        if (
+          s.activity !== "idle" &&
+          (c.mode === "poi" || (c.mode === "walking" && c.goal === "poi"))
+        ) {
           this.goToDesk(c);
         }
         break;
@@ -208,7 +221,15 @@ export class CharacterManager {
       seat,
       seededRandom(`helpers:${sessionId}`),
     );
-    const c = new SessionCharacter(sessionId, p.personId, s.agent, p.pod, s.desk, this.sheetFor(p, s), helpers);
+    const c = new SessionCharacter(
+      sessionId,
+      p.personId,
+      s.agent,
+      p.pod,
+      s.desk,
+      this.sheetFor(p, s),
+      helpers,
+    );
     this.chars.set(sessionId, c);
     this.scene.objects.addChild(c.sprite);
     this.scene.fx.addChild(c.marker, c.bubble);
@@ -364,7 +385,9 @@ export class CharacterManager {
     for (const [pod, t] of this.pendingPodClear) {
       const left = t - dt;
       const owner = [...this.model.people.values()].find((p) => p.pod === pod);
-      const busy = [...this.chars.values()].some((c) => c.pod === pod && (!owner || c.personId !== owner.personId));
+      const busy = [...this.chars.values()].some(
+        (c) => c.pod === pod && (!owner || c.personId !== owner.personId),
+      );
       if (owner && !busy) {
         this.pendingPodClear.delete(pod);
         continue;
@@ -400,7 +423,8 @@ export class CharacterManager {
         c.delay -= dt;
         if (c.delay <= 0) {
           c.sprite.visible = true;
-          if (c.hasDesk) this.walkTo(c, chairTile(c.pod, c.desk), "desk", this.seatOf(c.pod, c.desk));
+          if (c.hasDesk)
+            this.walkTo(c, chairTile(c.pod, c.desk), "desk", this.seatOf(c.pod, c.desk));
           else this.idleWander(c);
         }
         break;
@@ -464,7 +488,10 @@ export class CharacterManager {
         const frames = alertTextures();
         c.marker.texture = frames[Math.floor(time * 3) % 2]!;
         c.marker.visible = true;
-        c.marker.position.set(Math.round(c.x + 5), Math.round(headY - 3 + Math.round(Math.sin(time * 6))));
+        c.marker.position.set(
+          Math.round(c.x + 5),
+          Math.round(headY - 3 + Math.round(Math.sin(time * 6))),
+        );
       } else if (activity === "thinking") {
         const frames = dotsTextures();
         c.marker.texture = frames[Math.floor(time * 2.5) % 3]!;
@@ -520,7 +547,8 @@ export class CharacterManager {
       const dy = wp.y - c.y;
       const dist = Math.hypot(dx, dy);
       if (dist > 0.01) {
-        c.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+        c.facing =
+          Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
       }
       if (dist <= budget) {
         c.x = wp.x;
@@ -567,12 +595,19 @@ export class CharacterManager {
   idleSpots(): Point[] {
     const out: Point[] = [];
     for (const c of this.chars.values()) {
-      if (c.mode === "poi" || (c.mode === "seated" && this.activityOf(c) === "idle")) out.push({ x: c.x, y: c.y });
+      if (c.mode === "poi" || (c.mode === "seated" && this.activityOf(c) === "idle"))
+        out.push({ x: c.x, y: c.y });
     }
     return out;
   }
 }
 
 function standAnim(f: Facing): AnimName {
-  return f === "up" ? "idleUp" : f === "left" ? "idleLeft" : f === "right" ? "idleRight" : "idleDown";
+  return f === "up"
+    ? "idleUp"
+    : f === "left"
+      ? "idleLeft"
+      : f === "right"
+        ? "idleRight"
+        : "idleDown";
 }

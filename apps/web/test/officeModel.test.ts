@@ -1,0 +1,194 @@
+import { describe, expect, test } from "bun:test";
+import {
+  avatarFromSeed,
+  envelope,
+  type PersonView,
+  type SessionView,
+} from "@agent-office/protocol";
+import { DemoFeed } from "../src/demo/demoFeed.ts";
+import { OfficeModel } from "../src/state/officeModel.ts";
+
+const T0 = new Date(2026, 10, 10, 12, 0, 0).getTime();
+const sess = (id: string, extra: Partial<SessionView> = {}): SessionView => ({
+  sessionId: `laptop:${id}`,
+  agent: "claude",
+  project: "agent-office",
+  activity: "typing",
+  subagents: 0,
+  startedAt: T0 - 1000,
+  ...extra,
+});
+const person = (name: string, sessions: SessionView[] = []): PersonView => ({
+  personId: name.toLowerCase(),
+  name,
+  avatar: avatarFromSeed(name.toLowerCase()),
+  sessions,
+  joinedAt: T0 - 5000,
+});
+const snap = (people: PersonView[]) =>
+  envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
+
+describe("OfficeModel", () => {
+  test("snapshot adds people and sessions instantly", () => {
+    const m = new OfficeModel(() => T0);
+    const ch = m.apply(snap([person("Anna", [sess("a1"), sess("a2", { agent: "codex" })])]));
+    expect(ch.map((c) => c.kind)).toEqual([
+      "officeRenamed",
+      "personAdded",
+      "sessionAdded",
+      "sessionAdded",
+    ]);
+    expect(ch.every((c) => !("instant" in c) || c.instant)).toBe(true);
+    expect(m.officeName).toBe("Camp");
+    const st = m.stats();
+    expect(st).toMatchObject({ people: 1, sessions: 2, peakToday: 2, startedToday: 2 });
+    expect(st.byAgent).toMatchObject({ claude: 1, codex: 1 });
+  });
+
+  test("pods and desks are stable and reuse the lowest free slot", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna", [sess("a1")]), person("Ben", [sess("b1")])]));
+    expect(m.people.get("anna")!.pod).toBe(0);
+    expect(m.people.get("ben")!.pod).toBe(1);
+    m.apply(envelope("person.left", { personId: "anna" }));
+    m.apply(envelope("person.joined", { person: person("Cleo", [sess("c1")]) }));
+    expect(m.people.get("cleo")!.pod).toBe(0);
+    m.apply(envelope("session.started", { personId: "ben", session: sess("b2") }));
+    m.apply(envelope("session.started", { personId: "ben", session: sess("b3") }));
+    expect(m.sessionsOf("ben").map((s) => s.desk)).toEqual([0, 1, 2]);
+    m.apply(envelope("session.ended", { personId: "ben", sessionId: "laptop:b2" }));
+    m.apply(envelope("session.started", { personId: "ben", session: sess("b4") }));
+    expect(m.sessions.get("laptop:b4")!.desk).toBe(1);
+  });
+
+  test("events produce animated changes", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([]));
+    const joined = m.apply(envelope("person.joined", { person: person("Anna", [sess("a1")]) }));
+    expect(joined).toEqual([
+      { kind: "personAdded", personId: "anna", instant: false },
+      { kind: "sessionAdded", personId: "anna", sessionId: "laptop:a1", instant: false },
+    ]);
+    const act = m.apply(
+      envelope("session.activityChanged", {
+        personId: "anna",
+        sessionId: "laptop:a1",
+        activity: "waiting",
+        previous: "typing",
+      }),
+    );
+    expect(act).toEqual([
+      {
+        kind: "activityChanged",
+        personId: "anna",
+        sessionId: "laptop:a1",
+        activity: "waiting",
+        previous: "typing",
+      },
+    ]);
+    const sub = m.apply(
+      envelope("subagent.spawned", { personId: "anna", sessionId: "laptop:a1", count: 1 }),
+    );
+    expect(sub[0]).toMatchObject({ kind: "subagentsChanged", count: 1, previous: 0 });
+    expect(m.stats().subagents).toBe(1);
+    const left = m.apply(envelope("person.left", { personId: "anna" }));
+    expect(left.map((c) => c.kind)).toEqual(["sessionRemoved", "personRemoved"]);
+    expect(m.stats()).toMatchObject({ people: 0, sessions: 0, peakToday: 1 });
+  });
+
+  test("unknown sessions are ignored and duplicates are idempotent", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna", [sess("a1")])]));
+    expect(m.apply(envelope("session.ended", { personId: "anna", sessionId: "nope" }))).toEqual([]);
+    expect(m.apply(envelope("session.started", { personId: "anna", session: sess("a1") }))).toEqual(
+      [],
+    );
+    expect(
+      m.apply(
+        envelope("session.activityChanged", {
+          personId: "anna",
+          sessionId: "laptop:a1",
+          activity: "typing",
+          previous: "typing",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("session for an unknown person creates a placeholder person", () => {
+    const m = new OfficeModel(() => T0);
+    const ch = m.apply(envelope("session.started", { personId: "zoe", session: sess("z1") }));
+    expect(ch.map((c) => c.kind)).toEqual(["personAdded", "sessionAdded"]);
+    expect(m.people.get("zoe")!.name).toBe("zoe");
+  });
+
+  test("a reconnect snapshot reconciles silently", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna", [sess("a1"), sess("a2")]), person("Ben", [sess("b1")])]));
+    const ch = m.apply(
+      snap([
+        person("Anna", [sess("a1", { activity: "reading" }), sess("a3")]),
+        person("Cleo", [sess("c1")]),
+      ]),
+    );
+    const kinds = ch.map(
+      (c) => `${c.kind}:${"sessionId" in c ? c.sessionId : "personId" in c ? c.personId : ""}`,
+    );
+    expect(kinds).toContain("sessionRemoved:laptop:b1");
+    expect(kinds).toContain("personRemoved:ben");
+    expect(kinds).toContain("sessionRemoved:laptop:a2");
+    expect(kinds).toContain("activityChanged:laptop:a1");
+    expect(kinds).toContain("sessionAdded:laptop:a3");
+    expect(kinds).toContain("personAdded:cleo");
+    expect(ch.filter((c) => "instant" in c).every((c) => "instant" in c && c.instant)).toBe(true);
+    expect(m.sessions.get("laptop:a3")!.desk).toBe(1);
+  });
+
+  test("avatar updates are reported", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna")]));
+    const avatar = { ...avatarFromSeed("anna"), hairStyle: "mohawk" as const };
+    expect(m.apply(envelope("avatar.updated", { personId: "anna", avatar }))).toEqual([
+      { kind: "avatarChanged", personId: "anna" },
+    ]);
+    expect(m.people.get("anna")!.avatar.hairStyle).toBe("mohawk");
+  });
+
+  test("podCount follows the highest pod in use", () => {
+    const m = new OfficeModel(() => T0);
+    const people = Array.from({ length: 14 }, (_, i) => person(`P${i}`, [sess(`s${i}`)]));
+    m.apply(snap(people));
+    expect(m.podCount()).toBe(14);
+  });
+});
+
+describe("DemoFeed", () => {
+  const run = (mode: "busy" | "one" | "empty" | "join") => {
+    const msgs: unknown[] = [];
+    const feed = new DemoFeed(
+      { mode, seed: "x" },
+      (m) => msgs.push(m),
+      () => T0,
+    );
+    feed.start();
+    feed.stop();
+    return msgs as { type: string; data: { people: PersonView[] } }[];
+  };
+  test("busy demo: 12 people, 30 sessions, applies cleanly", () => {
+    const [first] = run("busy");
+    expect(first!.type).toBe("office.snapshot");
+    expect(first!.data.people.length).toBe(12);
+    expect(first!.data.people.flatMap((p) => p.sessions).length).toBe(30);
+    const m = new OfficeModel(() => T0);
+    m.apply(first as never);
+    expect(m.stats().sessions).toBe(30);
+  });
+  test("deterministic per seed", () => {
+    const strip = (x: unknown) => JSON.stringify(x).replace(/"id":"[^"]+"/g, "");
+    expect(strip(run("busy"))).toBe(strip(run("busy")));
+  });
+  test("empty and one", () => {
+    expect(run("empty")[0]!.data.people).toEqual([]);
+    expect(run("one")[0]!.data.people[0]!.sessions.length).toBe(1);
+  });
+});
