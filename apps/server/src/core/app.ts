@@ -4,6 +4,8 @@
  * sockets are abstracted behind `Transport` and identified by string ids.
  */
 import {
+  AvatarEditRequest,
+  type AvatarEditResponse,
   envelope,
   HistoryRow,
   InteractRequest,
@@ -57,6 +59,8 @@ export const BACKFILL_MAX_ROWS = 50_000;
 /** One interaction per viewer (IP) this often, and one notification per person this often. */
 export const INTERACT_MIN_INTERVAL_MS = 2_000;
 export const POKE_PER_PERSON_MS = 10_000;
+/** One look change per viewer (IP) this often. */
+export const LOOK_MIN_INTERVAL_MS = 1_000;
 
 const POKE_TEXT = {
   wave: "waved at you 👋",
@@ -98,6 +102,7 @@ export class OfficeApp {
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
   private lastPoke = new Map<string, number>();
+  private lastLook = new Map<string, number>();
 
   constructor(
     private env: AppEnv,
@@ -234,6 +239,26 @@ export class OfficeApp {
 
     if (path === "/api/interact" && method === "POST") return this.interact(req);
 
+    const look = /^\/api\/people\/([^/]{1,64})\/avatar$/.exec(path);
+    if (look) {
+      let personId: string;
+      try {
+        personId = decodeURIComponent(look[1]!);
+      } catch {
+        return json({ error: "bad person id" }, { status: 400 });
+      }
+      if (method === "GET") {
+        const p = this.hub.state().people.find((x) => x.personId === personId);
+        if (!p) return json({ error: "not in the office" }, { status: 404 });
+        return json({
+          ok: true,
+          avatar: p.avatar,
+          custom: this.hub.isCustomLook(personId),
+        } satisfies AvatarEditResponse);
+      }
+      if (method === "PUT") return this.editLook(req, personId);
+    }
+
     if (path === "/api/stats" && method === "GET") {
       const days = Number(url.searchParams.get("days") ?? 0);
       const since = days > 0 ? this.now() - days * 86_400_000 : 0;
@@ -331,6 +356,51 @@ export class OfficeApp {
 
     if (path.startsWith("/api/")) return json({ error: "not found" }, { status: 404 });
     return null;
+  }
+
+  /** Look editor: pin a custom look or go back to the automatic one. */
+  private async editLook(req: Request, personId: string): Promise<Response> {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const parsed = AvatarEditRequest.safeParse(body);
+    if (!parsed.success)
+      return json({ error: z.prettifyError(parsed.error).slice(0, 500) }, { status: 400 });
+    const now = this.now();
+    const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+    if (now - (this.lastLook.get(who) ?? 0) < LOOK_MIN_INTERVAL_MS)
+      return json({ error: "slow down" }, { status: 429 });
+    this.lastLook.set(who, now);
+    if (this.lastLook.size > 500) this.lastLook.clear();
+
+    const r = this.hub.setCustomAvatar(personId, parsed.data.avatar, now);
+    if (!r) return json({ error: "not in the office" }, { status: 404 });
+    this.hub.log(`look ${personId} edited by ${parsed.data.from || "someone"}`);
+    this.publish(r.events);
+    let avatar = r.avatar;
+    if (r.avatarJob) {
+      const job = r.avatarJob;
+      const res = await this.genui.resolve(job);
+      this.publish(
+        this.hub.setAvatar(
+          job.personId,
+          res.avatar,
+          res.key,
+          this.now(),
+          job.selfDescription ?? "",
+        ),
+      );
+      avatar = res.avatar;
+    }
+    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    return json({
+      ok: true,
+      avatar,
+      custom: parsed.data.avatar !== null,
+    } satisfies AvatarEditResponse);
   }
 
   private async interact(req: Request): Promise<Response> {

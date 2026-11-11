@@ -5,7 +5,7 @@
  */
 import {
   type Activity,
-  type AvatarSpec,
+  AvatarSpec,
   avatarFromSeed,
   CLOSE_BAD_MESSAGE,
   CLOSE_BAD_PASSWORD,
@@ -184,7 +184,15 @@ export class Hub {
           // fresh liveness window: live connectors heartbeat again within 30 s
           this.connectors.set(c.clientId, { ...c, lastSeen: Math.max(c.lastSeen, now) });
         }
-        for (const person of p.people ?? []) this.people.set(person.personId, person);
+        for (const person of p.people ?? []) {
+          // looks persisted before newer catalog fields existed get their defaults
+          const look = AvatarSpec.safeParse(person.avatar);
+          if (look.success) person.avatar = look.data;
+          // the custom look is the source of truth, even if the state was written before it
+          const custom = this.store.getCustomAvatar(person.personId);
+          if (custom) person.avatar = custom;
+          this.people.set(person.personId, person);
+        }
       } catch {
         // corrupt state: start empty
       }
@@ -258,8 +266,57 @@ export class Hub {
     const p = this.people.get(personId);
     if (p?.lookKey && key.replace(/:fallback$/, "") !== p.lookKey) return [];
     this.store.putAvatar(personId, avatar, key, selfDescription ?? p?.selfDescription ?? "");
+    // a custom look stays on; the automatic one waits in its row for "Automatic"
+    if (this.store.getCustomAvatar(personId)) return [];
     if (p) p.avatar = avatar;
     return this.commit(now);
+  }
+
+  /**
+   * Look editor: pin a custom look (catalog ids, already validated) or, with `null`, drop it
+   * and go back to the automatic look. The automatic look is kept in its own row, so going
+   * back is free; an avatar job is returned only when that row is missing or was made for an
+   * older description. Only for people in the office; returns null otherwise.
+   */
+  setCustomAvatar(
+    personId: string,
+    avatar: AvatarSpec | null,
+    now: number,
+  ): { events: ViewerEvent[]; avatarJob?: AvatarJob; avatar: AvatarSpec } | null {
+    const p = this.people.get(personId);
+    if (!p) return null;
+    const stored = this.store.getAvatar(personId);
+    if (p.selfDescription === undefined) p.selfDescription = stored?.selfDescription ?? "";
+    if (avatar) {
+      this.store.putCustomAvatar(personId, avatar);
+      p.avatar = avatar;
+      this.log(`look ${personId} custom`);
+      return { events: this.commit(now), avatar };
+    }
+    this.store.putCustomAvatar(personId, null);
+    const keyFn = this.cfg.avatarKey ?? defaultAvatarKey;
+    const want = keyFn(personId, p.selfDescription || undefined);
+    p.lookKey = want;
+    p.avatar = stored?.avatar ?? avatarFromSeed(personId);
+    const events = this.commit(now);
+    this.log(`look ${personId} back to automatic`);
+    if (stored && stored.key.replace(/:fallback$/, "") === want)
+      return { events, avatar: p.avatar };
+    return {
+      events,
+      avatar: p.avatar,
+      avatarJob: {
+        personId,
+        name: p.name,
+        key: want,
+        ...(p.selfDescription ? { selfDescription: p.selfDescription } : {}),
+      },
+    };
+  }
+
+  /** Whether a person's look was picked in the look editor. */
+  isCustomLook(personId: string): boolean {
+    return this.store.getCustomAvatar(personId) !== null;
   }
 
   state(): OfficeState {
@@ -409,13 +466,14 @@ export class Hub {
   private ensurePerson(b: Binding, now: number): AvatarJob | undefined {
     let p = this.people.get(b.personId);
     const stored = this.store.getAvatar(b.personId);
+    const custom = this.store.getCustomAvatar(b.personId);
     if (!p) {
       p = {
         personId: b.personId,
         name: b.name,
         joinedAt: now,
         goneSince: null,
-        avatar: stored?.avatar ?? avatarFromSeed(b.personId),
+        avatar: custom ?? stored?.avatar ?? avatarFromSeed(b.personId),
       };
       this.people.set(b.personId, p);
     }
@@ -431,6 +489,20 @@ export class Hub {
     const desc = b.selfDescription ?? "";
     if (desc && desc !== p.selfDescription) p.selfDescription = desc;
 
+    // a look picked in the look editor wins over any description: no job while it is on (a
+    // new description is remembered in the automatic row, whose key then no longer matches,
+    // so "Automatic" regenerates for it)
+    if (custom) {
+      p.avatar = custom;
+      if (!stored || stored.selfDescription !== p.selfDescription)
+        this.store.putAvatar(
+          b.personId,
+          stored?.avatar ?? avatarFromSeed(b.personId),
+          stored?.key ?? "",
+          p.selfDescription,
+        );
+      return undefined;
+    }
     const keyFn = this.cfg.avatarKey ?? defaultAvatarKey;
     const want = keyFn(b.personId, p.selfDescription || undefined);
     if (p.lookKey === want) return undefined;
@@ -584,6 +656,7 @@ export class Hub {
     const ps = [...this.people.values()].map((p) => [
       p.personId,
       p.name,
+      JSON.stringify(p.avatar),
       p.goneSince,
       p.joinedAt,
       p.selfDescription ?? "",

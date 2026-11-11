@@ -4,13 +4,25 @@
  * Pixel-styled via theme.css.
  */
 import {
+  ACCESSORIES,
   type ACTIVITIES,
   type Activity,
   AGENT_COLORS,
   AGENT_PALETTES,
   type AgentKind,
+  type AvatarSpec,
+  DESK_MESS_LEVELS,
+  DESK_PROPS,
+  FACIAL_HAIR,
+  GLASSES,
+  HAIR_COLORS,
+  HAIR_STYLES,
+  HELD_ITEMS,
   type InteractionKind,
+  MAX_DESK_PROPS,
+  OUTFITS,
   type PersonDayResponse,
+  SKIN_TONES,
 } from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
 import type { ConnectionStatus } from "./net/viewer.ts";
@@ -68,6 +80,27 @@ export type PokeRequest = {
 };
 /** What the HUD shows after a poke: a short status line. */
 export type PokeResult = { ok: boolean; message: string };
+/** After saving in the look editor. */
+export type LookResult = { ok: boolean; message: string; avatar?: AvatarSpec };
+
+type LookField = Exclude<keyof AvatarSpec, "deskProps" | "deskMess">;
+/** The look editor's dropdowns, in order. */
+const LOOK_FIELDS: {
+  key: LookField;
+  label: string;
+  options: readonly { id: string; label: string }[];
+}[] = [
+  { key: "hairStyle", label: "Hair", options: HAIR_STYLES },
+  { key: "hairColor", label: "Hair color", options: HAIR_COLORS },
+  { key: "skinTone", label: "Skin", options: SKIN_TONES },
+  { key: "facialHair", label: "Face", options: FACIAL_HAIR },
+  { key: "glasses", label: "Glasses", options: GLASSES },
+  { key: "accessory", label: "Head", options: ACCESSORIES },
+  { key: "outfit", label: "Outfit", options: OUTFITS },
+  { key: "leftHand", label: "Left hand", options: HELD_ITEMS },
+  { key: "rightHand", label: "Right hand", options: HELD_ITEMS },
+];
+const MESS_LABEL = ["spotless", "a bit messy", "messy", "chaos"] as const;
 
 const POKES: { kind: InteractionKind; label: string; title: string }[] = [
   { kind: "wave", label: "&#128075; Wave", title: "Wave (pops up on their Mac)" },
@@ -183,6 +216,14 @@ export class Hud {
   /** survives panel re-renders, so a half-typed message is not lost */
   private pokeBox: HTMLElement | null = null;
   private pokeFor: string | null = null;
+  /** look editor: save a custom look (null = back to automatic); null hides the editor */
+  onEditLook: ((personId: string, avatar: AvatarSpec | null) => Promise<LookResult>) | null = null;
+  /** preview canvases (front, side, at the desk) of a look in a given agent's colors */
+  previewLook: (avatar: AvatarSpec, agent: AgentKind) => HTMLCanvasElement[] = () => [];
+  /** whether a person's look is custom (GET /api/people/:id/avatar); null = unknown */
+  fetchLookCustom: (personId: string) => Promise<boolean | null> = async () => null;
+  /** open look editor (survives model re-renders) */
+  private lookEditor: { personId: string; box: HTMLElement } | null = null;
   /** a session row in the person panel was clicked */
   onOpenSession: (sessionId: string) => void = (id) => this.openSession(id);
 
@@ -390,6 +431,7 @@ export class Hud {
 
   openPanel(personId: string) {
     if (this.opts.kiosk) return;
+    if (this.lookEditor?.personId !== personId) this.lookEditor = null;
     this.panelPerson = personId;
     this.panelSession = null;
     this.renderPanel();
@@ -408,6 +450,7 @@ export class Hud {
   }
 
   closePanel() {
+    this.lookEditor = null;
     this.panelPerson = null;
     this.panelSession = null;
     this.panel.classList.remove("show", "card");
@@ -456,6 +499,16 @@ export class Hud {
       // the session ended: fall back to its person
       this.panelSession = null;
     }
+    if (this.lookEditor?.personId === p.personId) {
+      // keep the editor (and the half-picked look) through model updates
+      if (!this.lookEditor.box.isConnected) {
+        this.panel.replaceChildren(this.lookEditor.box);
+        this.panel.classList.remove("card");
+        this.panel.classList.add("show");
+        this.onPanelChange();
+      }
+      return;
+    }
     const sessions = this.model.sessionsOf(p.personId);
     const now = Date.now();
     const items = sessions
@@ -483,7 +536,11 @@ export class Hud {
         <div class="since">${sessions.length} session${sessions.length === 1 ? "" : "s"}</div>
       </div></header>
       <ul>${items || "<li>No agents running</li>"}</ul>
-      <div class="badges">${badges}</div>`;
+      <div class="badges">${badges}</div>
+      ${this.onEditLook ? '<button type="button" class="pixel-btn edit-look" title="Pick hair, outfit, things in hand...">&#9998; Customize look</button>' : ""}`;
+    this.panel
+      .querySelector(".edit-look")
+      ?.addEventListener("click", () => this.openLookEditor(p.personId));
     this.mountPoke(p);
     const portrait = this.portrait(p.personId);
     if (portrait) {
@@ -501,6 +558,123 @@ export class Hud {
     this.panel.classList.remove("card");
     this.panel.classList.add("show");
     this.onPanelChange();
+  }
+
+  /** Open the look editor for a person (in the side panel). */
+  openLookEditor(personId: string) {
+    const p = this.model.people.get(personId);
+    if (!p || !this.onEditLook || this.opts.kiosk) return;
+    this.panelPerson = personId;
+    this.panelSession = null;
+    this.lookEditor = { personId, box: this.buildLookEditor(p) };
+    this.panel.replaceChildren(this.lookEditor.box);
+    this.panel.classList.remove("card");
+    this.panel.classList.add("show");
+    this.panel.scrollTop = 0;
+    this.onPanelChange();
+  }
+
+  private closeLookEditor() {
+    this.lookEditor = null;
+    this.renderPanel();
+  }
+
+  private buildLookEditor(p: PersonState): HTMLElement {
+    const box = el("div", "look-editor");
+    const draft: AvatarSpec = structuredClone(p.avatar);
+    const agent = this.model.sessionsOf(p.personId)[0]?.agent ?? "claude";
+    const field = (f: (typeof LOOK_FIELDS)[number]) =>
+      `<label><span>${f.label}</span><select name="${f.key}">${f.options
+        .map(
+          (o) =>
+            `<option value="${esc(o.id)}"${draft[f.key] === o.id ? " selected" : ""}>${esc(o.label)}</option>`,
+        )
+        .join("")}</select></label>`;
+    box.innerHTML = `
+      <button class="pixel-btn close" aria-label="Back">&times;</button>
+      <h2>${esc(p.name)}'s look</h2>
+      <div class="look-preview" aria-label="preview"></div>
+      <div class="look-note dim">Only you can see this until you save. Saving pins the look; a new description no longer changes it.</div>
+      <form class="look-form">
+        ${LOOK_FIELDS.map(field).join("")}
+        <fieldset class="look-props"><legend>Desk (up to ${MAX_DESK_PROPS})</legend>${DESK_PROPS.map(
+          (d) =>
+            `<label class="chk"><input type="checkbox" name="prop" value="${esc(d.id)}"${draft.deskProps.includes(d.id) ? " checked" : ""}>${esc(d.label)}</label>`,
+        ).join("")}</fieldset>
+        <label><span>Desk mess</span><select name="deskMess">${DESK_MESS_LEVELS.map(
+          (m) =>
+            `<option value="${m}"${draft.deskMess === m ? " selected" : ""}>${MESS_LABEL[m]}</option>`,
+        ).join("")}</select></label>
+        <div class="look-btns">
+          <button class="pixel-btn save" type="submit">Save look</button>
+          <button class="pixel-btn auto" type="button" title="Drop the custom look: back to the one from the description">Automatic</button>
+        </div>
+        <div class="poke-status look-status" aria-live="polite"></div>
+      </form>`;
+    const preview = box.querySelector<HTMLElement>(".look-preview")!;
+    const status = box.querySelector<HTMLElement>(".look-status")!;
+    const form = box.querySelector<HTMLFormElement>("form")!;
+    const autoBtn = box.querySelector<HTMLButtonElement>(".auto")!;
+    const drawPreview = () => preview.replaceChildren(...this.previewLook(draft, agent));
+    drawPreview();
+    const say = (msg: string, ok?: boolean) => {
+      status.textContent = msg;
+      status.className = `poke-status look-status${ok === undefined ? "" : ok ? " ok" : " err"}`;
+    };
+    void this.fetchLookCustom(p.personId).then((custom) => {
+      if (custom === false) autoBtn.title = "This look is already automatic";
+      if (custom) say("custom look (picked here)");
+    });
+    form.addEventListener("change", (e) => {
+      const t = e.target as HTMLInputElement | HTMLSelectElement;
+      if (t.name === "prop") {
+        const boxes = [...form.querySelectorAll<HTMLInputElement>("input[name=prop]")];
+        const on = boxes.filter((b) => b.checked);
+        if (on.length > MAX_DESK_PROPS) {
+          (t as HTMLInputElement).checked = false;
+          say(`at most ${MAX_DESK_PROPS} things on the desk`, false);
+          return;
+        }
+        draft.deskProps = on.map((b) => b.value) as AvatarSpec["deskProps"];
+      } else if (t.name === "deskMess") {
+        draft.deskMess = Number(t.value) as AvatarSpec["deskMess"];
+      } else {
+        (draft as Record<string, unknown>)[t.name] = t.value;
+      }
+      say("");
+      drawPreview();
+    });
+    const save = async (avatar: AvatarSpec | null) => {
+      if (!this.onEditLook) return;
+      say("...");
+      const r = await this.onEditLook(p.personId, avatar);
+      say(r.message, r.ok);
+      if (r.ok && r.avatar && !avatar) {
+        // back to automatic: show the look the server picked
+        Object.assign(draft, r.avatar);
+        for (const f of LOOK_FIELDS) {
+          const sel = form.querySelector<HTMLSelectElement>(`select[name=${f.key}]`);
+          if (sel) sel.value = String(draft[f.key]);
+        }
+        for (const b of form.querySelectorAll<HTMLInputElement>("input[name=prop]"))
+          b.checked = draft.deskProps.includes(b.value as AvatarSpec["deskProps"][number]);
+        form.querySelector<HTMLSelectElement>("select[name=deskMess]")!.value = String(
+          draft.deskMess,
+        );
+        drawPreview();
+      }
+    };
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      void save(structuredClone(draft));
+    });
+    autoBtn.addEventListener("click", () => void save(null));
+    box.querySelector(".close")!.addEventListener("click", () => this.closeLookEditor());
+    // typing / arrow keys in the form must not trigger office keyboard shortcuts
+    box.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") e.stopPropagation();
+    });
+    return box;
   }
 
   /** The poke box at the bottom of the person panel and the agent card. */

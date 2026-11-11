@@ -20,8 +20,10 @@ import {
   GLASSES,
   HAIR_COLORS,
   HAIR_STYLES,
+  HELD_ITEMS,
   hashString,
   MAX_DESK_PROPS,
+  OUTFITS,
   SKIN_TONES,
 } from "@agent-office/protocol";
 import type { AvatarJob } from "./hub.ts";
@@ -60,6 +62,9 @@ export const AVATAR_JSON_SCHEMA = {
     "glasses",
     "facialHair",
     "accessory",
+    "outfit",
+    "leftHand",
+    "rightHand",
     "deskProps",
     "deskMess",
   ],
@@ -70,6 +75,9 @@ export const AVATAR_JSON_SCHEMA = {
     glasses: { type: "string", ...enumOf(AVATAR_CATALOG.glasses) },
     facialHair: { type: "string", ...enumOf(AVATAR_CATALOG.facialHair) },
     accessory: { type: "string", ...enumOf(AVATAR_CATALOG.accessories) },
+    outfit: { type: "string", ...enumOf(AVATAR_CATALOG.outfits) },
+    leftHand: { type: "string", ...enumOf(AVATAR_CATALOG.heldItems) },
+    rightHand: { type: "string", ...enumOf(AVATAR_CATALOG.heldItems) },
     deskProps: {
       type: "array",
       items: { type: "string", ...enumOf(AVATAR_CATALOG.deskProps) },
@@ -93,6 +101,9 @@ export const SYSTEM_PROMPT = [
   `glasses: ${list(GLASSES)}`,
   `facialHair: ${list(FACIAL_HAIR)}`,
   `accessory: ${list(ACCESSORIES)}`,
+  `outfit: ${list(OUTFITS)}`,
+  `leftHand, rightHand: ${list(HELD_ITEMS)}`,
+  "Use jacket and empty hands unless the description asks for another outfit or held items.",
   `deskProps (0-${MAX_DESK_PROPS}, distinct): ${list(DESK_PROPS)}`,
   "deskMess: 0 (spotless) .. 3 (chaos)",
 ].join("\n");

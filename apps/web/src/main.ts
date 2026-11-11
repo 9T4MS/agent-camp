@@ -16,11 +16,14 @@
 import "./ui/theme.css";
 import "./ui/office.css";
 import {
+  type AvatarEditResponse,
+  type AvatarSpec,
   type PersonDayResponse,
   parseViewerMessage,
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
+import { lookFor, lookPreview } from "./art/characters.ts";
 import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
@@ -357,6 +360,66 @@ async function boot() {
     }
   }
   if (!kiosk) hud.onPoke = poke;
+
+  /** Look editor: PUT the picked look (null = back to automatic). */
+  async function editLook(personId: string, avatar: AvatarSpec | null) {
+    if (demo) {
+      if (!avatar) return { ok: false, message: "demo: no automatic looks here" };
+      ingest({
+        v: 1,
+        type: "avatar.updated",
+        id: `demo-${Date.now()}`,
+        ts: Date.now(),
+        data: { personId, avatar },
+      });
+      return { ok: true, message: "saved (demo)", avatar };
+    }
+    try {
+      const from = localStorage.getItem("agent-office.viewerName")?.trim();
+      const r = await fetch(
+        `/api/people/${encodeURIComponent(personId)}/avatar${key ? `?key=${encodeURIComponent(key)}` : ""}`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ avatar, ...(from ? { from } : {}) }),
+        },
+      );
+      const body = (await r.json().catch(() => ({}))) as Partial<AvatarEditResponse> & {
+        error?: string;
+      };
+      if (r.status === 401) void loginIfLoggedOut();
+      if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
+      return {
+        ok: true,
+        message: avatar ? "saved, looking sharp!" : "back to the automatic look",
+        ...(body.avatar ? { avatar: body.avatar } : {}),
+      };
+    } catch {
+      return { ok: false, message: "could not reach the office" };
+    }
+  }
+  if (!kiosk) hud.onEditLook = editLook;
+  hud.previewLook = (avatar, agent) => {
+    const look = lookFor(avatar, agent, null);
+    // front, side, at the desk (back to the camera: the agent patch)
+    return [0, 31, 22].map((f) => {
+      const c = lookPreview(look, f, 4);
+      c.className = "look-canvas";
+      return c;
+    });
+  };
+  hud.fetchLookCustom = async (personId) => {
+    if (demo) return null;
+    try {
+      const r = await fetch(
+        `/api/people/${encodeURIComponent(personId)}/avatar${key ? `?key=${encodeURIComponent(key)}` : ""}`,
+      );
+      if (!r.ok) return null;
+      return ((await r.json()) as AvatarEditResponse).custom;
+    } catch {
+      return null;
+    }
+  };
 
   /** Agent card + ease the camera to the character (clear of the side panel). */
   const openSession = (sessionId: string) => {
