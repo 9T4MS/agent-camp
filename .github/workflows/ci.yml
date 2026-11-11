@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main] # main is handled by release.yml (CI already ran on the PR)
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  check:
+    name: Lint, typecheck, test, e2e, web, screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun test
+
+      - name: End-to-end (server + real connector + viewer)
+        run: bun run test:e2e
+
+      - name: Build web
+        run: bun run --filter @agent-office/web build
+
+      - name: Check for screenshots script
+        id: shots
+        run: |
+          if [ -n "$(jq -r '.scripts.screenshots // empty' package.json)" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No root 'screenshots' script yet; skipping screenshots"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Playwright Chromium
+        if: steps.shots.outputs.enabled == 'true'
+        run: bunx playwright install --with-deps chromium
+
+      - name: Screenshots
+        if: steps.shots.outputs.enabled == 'true'
+        run: bun run screenshots
+
+      - name: Upload screenshots
+        if: steps.shots.outputs.enabled == 'true' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: warn
+          retention-days: 14
+
+  connector:
+    name: Connector binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build darwin-arm64, darwin-x64, linux-x64
+        working-directory: apps/connector
+        env:
+          AGENT_OFFICE_VERSION: 0.0.0-ci.${{ github.run_number }}
+        run: bun scripts/build.ts darwin-arm64 darwin-x64 linux-x64
+
+      - name: Smoke-test the linux binary
+        working-directory: apps/connector
+        run: ./dist/agent-office-linux-x64 version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: connector-binaries
+          path: |
+            apps/connector/dist/agent-office-*
+            apps/connector/dist/install.sh
+          if-no-files-found: error
+          retention-days: 14
