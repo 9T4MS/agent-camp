@@ -823,6 +823,7 @@ body.kiosk .hud-reconnect {
 }
 .hud-panel .look-preview {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
   padding: 8px;
@@ -833,6 +834,9 @@ body.kiosk .hud-reconnect {
   width: 64px;
   height: 96px;
   image-rendering: pixelated;
+}
+.hud-panel .look-preview .look-ride {
+  width: 96px;
 }
 .hud-panel .look-note {
   margin: 6px 0 8px;

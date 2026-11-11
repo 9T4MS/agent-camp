@@ -4,6 +4,7 @@
  * Pixel-styled via theme.css.
  */
 import {
+  ACCENT_COLORS,
   ACCESSORIES,
   type ACTIVITIES,
   type Activity,
@@ -23,6 +24,8 @@ import {
   OUTFITS,
   type PersonDayResponse,
   SKIN_TONES,
+  VEHICLES,
+  WRISTWEAR,
 } from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
 import type { ConnectionStatus } from "./net/viewer.ts";
@@ -99,6 +102,9 @@ const LOOK_FIELDS: {
   { key: "outfit", label: "Outfit", options: OUTFITS },
   { key: "leftHand", label: "Left hand", options: HELD_ITEMS },
   { key: "rightHand", label: "Right hand", options: HELD_ITEMS },
+  { key: "wrist", label: "Bracelets", options: WRISTWEAR },
+  { key: "accentColor", label: "Accent color", options: ACCENT_COLORS },
+  { key: "vehicle", label: "Vehicle", options: VEHICLES },
 ];
 const MESS_LABEL = ["spotless", "a bit messy", "messy", "chaos"] as const;
 

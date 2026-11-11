@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { ViewerAvatar } from "./catalog.ts";
 import { PROTOCOL_VERSION } from "./constants.ts";
+import { ViewerPartyState } from "./party.ts";
 
 // ---- building blocks ----------------------------------------------------------------------
 export const AGENTS = ["claude", "codex", "pi", "unknown"] as const;
@@ -173,6 +174,7 @@ export const OfficeSnapshot = msg(
   "office.snapshot",
   z.object({
     officeName: z.string(),
+    party: ViewerPartyState.optional().catch(undefined),
     serverTime: EpochMs,
     people: z.array(PersonView),
     /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
@@ -264,8 +266,11 @@ export const InteractionHappened = msg(
   }),
 );
 
+export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
+
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,
+  PartyUpdated,
   PersonJoined,
   PersonLeft,
   SessionStarted,
@@ -286,10 +291,10 @@ export type AnyMessage = ConnectorToServer | ServerToConnector | ServerToViewer;
 export type MessageType = AnyMessage["type"];
 export type MessageOf<T extends MessageType> = Extract<AnyMessage, { type: T }>;
 export type MessageData<T extends MessageType> = MessageOf<T>["data"];
-/** What the server's diff() emits: everything but the initial snapshot and interactions. */
+/** What the server's diff() emits: everything but snapshots and transient interaction/party updates. */
 export type ViewerEvent = Exclude<
   ServerToViewer,
-  { type: "office.snapshot" | "interaction.happened" }
+  { type: "office.snapshot" | "interaction.happened" | "party.updated" }
 >;
 
 export const CONNECTOR_TO_SERVER_TYPES = ConnectorToServer.options.map((o) => o.shape.type.value);

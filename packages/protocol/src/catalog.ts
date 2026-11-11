@@ -90,6 +90,15 @@ export const ACCESSORIES = [
   { id: "cap-mint", label: "mint / aqua baseball cap with a white logo" },
   { id: "bow", label: "hair bow" },
   { id: "earring", label: "earring" },
+  { id: "cat-ears", label: "large cat ears" },
+  { id: "fox-ears", label: "fox ears" },
+  { id: "bunny-ears", label: "bunny ears" },
+  { id: "devil-horns", label: "devil horns" },
+  { id: "halo", label: "halo" },
+  { id: "crown", label: "crown" },
+  { id: "wizard-hat", label: "wizard hat" },
+  { id: "party-hat", label: "party hat" },
+  { id: "antenna", label: "antenna" },
 ] as const satisfies readonly Entry<string>[];
 export const Accessory = z.enum(ids(ACCESSORIES));
 export type Accessory = z.infer<typeof Accessory>;
@@ -105,6 +114,12 @@ export const OUTFITS = [
   { id: "flannel", label: "grey/teal plaid flannel over a navy tee" },
   { id: "flannel-red", label: "red lumberjack flannel over a navy tee" },
   { id: "tee", label: "plain navy t-shirt" },
+  { id: "cat", label: "cat costume with whiskers and tail" },
+  { id: "robot", label: "robot costume" },
+  { id: "astronaut", label: "astronaut suit" },
+  { id: "pirate", label: "pirate costume" },
+  { id: "vampire", label: "vampire cape" },
+  { id: "disco", label: "sparkling disco outfit" },
 ] as const satisfies readonly Entry<string>[];
 export const Outfit = z.enum(ids(OUTFITS));
 export type Outfit = z.infer<typeof Outfit>;
@@ -118,9 +133,49 @@ export const HELD_ITEMS = [
   { id: "joint", label: "joint" },
   { id: "phone", label: "phone" },
   { id: "coffee", label: "coffee cup" },
+  { id: "lightsaber", label: "lightsaber" },
+  { id: "confetti", label: "confetti cannon" },
+  { id: "cigarette", label: "cigarette" },
+  { id: "bubble-wand", label: "bubble wand" },
+  { id: "disco-ball", label: "disco ball" },
+  { id: "magic-wand", label: "magic wand" },
+  { id: "balloon", label: "balloon" },
+  { id: "water-pistol", label: "water pistol" },
+  { id: "maracas", label: "maracas" },
+  { id: "umbrella", label: "umbrella" },
 ] as const satisfies readonly Entry<string>[];
 export const HeldItem = z.enum(ids(HELD_ITEMS));
 export type HeldItem = z.infer<typeof HeldItem>;
+
+/** Optional personal accents; defaults keep existing stored and seeded looks unchanged. */
+export const WRISTWEAR = [
+  { id: "none", label: "none" },
+  { id: "neon-cyan", label: "neon cyan bracelets" },
+  { id: "neon-pink", label: "neon pink bracelets" },
+  { id: "neon-lime", label: "neon lime bracelets" },
+  { id: "rainbow", label: "rainbow bracelets" },
+] as const;
+export const Wristwear = z.enum(ids(WRISTWEAR));
+export type Wristwear = z.infer<typeof Wristwear>;
+export const ACCENT_COLORS = [
+  { id: "cyan", label: "cyan" },
+  { id: "pink", label: "pink" },
+  { id: "lime", label: "lime" },
+  { id: "gold", label: "gold" },
+  { id: "purple", label: "purple" },
+  { id: "red", label: "red" },
+] as const;
+export const AccentColor = z.enum(ids(ACCENT_COLORS));
+export type AccentColor = z.infer<typeof AccentColor>;
+export const VEHICLES = [
+  { id: "none", label: "on foot" },
+  { id: "car", label: "car" },
+  { id: "skateboard", label: "skateboard" },
+  { id: "hoverboard", label: "hoverboard" },
+  { id: "spaceship", label: "spaceship" },
+] as const;
+export const Vehicle = z.enum(ids(VEHICLES));
+export type Vehicle = z.infer<typeof Vehicle>;
 
 // ---- desk ---------------------------------------------------------------------------------
 export const DESK_PROPS = [
@@ -155,6 +210,9 @@ export const AvatarSpec = z.object({
   outfit: Outfit.default("jacket"),
   leftHand: HeldItem.default("none"),
   rightHand: HeldItem.default("none"),
+  wrist: Wristwear.default("none"),
+  accentColor: AccentColor.default("cyan"),
+  vehicle: Vehicle.default("none"),
   /** 0..3 distinct props */
   deskProps: z
     .array(DeskProp)
@@ -179,6 +237,9 @@ export const ViewerAvatar = z.object({
   outfit: Outfit.catch("jacket"),
   leftHand: HeldItem.catch("none"),
   rightHand: HeldItem.catch("none"),
+  wrist: Wristwear.catch("none"),
+  accentColor: AccentColor.catch("cyan"),
+  vehicle: Vehicle.catch("none"),
   deskProps: z
     .array(z.unknown())
     .catch([])
@@ -201,6 +262,9 @@ export const AVATAR_CATALOG = {
   accessories: Accessory.options,
   outfits: Outfit.options,
   heldItems: HeldItem.options,
+  wrists: Wristwear.options,
+  accentColors: AccentColor.options,
+  vehicles: Vehicle.options,
   deskProps: DeskProp.options,
   deskMess: DESK_MESS_LEVELS,
 } as const;
@@ -210,7 +274,14 @@ export const hairColorHex = (id: HairColor) => HAIR_COLORS.find((c) => c.id === 
 export const skinToneHex = (id: SkinTone) => SKIN_TONES.find((c) => c.id === id)!;
 
 /** Accessories the seed picks from: the original list, so seeded looks never shift. */
-const SEEDED_ACCESSORIES = Accessory.options.filter((a) => a !== "cap-mint");
+const SEEDED_ACCESSORIES: readonly Accessory[] = [
+  "none",
+  "headphones",
+  "beanie",
+  "cap",
+  "bow",
+  "earring",
+];
 
 /**
  * Deterministic avatar from any seed (normally the person's display name / personId).
@@ -242,6 +313,9 @@ export function avatarFromSeed(seed: string): AvatarSpec {
     outfit: "jacket",
     leftHand: "none",
     rightHand: "none",
+    wrist: "none",
+    accentColor: "cyan",
+    vehicle: "none",
     deskProps,
     deskMess: pick(rand, DESK_MESS_LEVELS),
   };

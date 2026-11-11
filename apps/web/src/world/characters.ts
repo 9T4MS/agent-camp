@@ -22,9 +22,12 @@ import { Sprite, type Texture } from "pixi.js";
 import {
   type AnimName,
   CHAR_H,
+  CHARACTER_SHEET_CACHE_LIMIT,
   type CharacterSheet,
   characterSheet,
+  characterSheetCacheSize,
   lookFor,
+  pruneCharacterSheets,
 } from "../art/characters.ts";
 import type { MonitorState } from "../art/desk.ts";
 import {
@@ -1489,6 +1492,19 @@ export class CharacterManager {
     this.updateCraters(dt);
     this.scene.doorWanted = doorBusy;
     this.updateSelection(time);
+    if (characterSheetCacheSize() > CHARACTER_SHEET_CACHE_LIMIT) {
+      const retained = new Set<CharacterSheet>();
+      const displayed: Texture[] = [];
+      for (const c of this.chars.values()) {
+        retained.add(c.sheet);
+        // Avatar changes replace c.sheet before setAnim necessarily switches its sprite.
+        displayed.push(c.sprite.texture);
+      }
+      for (const ghost of this.endedDesks) retained.add(ghost.sheet);
+      for (const ghost of this.ghosts) retained.add(ghost.sheet);
+      for (const sprite of this.ghostSprites) displayed.push(sprite.texture);
+      pruneCharacterSheets(retained, displayed);
+    }
   }
 
   /** Session whose agent card is open: gets a bouncing arrow over its head. */

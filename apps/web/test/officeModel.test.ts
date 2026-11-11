@@ -29,6 +29,44 @@ const snap = (people: PersonView[]) =>
   envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
 
 describe("OfficeModel", () => {
+  test("party scores and equipment reconcile through socket snapshots and events", () => {
+    const m = new OfficeModel(() => T0);
+    const p = person("Anna", [sess("a1")]);
+    m.apply(snap([p]));
+    const avatar = { ...p.avatar, rightHand: "lightsaber" as const, vehicle: "car" as const };
+    m.apply(envelope("avatar.updated", { personId: "anna", avatar }));
+    const party = {
+      scores: { anna: 3 },
+      events: [
+        {
+          id: "party-1",
+          personId: "anna",
+          action: "race" as const,
+          item: "lightsaber" as const,
+          vehicle: "car" as const,
+          at: T0,
+          roll: 3,
+        },
+      ],
+    };
+    expect(m.apply(envelope("party.updated", { party }))).toEqual([{ kind: "partyChanged" }]);
+    expect(m.party.scores.anna).toBe(3);
+    expect(m.people.get("anna")!.avatar.rightHand).toBe("lightsaber");
+    // Party updates must leave the reported coding session state intact.
+    expect(m.sessions.get("laptop:a1")!.activity).toBe("typing");
+    m.apply(
+      envelope("office.snapshot", {
+        officeName: "Camp",
+        serverTime: T0,
+        people: [{ ...p, avatar }],
+        party,
+      }),
+    );
+    expect(m.party).toEqual(party);
+    m.apply(snap([p]));
+    expect(m.party).toEqual({ events: [], scores: {} });
+  });
+
   test("agent card data: machine, subagent peak, activity timeline", () => {
     let now = T0;
     const m = new OfficeModel(() => now);

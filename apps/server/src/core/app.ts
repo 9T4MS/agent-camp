@@ -11,13 +11,16 @@ import {
   InteractRequest,
   type InteractResponse,
   type MessageOf,
+  PartyState,
   type ServerToConnector,
   type ViewerEvent,
 } from "@agent-office/protocol";
 import { z } from "zod";
+import { isAuthorized } from "./auth.ts";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
+import { Party, readPartyBody } from "./party.ts";
 import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
 
@@ -102,6 +105,7 @@ export class OfficeApp {
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
   private lastPoke = new Map<string, number>();
+  readonly party: Party;
   private lastLook = new Map<string, number>();
 
   constructor(
@@ -110,6 +114,7 @@ export class OfficeApp {
     private transport: Transport,
     private opts: { now?: () => number; fetch?: FetchLike; log?: (line: string) => void } = {},
   ) {
+    this.party = new Party(store);
     const log = opts.log ?? ((l: string) => console.log(l));
     this.timezone = env.OFFICE_TIMEZONE || "Europe/Vienna";
     this.genui = createAvatarService(env, store, {
@@ -185,7 +190,10 @@ export class OfficeApp {
     });
     const v = serverVersion(this.env);
     const version = v !== "dev" ? v : this.latest.current;
-    return { ...snap, data: { ...snap.data, today, ...(version ? { version } : {}) } };
+    return {
+      ...snap,
+      data: { ...snap.data, today, party: this.party.state(now), ...(version ? { version } : {}) },
+    };
   }
 
   alarm(): void {
@@ -238,6 +246,43 @@ export class OfficeApp {
     if (path === "/api/me" && method === "GET") return json({ ok: true });
 
     if (path === "/api/interact" && method === "POST") return this.interact(req);
+    if (path === "/api/party") {
+      if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
+      const now = this.now();
+      const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+      const retryAfter = this.party.requestAllowed(who, now);
+      if (retryAfter !== null)
+        return json(
+          { error: "slow down" },
+          { status: 429, headers: { "retry-after": String(retryAfter) } },
+        );
+      if (!(await isAuthorized(req, this.env, now)))
+        return json({ error: "unauthorized" }, { status: 401 });
+      const body = await readPartyBody(req);
+      if (body.status)
+        return json(
+          { error: body.status === 413 ? "too large" : "invalid JSON" },
+          { status: body.status },
+        );
+      const actionAt = this.now();
+      const online = new Map(
+        this.hub
+          .state()
+          .people.filter((p) => this.hub.liveSocketsOf(p.personId, actionAt).length > 0)
+          .map((p) => [p.personId, p.avatar] as const),
+      );
+      const result = this.party.mutate(body.value, online, actionAt);
+      if (result.status === 200) {
+        const party = PartyState.parse(result.body);
+        this.transport.broadcast(
+          JSON.stringify(envelope("party.updated", { party }, { ts: actionAt })),
+        );
+      }
+      return json(result.body, {
+        status: result.status,
+        ...(result.retryAfter ? { headers: { "retry-after": String(result.retryAfter) } } : {}),
+      });
+    }
 
     const look = /^\/api\/people\/([^/]{1,64})\/avatar$/.exec(path);
     if (look) {

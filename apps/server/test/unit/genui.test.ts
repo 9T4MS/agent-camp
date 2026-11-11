@@ -77,6 +77,11 @@ describe("genui", () => {
       JSON.parse(JSON.stringify(AVATAR_JSON_SCHEMA)),
     );
     expect(JSON.stringify(c.body.messages)).toContain("curly red hair");
+    expect(String(c.body.system)).toContain("devil-horns");
+    expect(String(c.body.system)).toContain(
+      "only when the person's self-description explicitly requests them",
+    );
+    expect(String(c.body.system)).toContain("otherwise choose an ordinary accessory");
     expect(lines.some((l) => l.includes("tokens in=512 out=64"))).toBe(true);
     expect(svc.callsToday()).toBe(1);
   });

@@ -9,6 +9,7 @@ import {
   compareVersions,
   envelope,
   type ParseResult,
+  PartyState,
   parseConnectorMessage,
   parseServerToConnector,
   parseViewerMessage,
@@ -118,6 +119,86 @@ describe("negative parsing", () => {
       expect(parseConnectorMessage({ ...snap, data: { sessions: [s] } }).ok).toBe(false);
     }
   });
+  test("party state is optional for older snapshots and validates equipment and rolls", () => {
+    expect(parseViewerMessage(load("office.snapshot")).ok).toBe(true);
+    const message = load("party.updated") as {
+      data: { party: { events: Record<string, unknown>[]; scores: Record<string, number> } };
+    };
+    const event = message.data.party.events[0]!;
+    for (const bad of [
+      { ...event, roll: 7 },
+      { ...event, roll: 0 },
+      { ...event, at: -1 },
+    ])
+      expect(
+        parseViewerMessage({
+          ...message,
+          data: { party: { ...message.data.party, events: [bad] } },
+        }).ok,
+      ).toBe(false);
+    expect(
+      parseViewerMessage({ ...message, data: { party: { ...message.data.party, profiles: {} } } })
+        .ok,
+    ).toBe(true);
+  });
+  test("future avatar and party equipment IDs do not drop the office snapshot", () => {
+    const snapshot = load("office.snapshot") as {
+      data: { people: { avatar: Record<string, unknown> }[] };
+    };
+    const event = {
+      id: "future",
+      personId: "anna",
+      action: "use",
+      item: "future-item",
+      vehicle: "future-ride",
+      at: 1000,
+    };
+    const party = { events: [event], scores: {} };
+    const people = snapshot.data.people.map((person) => ({
+      ...person,
+      avatar: { ...person.avatar, leftHand: "future-item", vehicle: "future-ride" },
+    }));
+    const parsed = parseViewerMessage({ ...snapshot, data: { ...snapshot.data, people, party } });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok && parsed.msg.type === "office.snapshot") {
+      expect(parsed.msg.data.party?.events[0]).toMatchObject({ item: "none", vehicle: "none" });
+      expect(parsed.msg.data.people[0]?.avatar.leftHand).toBe("none");
+      expect(parsed.msg.data.people[0]?.avatar.vehicle).toBe("none");
+    } else throw new Error("snapshot rejected");
+    const update = load("party.updated") as { data: unknown };
+    expect(parseViewerMessage({ ...update, data: { party } }).ok).toBe(true);
+    expect(PartyState.safeParse(party).success).toBe(false);
+  });
+  test("future party actions and fields degrade safely without losing office presence", () => {
+    const update = load("party.updated") as {
+      data: { party: { events: Record<string, unknown>[]; scores: Record<string, number> } };
+    };
+    const party = {
+      ...update.data.party,
+      futureState: true,
+      events: [{ ...update.data.party.events[0], action: "future-dance", futureEvent: true }],
+    };
+    const parsed = parseViewerMessage({ ...update, data: { party } });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok && parsed.msg.type === "party.updated") {
+      expect(parsed.msg.data.party.events[0]?.action).toBe("wave");
+      expect(parsed.msg.data.party).not.toHaveProperty("futureState");
+      expect(parsed.msg.data.party.events[0]).not.toHaveProperty("futureEvent");
+    } else throw new Error("future party message rejected");
+    expect(PartyState.safeParse(party).success).toBe(false);
+    const snapshot = load("office.snapshot") as { data: { people: unknown[] } };
+    for (const optionalParty of [party, { changedFormat: true }, null, "future-format"]) {
+      const result = parseViewerMessage({
+        ...snapshot,
+        data: { ...snapshot.data, party: optionalParty },
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok && result.msg.type === "office.snapshot") {
+        expect(result.msg.data.people.length).toBe(snapshot.data.people.length);
+        if (optionalParty !== party) expect(result.msg.data.party).toBeUndefined();
+      }
+    }
+  });
   test("invalid avatar in avatar.updated", () => {
     // unknown ids fall back (see "viewers tolerate catalog ids"), but not a missing avatar
     const m = load("avatar.updated") as { data: { avatar: Record<string, unknown> } };
@@ -182,6 +263,9 @@ describe("avatars", () => {
       ...raw.data.avatar,
       accessory: "top-hat-from-the-future",
       outfit: "space-suit",
+      wrist: "future-cuffs",
+      accentColor: "ultraviolet",
+      vehicle: "teleporter",
       deskProps: ["plant", "hologram", "plant"],
     };
     const r = parseViewerMessage(raw);
@@ -190,7 +274,15 @@ describe("avatars", () => {
     expect(r.msg.data.avatar.accessory).toBe("none");
     expect(r.msg.data.avatar.outfit).toBe("jacket");
     expect(r.msg.data.avatar.leftHand).toBe("none");
+    expect(r.msg.data.avatar.wrist).toBe("none");
+    expect(r.msg.data.avatar.accentColor).toBe("cyan");
+    expect(r.msg.data.avatar.vehicle).toBe("none");
     expect(r.msg.data.avatar.deskProps).toEqual(["plant"]);
+  });
+  test("avatar requests keep rejecting unknown wardrobe ids", () => {
+    const avatar = avatarFromSeed("anna");
+    for (const field of ["wrist", "accentColor", "vehicle"] as const)
+      expect(AvatarSpec.safeParse({ ...avatar, [field]: "from-the-future" }).success).toBe(false);
   });
   test("coerceAvatar falls back on garbage", () => {
     expect(coerceAvatar({ hairStyle: "nope" }, "anna")).toEqual(avatarFromSeed("anna"));
