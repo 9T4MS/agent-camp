@@ -13,16 +13,36 @@ for everyone.
 
 ## Join the office (teammates)
 
+You need two things from whoever runs the office: the **server URL** and the **password**.
+
+### Easiest: let your coding agent do it
+
+Paste this into Claude Code (or Codex / Pi), with the two values filled in:
+
+```text
+Set up Agent Office on this Mac for me.
+Server: https://<server-url>
+Password: <password>
+Follow the "Instructions for coding agents" section in
+https://github.com/MrGatzi/agent-camp/blob/main/README.md
+```
+
+Your agent will ask you a few quick questions (your name, how you look, a name for this
+machine), install the connector, and check that you show up in the office. Approve the
+network and `launchctl` commands when it asks. Then open the server URL in your browser and
+find yourself.
+
+### By hand
+
 ```sh
 curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/install.sh | sh
 ```
 
-It asks five things: the **server URL** and **shared password** (whoever runs the office gives
-you both), your **name**, an optional **description** of yourself ("curly hair, round
-glasses") that shapes your avatar, and a **name for this machine** (defaults to its short
-hostname). Done: the connector runs in the background (launchd) and starts at login.
-Re-run the same line any time to change answers. It updates itself.
-`curl -fsSL https://<your-server>/install.sh | sh` does the same with the URL already filled in.
+It asks five things: the **server URL**, the **password**, your **name**, an optional
+**description** of yourself ("curly hair, round glasses") that shapes your avatar, and a
+**name for this machine** (defaults to its short hostname). Done: the connector runs in the
+background (launchd), starts at login and updates itself. Re-run the same line any time to
+change answers.
 
 ```sh
 agent-office status      # connected? which sessions does it see?
@@ -31,6 +51,45 @@ agent-office uninstall   # stop and remove everything
 ```
 
 ![Installer and status](screenshots/10-terminal-install.png)
+
+### Instructions for coding agents
+
+You are setting up the Agent Office connector for the human you are working with. They gave
+you a server URL and a password. Do this:
+
+1. Check the machine: `uname -sm` should say `Darwin arm64` or `Darwin x86_64` (macOS only).
+2. Ask the human, in one message, and wait for the answers:
+   - **Display name** shown in the office (first name is fine). If they already run Agent
+     Office on another machine, it must be the **same name** there so both count as one person.
+   - **Look** (optional): one line describing them, e.g. "curly hair, round glasses, hoodie".
+   - **Machine name** (optional): a label for this computer, default `hostname -s`
+     (e.g. "laptop", "devbox").
+   - **Share project folder names?** (default yes). Only the folder's base name is ever sent.
+3. Install without prompts (the env vars must be on `sh`, not on `curl`):
+   ```sh
+   curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/install.sh \
+     | AO_NONINTERACTIVE=1 AO_SERVER='<server-url>' AO_PASSWORD='<password>' \
+       AO_NAME='<name>' AO_DESCRIPTION='<look or empty>' AO_MACHINE='<machine name>' sh
+   ```
+   The binary lands in `~/.local/bin/agent-office` and a launchd agent
+   (`dev.agentoffice.connector`) starts it now and at every login. This needs network access
+   and `launchctl`; if your sandbox blocks them, ask the human to approve or to run the command.
+4. If they said **no** to project folder names:
+   ```sh
+   ~/.local/bin/agent-office configure --share-project-names false
+   launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector
+   ```
+5. Verify: run `~/.local/bin/agent-office status`. It must say **connected** and should list
+   this very session (it needs a transcript write in the last 90 s, so check after a moment).
+   If it is not connected, look at `~/.local/bin/agent-office logs` (Ctrl-C to stop): a
+   rejected password means a typo; a connection error usually means a wrong URL (use the
+   `https://` address of the office).
+6. If `~/.local/bin` is not on their `PATH`, offer to add it to `~/.zshrc`.
+7. Tell the human it worked and that they can watch at the server URL in any browser.
+   Don't echo the password back in your summary.
+
+The connector only reads agent transcript metadata and never sends prompts, code or file
+contents (see Privacy below), so no other setup is needed.
 
 ### Two machines, one you
 
