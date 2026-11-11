@@ -1,20 +1,23 @@
 /**
- * Subagent helpers: tiny bots that pop out with a puff near the parent's desk, scurry
- * around the pod's aisle and now and then run an errand (carry a paper or a box to the
- * printer, the server rack or the bookshelf and back). Max 5 visible, plus a "+N" badge.
- * When a helper finishes it hops into the parent's monitor with a sparkle (or the office
- * cat gets it).
+ * Subagent helpers: one tiny bot (or kitten, the person's `helpers` skin) per live subagent.
+ * They pop out with a puff near the parent's desk, one after another in a burst, scurry
+ * around the pod's aisle (the area grows with the swarm) and now and then run an errand
+ * (carry a paper or a box to the printer, the server rack or the bookshelf and back). Only
+ * beyond MAX_BOTS a "+N" badge stands in for the rest. When a helper finishes it hops into the
+ * parent's monitor with a sparkle (or the office cat gets a bot; it leaves kittens alone).
  */
-import type { AgentKind } from "@agent-office/protocol";
-import { type Container, Sprite } from "pixi.js";
+import type { AgentKind, HelperSkin } from "@agent-office/protocol";
+import { type Container, Sprite, type Texture } from "pixi.js";
 import { carryTextures } from "../art/fun.ts";
-import { badgeTexture, botTextures } from "../art/fx.ts";
+import { badgeTexture, botTextures, CAT_COATS, kittenTextures } from "../art/fx.ts";
 import type { Effects } from "./effects.ts";
+import { burstGap, errandSlots, escortSpot, type Rect, visibleHelpers } from "./helperRules.ts";
 
-const MAX_VISIBLE = 5;
 type Pt = { x: number; y: number };
 type Bot = {
   sprite: Sprite;
+  /** two walk frames (robot, or a kitten in its own coat) */
+  frames: Texture[];
   x: number;
   y: number;
   tx: number;
@@ -24,8 +27,11 @@ type Bot = {
   /** errand: path to walk, what it carries, and whether it is on the way back */
   errand: { path: Pt[]; back: boolean; carry: Sprite; pause: number; home: Pt } | null;
 };
-type Leaving = { sprite: Sprite; x0: number; y0: number; t: number };
-export type Rect = { x: number; y: number; w: number; h: number };
+type Leaving = { sprite: Sprite; frames: Texture[]; x0: number; y0: number; t: number };
+
+export type { Rect };
+/** The roaming area for a swarm of `count` helpers. */
+export type AreaFor = (count: number) => Rect;
 
 /** Hooks the world gives the swarm (paths around furniture, the hungry cat). */
 export type HelperWorld = {
@@ -42,6 +48,10 @@ export class HelperSwarm {
   private leaving: Leaving[] = [];
   private badge: Sprite | null = null;
   private count = 0;
+  /** helpers still to pop out (a burst puffs them out one by one) */
+  private queued = 0;
+  private queueT = 0;
+  private area: Rect;
   /** seconds a helper spends at least between errands */
   errandEvery = 25;
   /** while set, every helper drops its errand and crowds under this point (carrying someone) */
@@ -52,36 +62,56 @@ export class HelperSwarm {
     private readonly fxLayer: Container,
     private readonly effects: Effects,
     private readonly agent: AgentKind,
-    private area: Rect,
+    private areaFor: AreaFor,
     private origin: { x: number; y: number },
     private readonly rand: () => number,
     private readonly world: HelperWorld | null = null,
-  ) {}
+    private skin: HelperSkin = "robots",
+  ) {
+    this.area = areaFor(0);
+  }
 
-  setArea(area: Rect, origin: { x: number; y: number }) {
-    this.area = area;
+  setArea(areaFor: AreaFor, origin: { x: number; y: number }) {
+    this.areaFor = areaFor;
     this.origin = origin;
+    this.area = areaFor(this.count);
+  }
+
+  /** Robots <-> kittens: every helper turns into the other kind with a puff. */
+  setSkin(skin: HelperSkin, animate: boolean) {
+    if (skin === this.skin) return;
+    this.skin = skin;
+    for (const b of this.bots) {
+      b.frames = this.pickFrames();
+      b.sprite.texture = b.frames[0]!;
+      if (animate) this.effects.puff(b.x, b.y - 5);
+    }
+  }
+
+  private pickFrames(): Texture[] {
+    if (this.skin === "cats") {
+      const coat = CAT_COATS[Math.floor(this.rand() * CAT_COATS.length)] ?? CAT_COATS[0]!;
+      return kittenTextures(this.agent, coat);
+    }
+    return botTextures(this.agent);
   }
 
   set(count: number, animate: boolean) {
-    const finished = this.count - count;
     this.count = count;
-    const want = Math.min(MAX_VISIBLE, count);
-    while (this.bots.length < want) this.spawn(animate);
-    // helpers beyond the visible five finish too: one of them pops out of the crowd and hops home
-    const hidden = Math.min(finished, this.bots.length - want);
-    for (let i = hidden; animate && i < finished && this.bots.length > 0; i++) {
-      const from = this.bots[Math.floor(this.rand() * this.bots.length)]!;
-      const s = new Sprite(botTextures(this.agent)[0]!);
-      s.anchor.set(0.5, 1);
-      s.label = "actor";
-      this.objects.addChild(s);
-      s.position.set(Math.round(from.x), Math.round(from.y));
-      if (!this.world?.catEats(s, from.x, from.y))
-        this.leaving.push({ sprite: s, x0: from.x, y0: from.y, t: 0 });
+    this.area = this.areaFor(count);
+    const { shown: want, extra } = visibleHelpers(count);
+    if (!animate) {
+      this.queued = 0;
+      while (this.bots.length < want) this.spawn(false);
+    } else if (this.bots.length + this.queued < want) {
+      if (this.queued === 0) this.queueT = 0;
+      this.queued = want - this.bots.length;
+    }
+    // fewer helpers: first drop ones that haven't popped out yet, then finish visible ones
+    if (this.bots.length + this.queued > want) {
+      this.queued = Math.max(0, want - this.bots.length);
     }
     while (this.bots.length > want) this.despawn(animate);
-    const extra = count - want;
     if (extra > 0) {
       const tex = badgeTexture(`+${extra}`);
       if (!this.badge) {
@@ -107,11 +137,13 @@ export class HelperSwarm {
   }
 
   private spawn(animate: boolean) {
-    const s = new Sprite(botTextures(this.agent)[0]!);
+    const frames = this.pickFrames();
+    const s = new Sprite(frames[0]!);
     s.anchor.set(0.5, 1);
     s.label = "actor";
     const b: Bot = {
       sprite: s,
+      frames,
       x: this.origin.x + (this.rand() - 0.5) * 12,
       y: this.origin.y + 6,
       tx: 0,
@@ -155,9 +187,9 @@ export class HelperSwarm {
       b.sprite.destroy();
       return;
     }
-    // finished: maybe the cat pounces, else hop back into the parent's monitor
-    if (this.world?.catEats(b.sprite, b.x, b.y)) return;
-    this.leaving.push({ sprite: b.sprite, x0: b.x, y0: b.y, t: 0 });
+    // finished: maybe the cat pounces on a bot, else hop back into the parent's monitor
+    if (this.skin === "robots" && this.world?.catEats(b.sprite, b.x, b.y)) return;
+    this.leaving.push({ sprite: b.sprite, frames: b.frames, x0: b.x, y0: b.y, t: 0 });
   }
 
   private place(b: Bot) {
@@ -222,16 +254,24 @@ export class HelperSwarm {
   }
 
   update(dt: number, time: number) {
-    const frames = botTextures(this.agent);
+    // a burst: pop the queued helpers out one after another (faster the more are waiting)
+    if (this.queued > 0) {
+      this.queueT -= dt;
+      while (this.queued > 0 && this.queueT <= 0) {
+        this.spawn(true);
+        this.queued--;
+        this.queueT += burstGap(this.queued, this.rand());
+      }
+    }
     let maxX = -1;
     let at = { x: 0, y: 0 };
-    const busy = this.bots.filter((b) => b.errand).length;
+    let busy = this.bots.filter((b) => b.errand).length;
+    const slots = errandSlots(this.bots.length);
     for (const [i, b] of this.bots.entries()) {
       let moving = false;
       if (this.escort) {
         this.dropCarry(b);
-        const tx = this.escort.x + (i - (this.bots.length - 1) / 2) * 5;
-        const ty = this.escort.y + 1 + (i % 2);
+        const { x: tx, y: ty } = escortSpot(this.escort, i, this.bots.length);
         const dx = tx - b.x;
         const dy = ty - b.y;
         const d = Math.hypot(dx, dy);
@@ -253,10 +293,11 @@ export class HelperSwarm {
         if (
           b.wait <= 0 &&
           this.world &&
-          busy < 2 &&
+          busy < slots &&
           this.rand() < 1.2 / this.errandEvery &&
           this.startErrand(b)
         ) {
+          busy++;
           moving = true;
         }
       } else {
@@ -276,7 +317,7 @@ export class HelperSwarm {
         b.sprite.scale.x = dx < 0 ? -1 : 1;
         moving = true;
       }
-      b.sprite.texture = frames[moving ? Math.floor(time * 8 + b.phase) % 2 : 0]!;
+      b.sprite.texture = b.frames[moving ? Math.floor(time * 8 + b.phase) % 2 : 0]!;
       this.place(b);
       if (!b.errand && b.x > maxX) {
         maxX = b.x;
@@ -295,7 +336,7 @@ export class HelperSwarm {
       l.sprite.position.set(Math.round(x), Math.round(y));
       l.sprite.zIndex = Math.max(y, this.origin.y - 1);
       l.sprite.scale.set(1 - 0.6 * k);
-      l.sprite.texture = frames[1]!;
+      l.sprite.texture = l.frames[1]!;
       if (k >= 1) {
         this.effects.sparkle(mon.x, mon.y - 4);
         this.objects.removeChild(l.sprite);
@@ -313,6 +354,7 @@ export class HelperSwarm {
       b.sprite.destroy();
     }
     this.bots = [];
+    this.queued = 0;
     for (const l of this.leaving) {
       this.objects.removeChild(l.sprite);
       l.sprite.destroy();

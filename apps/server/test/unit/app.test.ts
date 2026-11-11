@@ -330,6 +330,54 @@ describe("OfficeApp interactions", () => {
     expect(sent.map((s) => JSON.parse(s).data.kind)).toEqual(["paper", "pet"]);
   });
 
+  test("sending a cat notifies the person like a poke", async () => {
+    const { sent, toConnector, post, advance } = withPerson();
+    const res = await post({ kind: "cat", personId: "anna", from: "Martin", catId: 3 });
+    expect(await res!.json()).toEqual({ ok: true, delivered: 1 });
+    const poke = JSON.parse(toConnector[0]![1]);
+    expect(poke.data).toEqual({
+      kind: "cat",
+      from: "Martin",
+      text: "Martin sent a cat to sit on your keyboard 🐈",
+    });
+    expect(JSON.parse(sent.at(-1)!).data).toEqual({
+      kind: "cat",
+      personId: "anna",
+      from: "Martin",
+      delivered: 1,
+      catId: 3,
+    });
+    // the per-person poke limit applies to cats too
+    advance(5_000);
+    expect((await post({ kind: "cat", personId: "anna", catId: 1 }))!.status).toBe(429);
+    expect((await post({ kind: "cat" }, "3.3.3.3"))!.status).toBe(400);
+  });
+
+  test("feeding, yarn and the laser are broadcast with their cat and spot", async () => {
+    const { sent, toConnector, post, advance } = withPerson();
+    expect((await post({ kind: "feed", catId: 2, x: 600, y: 140 }))!.status).toBe(200);
+    advance(2_000);
+    expect((await post({ kind: "yarn", catId: 0, x: 610, y: 150, from: "Lea" }))!.status).toBe(200);
+    advance(2_000);
+    expect((await post({ kind: "laser", x: 700, y: 300 }))!.status).toBe(200);
+    advance(2_000);
+    expect((await post({ kind: "pet", catId: 4 }))!.status).toBe(200);
+    expect(toConnector).toHaveLength(0);
+    expect(sent.map((s) => JSON.parse(s).data)).toEqual([
+      { kind: "feed", catId: 2, x: 600, y: 140 },
+      { kind: "yarn", from: "Lea", catId: 0, x: 610, y: 150 },
+      { kind: "laser", x: 700, y: 300 },
+      { kind: "pet", catId: 4 },
+    ]);
+  });
+
+  test("bad cat requests", async () => {
+    const { post } = withPerson();
+    expect((await post({ kind: "feed", catId: 1 }))!.status).toBe(400);
+    expect((await post({ kind: "laser", x: 10, y: 99_999 }))!.status).toBe(400);
+    expect((await post({ kind: "pet", catId: 10 }))!.status).toBe(400);
+  });
+
   test("rate limits per viewer and per poked person", async () => {
     const { post, advance, toConnector } = withPerson();
     expect((await post({ kind: "cheer", personId: "anna" }))!.status).toBe(200);

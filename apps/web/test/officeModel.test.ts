@@ -29,6 +29,46 @@ const snap = (people: PersonView[]) =>
   envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
 
 describe("OfficeModel", () => {
+  test("helper skin: robots by default, cats from snapshot and event", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna"), { ...person("Bob"), helpers: "cats" }]));
+    expect(m.people.get("anna")?.helpers).toBe("robots");
+    expect(m.people.get("bob")?.helpers).toBe("cats");
+    const ch = m.apply(envelope("person.helpersChanged", { personId: "anna", helpers: "cats" }));
+    expect(ch).toEqual([{ kind: "helpersChanged", personId: "anna", helpers: "cats" }]);
+    expect(
+      m.apply(envelope("person.helpersChanged", { personId: "anna", helpers: "cats" })),
+    ).toEqual([]);
+    // a resync snapshot without the field turns Bob back to robots
+    const back = m.apply(snap([{ ...person("Anna"), helpers: "cats" }, person("Bob")]));
+    expect(back).toContainEqual({ kind: "helpersChanged", personId: "bob", helpers: "robots" });
+  });
+
+  test("cat interactions carry the cat and the floor spot", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Anna")]));
+    const yarn = m.apply(
+      envelope("interaction.happened", { kind: "yarn", from: "Lea", catId: 2, x: 600, y: 140 }),
+    );
+    expect(yarn).toEqual([
+      {
+        kind: "interaction",
+        interaction: "yarn",
+        personId: undefined,
+        from: "Lea",
+        text: undefined,
+        delivered: undefined,
+        catId: 2,
+        spot: { x: 600, y: 140 },
+      },
+    ]);
+    const visit = m.apply(
+      envelope("interaction.happened", { kind: "cat", personId: "anna", catId: 1, delivered: 0 }),
+    );
+    expect(visit[0]).toMatchObject({ interaction: "cat", personId: "anna", catId: 1 });
+    expect(visit[0]).toMatchObject({ spot: undefined });
+  });
+
   test("party scores and equipment reconcile through socket snapshots and events", () => {
     const m = new OfficeModel(() => T0);
     const p = person("Anna", [sess("a1")]);

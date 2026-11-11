@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "person.helpersChanged",
+  "id": "01KD8QZ0000000000000000002",
+  "ts": 1793174401000,
+  "data": {
+    "personId": "anna",
+    "helpers": "cats"
+  }
+}

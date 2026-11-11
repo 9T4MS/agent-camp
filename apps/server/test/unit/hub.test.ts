@@ -168,6 +168,22 @@ describe("hub: sessions", () => {
     expect(hub.state().people[0]!.sessions).toHaveLength(2);
   });
 
+  test("helpers: cats when any of the person's connectors says so", () => {
+    const { hub } = setup();
+    hub.onConnectorMessage("s1", hello("Martin", "mac-a"), 0);
+    expect(hub.state().people[0]!.helpers).toBeUndefined();
+    const evs = hub.onConnectorMessage(
+      "s2",
+      hello("martin", "mac-b", { helpers: "cats" }),
+      1,
+    ).events;
+    expect(types(evs)).toEqual(["person.helpersChanged"]);
+    expect(hub.state().people[0]!.helpers).toBe("cats");
+    // the cat machine leaves: back to robots
+    expect(types(hub.onConnectorMessage("s2", bye(), 2).events)).toContain("person.helpersChanged");
+    expect(hub.state().people[0]!.helpers).toBeUndefined();
+  });
+
   test("duplicate session keys in one snapshot are collapsed", () => {
     const { hub } = setup();
     hub.onConnectorMessage("s1", hello("M", "c1"), 0);

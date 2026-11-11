@@ -15,6 +15,7 @@ import {
   catalogAvatar,
   compareVersions,
   envelope,
+  type HelperSkin,
   hashString,
   type MessageOf,
   PERSON_GRACE_MS,
@@ -61,6 +62,8 @@ export type Binding = {
   machine?: string;
   /** opt-in "MM-DD" */
   birthday?: string;
+  /** opt-in: this person's subagents are kittens (omitted = robots) */
+  helpers?: HelperSkin;
 };
 
 /** A connector as the hub tracks and persists it (its description lives on the person). */
@@ -466,6 +469,7 @@ export class Hub {
       ...(desc ? { selfDescription: desc } : {}),
       ...(machine ? { machine } : {}),
       ...(d.birthday ? { birthday: d.birthday } : {}),
+      ...(d.helpers === "cats" ? { helpers: d.helpers } : {}),
     };
     // a hello on a socket that was bound to another clientId: drop the old binding
     this.sockets.set(socketId, binding);
@@ -727,8 +731,12 @@ export class Hub {
       }
       sessions.sort((a, b) => a.startedAt - b.startedAt || a.sessionId.localeCompare(b.sessionId));
       let birthday = false;
-      for (const c of this.connectors.values())
-        if (c.personId === p.personId && c.birthday === today) birthday = true;
+      let cats = false;
+      for (const c of this.connectors.values()) {
+        if (c.personId !== p.personId) continue;
+        if (c.birthday === today) birthday = true;
+        if (c.helpers === "cats") cats = true;
+      }
       people.push({
         personId: p.personId,
         name: p.name,
@@ -736,6 +744,7 @@ export class Hub {
         sessions,
         joinedAt: p.joinedAt,
         ...(birthday ? { birthday } : {}),
+        ...(cats ? { helpers: "cats" as const } : {}),
       });
     }
     return { people };
@@ -748,6 +757,7 @@ export class Hub {
       c.personId,
       c.name,
       c.machine ?? "",
+      c.helpers ?? "",
       c.socketId ?? "",
       c.sessions.map((s) => s.sessionKey).join(","),
     ]);

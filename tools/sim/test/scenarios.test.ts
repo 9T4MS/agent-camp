@@ -63,6 +63,8 @@ describe("scenario generators", () => {
     expect(s.filter((x) => x.activity === "waiting")).toHaveLength(1);
     const martin = r.world.online().filter((l) => l.personId === "martin");
     expect(martin).toHaveLength(2);
+    const anna = r.world.online().filter((l) => l.personId === "anna");
+    expect(anna.map((l) => l.helpers)).toEqual(["cats"]);
   });
 
   test("busy holds still after settling", () => {

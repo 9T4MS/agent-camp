@@ -4,7 +4,7 @@
  * shop and smokers' corner busy.
  * `party` plays the office-life moments quickly: idle people (coffee, chats, arcade), a long
  * waiter, a helper burst to 10 (party mode), `/clear` restarts, a long session that ships, new
- * records of parallel agents.
+ * records of parallel agents, and the cats: a food bowl, the laser, a yarn ball, a cat visit.
  * Deterministic for a given `seed`: the same sequence of messages in the same order
  * (timing is wall clock, so only order and content are reproducible).
  * Every message is built with `envelope()` and is schema-valid.
@@ -302,6 +302,21 @@ export class DemoFeed {
     this.after(19000, () => this.endSession(anna!, anna!.sessions[0]));
     this.after(24000, () => this.startSession(martin!, "reading"));
     this.after(34000, () => this.clearSession(martin!));
+    // the cats get some attention too: a bowl, the laser, a yarn ball, a cat on Lea's desk
+    this.after(5000, () => this.catPlay("feed", "Mia", 0, 720, 140));
+    this.after(10000, () => this.catPlay("laser", "Jonas", 1, 600, 140));
+    this.after(18000, () => this.catPlay("yarn", "Max", 2, 700, 400));
+    this.after(26000, () =>
+      this.emit(
+        envelope("interaction.happened", {
+          kind: "cat",
+          personId: "lea",
+          from: "Felix",
+          catId: 3,
+          delivered: 0,
+        }),
+      ),
+    );
     // keep the busy ones busy, the idle ones idle (they wander, chat, play)
     this.loop(2600, () => {
       const busy = [...this.people.values()].flatMap((p) =>
@@ -327,6 +342,16 @@ export class DemoFeed {
         }
       }
     });
+  }
+
+  private catPlay(
+    kind: "feed" | "yarn" | "laser",
+    from: string,
+    catId: number,
+    x: number,
+    y: number,
+  ) {
+    this.emit(envelope("interaction.happened", { kind, from, catId, x, y }));
   }
 
   // ---- feierabend -------------------------------------------------------------------------

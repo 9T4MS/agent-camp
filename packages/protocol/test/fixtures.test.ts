@@ -8,6 +8,8 @@ import {
   coerceAvatar,
   compareVersions,
   envelope,
+  InteractRequest,
+  MAX_CATS,
   type ParseResult,
   PartyState,
   parseConnectorMessage,
@@ -204,6 +206,42 @@ describe("negative parsing", () => {
     const m = load("avatar.updated") as { data: { avatar: Record<string, unknown> } };
     for (const avatar of [undefined, null, "afro-unicorn", 42])
       expect(parseViewerMessage({ ...m, data: { ...m.data, avatar } }).ok).toBe(false);
+  });
+});
+
+describe("cat interactions", () => {
+  const ok = (body: unknown) => InteractRequest.safeParse(body).success;
+  test("cat kinds need no person, spot kinds need a spot", () => {
+    expect(ok({ kind: "pet" })).toBe(true);
+    expect(ok({ kind: "pet", catId: 3 })).toBe(true);
+    expect(ok({ kind: "feed", catId: 1, x: 640, y: 120 })).toBe(true);
+    expect(ok({ kind: "yarn", catId: 0, x: 10, y: 10 })).toBe(true);
+    expect(ok({ kind: "laser", x: 700, y: 300 })).toBe(true);
+    expect(ok({ kind: "feed", catId: 1 })).toBe(false);
+    expect(ok({ kind: "laser", x: 700 })).toBe(false);
+  });
+  test("sending a cat needs a person", () => {
+    expect(ok({ kind: "cat", catId: 2 })).toBe(false);
+    expect(ok({ kind: "cat", catId: 2, personId: "anna" })).toBe(true);
+  });
+  test("cat ids and spots are bounded", () => {
+    expect(ok({ kind: "pet", catId: MAX_CATS })).toBe(false);
+    expect(ok({ kind: "pet", catId: -1 })).toBe(false);
+    expect(ok({ kind: "pet", catId: 1.5 })).toBe(false);
+    expect(ok({ kind: "laser", x: -1, y: 10 })).toBe(false);
+    expect(ok({ kind: "laser", x: 10, y: 9000 })).toBe(false);
+    expect(ok({ kind: "laser", x: 10.5, y: 10 })).toBe(false);
+  });
+  test("interaction.happened carries the cat and the spot", () => {
+    const m = load("interaction.happened") as { data: Record<string, unknown> };
+    const yarn = { ...m, data: { kind: "yarn", from: "Martin", catId: 4, x: 600, y: 140 } };
+    expect(parseViewerMessage(yarn).ok).toBe(true);
+    expect(parseViewerMessage({ ...yarn, data: { ...yarn.data, catId: 99 } }).ok).toBe(false);
+  });
+  test("a cat poke reaches the connector channel", () => {
+    const m = load("connector.poked") as { data: Record<string, unknown> };
+    const r = parseServerToConnector({ ...m, data: { kind: "cat", text: "a cat" } });
+    expect(r.ok).toBe(true);
   });
 });
 

@@ -775,6 +775,16 @@ body.kiosk .hud-reconnect {
 .hud-panel .poke-status.err {
   color: var(--pink);
 }
+
+/* cat card */
+.hud-panel .portrait.cat {
+  width: 72px;
+  height: 56px;
+}
+.hud-panel .poke-btns .pixel-btn.armed {
+  background: var(--red);
+  color: var(--white);
+}
 .hud-panel .now.offline .act-name {
   color: var(--grey);
 }

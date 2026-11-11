@@ -8,6 +8,7 @@ import {
   type AgentKind,
   ConnectorToServer,
   envelope,
+  type HelperSkin,
   MAX_SELF_DESCRIPTION,
   type MessageOf,
   personIdFromName,
@@ -21,6 +22,8 @@ export type LaptopDef = {
   description?: string;
   /** machine label sent in hello ("laptop", "devbox") */
   machine?: string;
+  /** what this person's subagents look like (connector `helpers`); omitted = robots */
+  helpers?: HelperSkin;
 };
 
 export type SessionSpec = {
@@ -212,6 +215,7 @@ export function helloMessage(
   };
   Object.assign(data, helloDescription(laptop.description));
   if (laptop.machine) data.machine = laptop.machine;
+  if (laptop.helpers === "cats") data.helpers = "cats";
   return validateOutgoing(envelope("connector.hello", data, ts === undefined ? {} : { ts }));
 }
 

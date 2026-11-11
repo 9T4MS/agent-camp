@@ -23,6 +23,8 @@ import "./ui/office.css";
 import {
   type AvatarEditResponse,
   type AvatarSpec,
+  type InteractRequest,
+  isCatInteraction,
   type PartyEvent,
   type PersonDayResponse,
   parseViewerMessage,
@@ -32,13 +34,14 @@ import { Application, TextureStyle } from "pixi.js";
 import { CHAR_H, CHAR_RES, CHAR_W, lookFor, lookPreview } from "./art/characters.ts";
 import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
+import { CAT, catTextures } from "./art/fx.ts";
 import { C } from "./art/palette.ts";
 import { avatarPortrait } from "./art/party.ts";
 import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
 import { CHANGELOG } from "./changelog.ts";
 import { DemoFeed, parseDemoMode, parseLookParam } from "./demo/demoFeed.ts";
-import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
+import { type CatAction, Hud, type PokeResult } from "./hud.ts";
 import { keepAwake, reloadInto, watchForNewBuild } from "./kiosk.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
@@ -55,11 +58,11 @@ import {
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
 import { Celebration } from "./ui/celebration.ts";
 import { Minimap } from "./ui/minimap.ts";
-import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
+import { CatColony } from "./world/colony.ts";
 import { Effects } from "./world/effects.ts";
 import { OfficeLife } from "./world/life.ts";
-import { SEASONS, type Season, seasonFor } from "./world/lifeRules.ts";
+import { catCount, SEASONS, type Season, seasonFor } from "./world/lifeRules.ts";
 import { Living } from "./world/living.ts";
 import {
   type AreaName,
@@ -93,6 +96,8 @@ type OfficeApi = {
   openSession(sessionId: string): boolean;
   snapshotPng(): Promise<string | null>;
   characters(): number;
+  /** office cats right now (not counting the ones walking out) */
+  cats(): number;
   /** slow down / freeze the world clock (screenshots of short moments); 1 = normal */
   setSpeed(k: number): void;
 };
@@ -164,15 +169,17 @@ async function boot() {
   }
   // Friday after work: the shop sells more, so the smokers' corner fills up quickly
   if (feierabend) chars.shopChance = 0.4;
-  const cat = new OfficeCat(
-    scene.objects,
-    scene.fx,
-    scene.map,
-    () => chars.idleSpots(),
-    effects,
-    () => chars.catWaitSpots(),
-  );
-  chars.catEats = (sprite, x, y) => cat.tryEat(sprite, x, y);
+  const colony = new CatColony(scene.objects, scene.fx, scene.map, effects, {
+    idleSpots: () => chars.idleSpots(),
+    waitSpots: () => chars.catWaitSpots(),
+    perchFor: (personId, pick) => chars.catPerch(personId, pick),
+    personName: (personId) => model.people.get(personId)?.name ?? personId,
+    onVisit: (personId) => {
+      const c = chars.charactersOf(personId)[0];
+      if (c) effects.after(0.6, () => chars.say(c, "AWW, A CAT!"));
+    },
+  });
+  chars.catEats = (sprite, x, y) => colony.tryEat(sprite, x, y);
   const queen = new OfficeQueen(
     scene.objects,
     scene.map,
@@ -181,8 +188,7 @@ async function boot() {
     (id, text) => chars.answerPage(id, text),
   );
   if (party) {
-    cat.eatChance = 0.6;
-    cat.eatRange = 900;
+    colony.setHunting(0.6, 900);
     queen.pageEvery = 12;
   }
   const hourValue =
@@ -203,7 +209,7 @@ async function boot() {
       burning: () => chars.burningCount(),
       evacuate: (spot) => chars.evacuate(spot),
       personSpot: (personId) => chars.personSpot(personId),
-      catBoss: (spot) => cat.setBoss(spot),
+      catBoss: (spot) => colony.setBoss(spot),
     },
     {
       weather:
@@ -276,7 +282,7 @@ async function boot() {
     const need = model.podCount();
     if (need <= scene.map.podRows * POD_COLS) return;
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
-    cat.setMap(scene.map);
+    colony.setMap(scene.map);
     queen.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
@@ -293,6 +299,7 @@ async function boot() {
     partyWorld.setState(model.party);
     games?.refresh();
     ensureCapacity();
+    colony.sync(catCount(model.people.size));
     for (const ch of changes) {
       chars.handle(ch);
       if (ch.kind === "officeRenamed") hud.setOfficeName(ch.name);
@@ -340,12 +347,33 @@ async function boot() {
   };
   /** Play an interaction for everyone watching (it comes back from the server to all viewers). */
   function react(ch: Extract<ModelChange, { kind: "interaction" }>) {
+    const who = ch.from || "Someone";
+    const catName = colony.get(ch.catId)?.name ?? "the cat";
     if (ch.interaction === "pet") {
-      cat.meow();
+      colony.get(ch.catId)?.meow();
+      return;
+    }
+    if (ch.interaction === "feed" || ch.interaction === "yarn" || ch.interaction === "laser") {
+      if (!ch.spot) return;
+      if (ch.interaction === "feed") {
+        colony.feed(ch.catId, ch.spot);
+        hud.showBanner(`${who} fed ${catName}`, "nom nom nom");
+      } else if (ch.interaction === "yarn") {
+        colony.yarn(ch.catId, ch.spot);
+        hud.showBanner(`${who} tossed ${catName} a yarn ball`);
+      } else {
+        colony.laser(ch.catId, ch.spot);
+        hud.showBanner(`${who} got out the laser pointer`, "the cats are on it");
+      }
+      hud.refreshCat();
       return;
     }
     const targets = ch.personId ? chars.charactersOf(ch.personId) : [];
     const name = ch.personId ? (model.people.get(ch.personId)?.name ?? ch.personId) : "";
+    if (ch.interaction === "cat" && ch.personId) {
+      colony.visit(ch.catId, ch.personId);
+      hud.refreshCat();
+    }
     if (ch.interaction === "paper" || ch.interaction === "tomato") {
       const kind = ch.interaction;
       const c = targets[Math.floor(Math.random() * targets.length)];
@@ -372,7 +400,7 @@ async function boot() {
             });
         }
       }
-    } else {
+    } else if (ch.interaction !== "cat") {
       const text =
         ch.interaction === "message"
           ? fitText((ch.text ?? "").toUpperCase(), 110)
@@ -387,24 +415,49 @@ async function boot() {
         : ch.delivered > 0
           ? `popped up on ${ch.delivered} Mac${ch.delivered === 1 ? "" : "s"}`
           : "their Mac is not listening";
-    hud.showBanner(`${ch.from || "Someone"} ${VERB[ch.interaction]} ${name}`, macs);
+    const title =
+      ch.interaction === "cat"
+        ? `${who} sent ${catName} to ${name}`
+        : `${who} ${VERB[ch.interaction]} ${name}`;
+    hud.showBanner(title, macs);
   }
 
-  async function poke(req: PokeRequest | { kind: "pet" }): Promise<PokeResult> {
+  const DONE: Partial<Record<InteractRequest["kind"], string>> = {
+    tomato: "splat!",
+    paper: "bonk!",
+    pet: "purr!",
+    feed: "nom nom nom",
+    yarn: "boing!",
+    laser: "pew!",
+  };
+  /** One shared client cooldown for every cat request: spam would only earn 429s that still count. */
+  const CAT_COOLDOWN_MS = 2000;
+  let catPokeAt = -Infinity;
+  async function poke(input: InteractRequest): Promise<PokeResult> {
+    // which cat goes: picked here, so every viewer sends the same one
+    const req =
+      input.kind === "cat" && input.catId === undefined
+        ? { ...input, catId: colony.randomSlot() }
+        : input;
+    const officeOnly = isCatInteraction(req.kind) || req.kind === "paper" || req.kind === "tomato";
     if (demo) {
       ingest({
         v: 1,
         type: "interaction.happened",
         id: `demo-${Date.now()}`,
         ts: Date.now(),
-        data: {
-          ...req,
-          ...(req.kind !== "pet" && req.kind !== "paper" && req.kind !== "tomato"
-            ? { delivered: 0 }
-            : {}),
-        },
+        data: { ...req, ...(officeOnly ? {} : { delivered: 0 }) },
       });
-      return { ok: true, message: "sent (demo: no Macs here)" };
+      return {
+        ok: true,
+        message: officeOnly ? (DONE[req.kind] ?? "done") : "sent (demo: no Macs here)",
+      };
+    }
+    if (isCatInteraction(req.kind) || req.kind === "cat") {
+      const now = performance.now();
+      if (now - catPokeAt < CAT_COOLDOWN_MS)
+        return { ok: false, message: "the cats need a breather" };
+      catPokeAt = now;
     }
     try {
       const r = await fetch("/api/interact", {
@@ -415,13 +468,13 @@ async function boot() {
       const body = (await r.json().catch(() => ({}))) as { delivered?: number; error?: string };
       if (r.status === 401) void loginIfLoggedOut();
       if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
-      if (req.kind === "tomato") return { ok: true, message: "splat!" };
-      if (req.kind === "paper" || req.kind === "pet") return { ok: true, message: "bonk!" };
+      if (officeOnly) return { ok: true, message: DONE[req.kind] ?? "done" };
+      const sent = req.kind === "cat" ? "a cat is on its way" : "sent";
       return {
         ok: true,
         message: body.delivered
-          ? "sent, it popped up on their Mac"
-          : "sent (their Mac is not listening)",
+          ? `${sent}, it popped up on their Mac`
+          : `${sent} (their Mac is not listening)`,
       };
     } catch {
       return { ok: false, message: "could not reach the office" };
@@ -429,6 +482,40 @@ async function boot() {
   }
   if (!kiosk) hud.onPoke = poke;
 
+  // ---- the cat card --------------------------------------------------------------------------
+  /** Laser armed from a cat card: the next tap on the floor points it. */
+  let laserArmed: { slot: number; from: string | undefined } | null = null;
+  hud.catInfo = (slot) => {
+    const cat = colony.get(slot);
+    if (!cat) return null;
+    const frame = catTextures(cat.coat)[CAT.sit[0]]!;
+    const src = frame.source.resource as HTMLCanvasElement | undefined;
+    let portrait: HTMLCanvasElement | null = null;
+    if (src) {
+      portrait = document.createElement("canvas");
+      portrait.width = 72;
+      portrait.height = 56;
+      const ctx = portrait.getContext("2d")!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(src, frame.frame.x, frame.frame.y, 18, 14, 0, 0, 72, 56);
+    }
+    return { slot, name: cat.name, coat: cat.coat.label, status: cat.status(), portrait };
+  };
+  if (!kiosk)
+    hud.onCatAction = async (action: CatAction, slot, from) => {
+      laserArmed = null;
+      const sign = from ? { from } : {};
+      if (action === "laser") {
+        laserArmed = { slot, from };
+        return { ok: true, message: "now tap the floor to point it" };
+      }
+      if (action === "pet") {
+        colony.get(slot)?.meow();
+        return poke({ kind: "pet", catId: slot, ...sign });
+      }
+      const spot = colony.dropSpot(slot);
+      return poke({ kind: action, catId: slot, x: spot.x, y: spot.y, ...sign });
+    };
   /** Look editor: PUT the picked look (null = back to automatic). */
   async function editLook(personId: string, avatar: AvatarSpec | null) {
     if (demo) {
@@ -562,6 +649,7 @@ async function boot() {
   camera.holdWhile = () => hud.panelOpen || hud.lookEditorOpen;
   hud.onPanelChange = () => {
     chars.selected = hud.openSessionId;
+    if (hud.openCatSlot === null) laserArmed = null;
   };
   hud.fetchDay = async (personId): Promise<PersonDayResponse | null> => {
     if (demo) return null;
@@ -575,9 +663,24 @@ async function boot() {
       location.href = key ? `./stats?key=${encodeURIComponent(key)}` : "./stats";
       return;
     }
-    if (cat.hit(wx, wy)) {
+    if (laserArmed) {
+      const armed = laserArmed;
+      if (!scene.map.isWalkable(Math.floor(wx / 16), Math.floor((wy - 2) / 16))) return;
+      laserArmed = null;
+      void poke({
+        kind: "laser",
+        catId: armed.slot,
+        x: Math.max(0, Math.round(wx)),
+        y: Math.max(0, Math.round(wy)),
+        ...(armed.from ? { from: armed.from } : {}),
+      }).then((r) => hud.laserDone(r));
+      return;
+    }
+    const cat = colony.hit(wx, wy);
+    if (cat) {
       cat.meow();
-      if (!demo) void poke({ kind: "pet" });
+      if (!demo) void poke({ kind: "pet", catId: cat.slot });
+      hud.openCat(cat.slot);
       return;
     }
     const c = chars.pick(wx, wy);
@@ -793,7 +896,12 @@ async function boot() {
     scene.update(time, dt);
     chars.update(dt, time);
     partyWorld.update(dt, time);
-    cat.update(dt, time);
+    colony.update(dt, time);
+    // cats coming in or going home get the door opened too
+    if (!scene.doorWanted) {
+      const d = scene.map.door;
+      scene.doorWanted = colony.nearDoor({ x: (d.x + 1) * 16, y: (d.y + 1) * 16 });
+    }
     queen.update(dt, time);
     life.update(dt, time);
     effects.update(dt);
@@ -854,6 +962,7 @@ async function boot() {
       });
     },
     characters: () => chars.chars.size,
+    cats: () => colony.cats().length,
     setSpeed: (k) => {
       speed = Math.max(0, k);
     },

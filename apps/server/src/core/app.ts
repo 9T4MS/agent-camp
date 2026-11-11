@@ -75,6 +75,7 @@ const POKE_TEXT = {
   wave: "waved at you 👋",
   coffee: "wants to grab a coffee ☕",
   cheer: "cheers you on 🎉",
+  cat: "sent a cat to sit on your keyboard 🐈",
 } as const;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
@@ -588,7 +589,12 @@ export class OfficeApp {
 
     let delivered = 0;
     const kind = r.kind;
-    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer" || kind === "message";
+    const pokes =
+      kind === "wave" ||
+      kind === "coffee" ||
+      kind === "cheer" ||
+      kind === "message" ||
+      kind === "cat";
     const officeOnly = !pokes;
     if (r.personId && pokes) {
       if (now - (this.lastPoke.get(r.personId) ?? 0) < POKE_PER_PERSON_MS)
@@ -610,6 +616,8 @@ export class OfficeApp {
       ...(r.from ? { from: r.from } : {}),
       ...(r.text && r.kind === "message" ? { text: r.text } : {}),
       ...(r.personId && !officeOnly ? { delivered } : {}),
+      ...(r.catId !== undefined ? { catId: r.catId } : {}),
+      ...(r.x !== undefined && r.y !== undefined ? { x: r.x, y: r.y } : {}),
     });
     this.transport.broadcast(JSON.stringify(event));
     this.hub.log(`interaction ${r.kind} ${r.personId ?? "-"} delivered=${delivered}`);

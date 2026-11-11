@@ -29,7 +29,8 @@ export function notificationLines(p: Poke): { body: string; subtitle: string } {
   const from = clean(p.from ?? "", 40);
   return {
     body: clean(p.text, 200),
-    subtitle: p.kind === "message" ? `${from || "Someone"} says` : "",
+    subtitle:
+      p.kind === "message" ? `${from || "Someone"} says` : p.kind === "cat" ? "Cat delivery" : "",
   };
 }
 

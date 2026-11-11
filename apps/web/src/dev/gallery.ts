@@ -13,8 +13,17 @@ import { LOOK_FIXTURES } from "@agent-office/protocol/fixtures";
 import { type Application, Container, Sprite, Text } from "pixi.js";
 import { ANIM, CHAR_H, CHAR_W, characterSheet, lookFor } from "../art/characters.ts";
 import { chairTexture, deskTexture, monitorTextures, propTexture } from "../art/desk.ts";
+import { bowlTextures, laserTextures, yarnTextures } from "../art/fun.ts";
 import { ART, furnitureFrames } from "../art/furniture.ts";
-import { alertTextures, botTextures, bubbleTexture, catTextures, dotsTextures } from "../art/fx.ts";
+import {
+  alertTextures,
+  botTextures,
+  bubbleTexture,
+  CAT_COATS,
+  catTextures,
+  dotsTextures,
+  kittenTextures,
+} from "../art/fx.ts";
 import { C } from "../art/palette.ts";
 import { queenTextures } from "../art/queen.ts";
 import { parseLookParam } from "../demo/demoFeed.ts";
@@ -136,6 +145,29 @@ export function showGallery(app: Application) {
     s.position.set(x2, y2);
     root.addChild(s);
     x2 += t.width + 3;
+  }
+  // every cat coat (cat, then helper kittens for each agent), then the cat toys
+  const y3 = y2 + 30;
+  CAT_COATS.forEach((coat, row) => {
+    catTextures(coat).forEach((t, i) => {
+      const s = new Sprite(t);
+      s.position.set(4 + i * 20, y3 + row * 16);
+      root.addChild(s);
+    });
+    AGENTS.forEach((agent, k) => {
+      kittenTextures(agent, coat).forEach((t, i) => {
+        const s = new Sprite(t);
+        s.position.set(4 + 8 * 20 + 8 + k * 28 + i * 13, y3 + 18 + row * 16);
+        root.addChild(s);
+      });
+    });
+  });
+  let x4 = 4 + 8 * 20 + 8;
+  for (const t of [...bowlTextures(), ...yarnTextures(), ...laserTextures()]) {
+    const s = new Sprite(t);
+    s.position.set(x4, y3);
+    root.addChild(s);
+    x4 += t.width + 3;
   }
 }
 
