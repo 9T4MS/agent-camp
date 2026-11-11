@@ -522,6 +522,27 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(16, 0, 2, 2, C.lemon);
     },
   },
+  serverRack: {
+    w: 16,
+    h: 30,
+    frames: 2,
+    draw(pc, _v, f) {
+      pc.rect(1, 0, 14, 29, C.ink);
+      pc.hline(1, 0, 14, C.slate);
+      pc.vline(14, 1, 28, C.night);
+      for (let u = 0; u < 5; u++) {
+        const y = 3 + u * 5;
+        pc.rect(3, y, 10, 3, C.slate);
+        pc.hline(3, y, 10, C.grey);
+        const on = (u + f) % 2 === 0;
+        pc.set(4, y + 1, on ? C.leaf : C.moss);
+        pc.set(6, y + 1, (u * 3 + f) % 3 === 0 ? C.amber : C.night);
+        pc.hline(9, y + 1, 3, C.night);
+      }
+      pc.rect(2, 28, 2, 1, C.night);
+      pc.rect(12, 28, 2, 1, C.night);
+    },
+  },
   printer: {
     w: 16,
     h: 20,

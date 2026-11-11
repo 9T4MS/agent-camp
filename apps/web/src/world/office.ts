@@ -11,6 +11,7 @@ import {
   deskTexture,
   doorTextures,
   MONITOR,
+  MONITOR_FPS,
   type MonitorState,
   messTextures,
   monitorTextures,
@@ -18,6 +19,7 @@ import {
   propTexture,
 } from "../art/desk.ts";
 import { furnitureFrames, furnitureMeta } from "../art/furniture.ts";
+import { deskLampTextures, leafTexture } from "../art/fun.ts";
 import { glowTexture, pixelTexture, whiteboardTexture } from "../art/fx.ts";
 import { C, hexNum } from "../art/palette.ts";
 import {
@@ -26,6 +28,8 @@ import {
   renderTerrain,
   rugTexture,
   SURROUND,
+  WEATHER_FRAMES,
+  type Weather,
   type WindowRect,
   windowPane,
 } from "../art/tiles.ts";
@@ -52,6 +56,8 @@ type Anim = {
   fps: number;
   phase: number;
   kind: "loop" | "arcade" | "neon";
+  /** tile x of the object (arcades: which machine someone plays) */
+  tileX: number;
 };
 type Glow = { sprite: Sprite; base: number; kind: "lamp" | "window" };
 
@@ -63,6 +69,9 @@ export type DeskView = {
   glow: Sprite;
   state: MonitorState;
   seat: { x: number; y: number };
+  /** desk lamp (shown at night, lit while the session works) */
+  lamp: Sprite;
+  lampGlow: Sprite;
 };
 
 export type PodOwner = {
@@ -116,6 +125,14 @@ export class OfficeScene {
   private whiteboard!: Sprite;
   private whiteboardKey = "";
   gameLit = false;
+  /** someone has 10+ helpers: the game corner throws a party */
+  party = false;
+  /** tile x of arcade machines someone is playing right now */
+  readonly arcadeBusy = new Set<number>();
+  private partyGlows: { sprite: Sprite; y: number }[] = [];
+  private leaves: { sprite: Sprite; from: number }[] = [];
+  private sky: "day" | "dusk" | "night" = "day";
+  weather: Weather = "sun";
 
   constructor(public map: OfficeMap) {
     this.objects.sortableChildren = true;
@@ -152,6 +169,8 @@ export class OfficeScene {
     this.lampGlows = [];
     this.panes = [];
     this.steam = [];
+    this.partyGlows = [];
+    this.leaves = [];
     this.whiteboardKey = "";
     this.build();
     for (const c of keepChars) this.objects.addChild(c);
@@ -178,6 +197,18 @@ export class OfficeScene {
       this.addGlow(rect.x + rect.w / 2, rect.y + rect.h + 6, 20, C.cyan, 0.0, "window");
     }
     for (const ob of this.map.objects) this.placeObject(ob);
+    // party lights over the game corner (hidden until someone runs 10+ helpers)
+    const game = this.map.areas.find((a) => a.name === "game");
+    if (game) {
+      for (let i = 0; i < 4; i++) {
+        const g = new Sprite(glowTexture(30, C.neon));
+        g.anchor.set(0.5);
+        g.visible = false;
+        g.position.set((game.x + 3 + i * 3.5) * TILE, (game.y + 2.5) * TILE);
+        this.glows.addChild(g);
+        this.partyGlows.push({ sprite: g, y: g.y });
+      }
+    }
     for (let pod = 0; pod < this.slotCount; pod++) this.setSlot(pod, { kind: "nook" });
 
     const d = this.map.door;
@@ -230,7 +261,38 @@ export class OfficeScene {
     if (frames.length > 1) {
       const kind = ob.kind === "arcade" ? "arcade" : ob.kind === "neon" ? "neon" : "loop";
       const fps = ob.kind === "tree" ? 0.7 : ob.kind === "tv" ? 2 : 1.4;
-      this.anims.push({ sprite: s, frames, fps, phase: (ob.x * 7 + ob.y * 3) % 10, kind });
+      this.anims.push({
+        sprite: s,
+        frames,
+        fps,
+        phase: (ob.x * 7 + ob.y * 3) % 10,
+        kind,
+        tileX: ob.x,
+      });
+    }
+    if (ob.kind === "plant" || ob.kind === "plantBig") {
+      // a new leaf or two sprouts as the day goes on
+      const spots =
+        ob.kind === "plant"
+          ? [
+              { x: left - 2, y: top + 3, from: 11 },
+              { x: left + meta.w - 3, y: top + 6, from: 15 },
+            ]
+          : [
+              { x: left - 2, y: top + 4, from: 10.5 },
+              { x: left + meta.w - 3, y: top + 9, from: 14.5 },
+            ];
+      for (const sp of spots) {
+        const leaf = new Sprite(leafTexture());
+        leaf.position.set(sp.x, sp.y);
+        leaf.zIndex = s.zIndex + 0.1;
+        leaf.visible = false;
+        if (sp.x > left + 4) leaf.scale.x = -1;
+        if (sp.x > left + 4) leaf.x += 6;
+        this.objects.addChild(leaf);
+        added.push(leaf);
+        this.leaves.push({ sprite: leaf, from: sp.from });
+      }
     }
     switch (ob.kind) {
       case "floorLamp":
@@ -324,6 +386,7 @@ export class OfficeScene {
     for (const t of view.owned) t.destroy(true);
     const gone = new Set(view.items.map((i) => i.obj));
     this.anims = this.anims.filter((a) => !gone.has(a.sprite));
+    this.leaves = this.leaves.filter((l) => !gone.has(l.sprite));
     this.lampGlows = this.lampGlows.filter((g) => !gone.has(g.sprite));
     for (let d = 0; d < view.desks; d++) this.desks.delete(`${pod}:${d}`);
     if (view.pois.length) this.nookPois = this.nookPois.filter((p) => !view.pois.includes(p));
@@ -381,8 +444,28 @@ export class OfficeScene {
       glow.position.set(t.x + Math.round(pitch / 2), t.y + 2);
       glow.alpha = 0;
       glow.visible = false;
-      this.track(view, this.glows, glow);
-      this.desks.set(`${pod}:${d}`, { pod, desk: d, chair, monitor, glow, state: "off", seat });
+      const lamp = new Sprite(deskLampTextures()[0]!);
+      lamp.position.set(t.x + 1, t.y + 1);
+      lamp.zIndex = desk.zIndex + 0.4;
+      lamp.visible = false;
+      const lampGlow = new Sprite(glowTexture(16, C.amber));
+      lampGlow.anchor.set(0.5);
+      lampGlow.position.set(t.x + 5, t.y + 10);
+      lampGlow.visible = false;
+      lampGlow.alpha = 0.75;
+      this.track(view, this.glows, glow, lampGlow);
+      this.track(view, this.objects, lamp);
+      this.desks.set(`${pod}:${d}`, {
+        pod,
+        desk: d,
+        chair,
+        monitor,
+        glow,
+        state: "off",
+        seat,
+        lamp,
+        lampGlow,
+      });
     }
     setSlotBlocked(this.map, pod, podBlockTiles(pod, n));
     const plate = new Sprite(
@@ -450,7 +533,10 @@ export class OfficeScene {
     if (!d || d.state === state) return;
     d.state = state;
     d.monitor.texture = monitorTextures()[MONITOR[state][0]]!;
-    d.glow.texture = glowTexture(14, state === "run" ? C.leaf : state === "wait" ? C.amber : C.sky);
+    d.glow.texture = glowTexture(
+      14,
+      state === "run" ? C.leaf : state === "wait" ? C.amber : state === "think" ? C.lemon : C.sky,
+    );
   }
 
   accentFor(agent: keyof typeof AGENT_PALETTES) {
@@ -471,7 +557,8 @@ export class OfficeScene {
     this.overlay.tint = hexNum(tint);
     this.overlay.alpha = alpha;
     this.overlay.visible = alpha > 0.01;
-    for (const p of this.panes) p.sprite.texture = windowPane(sky, p.rect.w, p.rect.h);
+    this.sky = sky;
+    for (const p of this.panes) p.sprite.texture = windowPane(sky, p.rect.w, p.rect.h, this.weather);
     for (const g of this.lampGlows) {
       g.sprite.alpha = g.kind === "lamp" ? g.base * night : sky === "day" ? 0.12 : 0;
       g.sprite.visible = g.sprite.alpha > 0.01;
@@ -480,29 +567,71 @@ export class OfficeScene {
   }
   night = 0;
 
+  /** Local hour (living.ts, every 2 s): plants sprout their new leaves through the day. */
+  setHour(hour: number) {
+    for (const l of this.leaves) l.sprite.visible = hour >= l.from;
+  }
+
   update(time: number, dt: number) {
     for (const a of this.anims) {
       let idx: number;
-      if (a.kind === "arcade") idx = this.gameLit ? 1 + (Math.floor(time * 3 + a.phase) % 2) : 0;
-      else if (a.kind === "neon")
-        idx = this.gameLit ? 1 : Math.floor(time * 0.5 + a.phase) % 7 === 0 ? 1 : 0;
+      if (a.kind === "arcade") {
+        if (this.party) idx = 1 + (Math.floor(time * 8 + a.phase) % 2);
+        else if (this.arcadeBusy.has(a.tileX))
+          // someone plays: the screen flashes with the action
+          idx = Math.floor(time * 5 + a.phase) % 5 === 0 ? 0 : 1 + (Math.floor(time * 4) % 2);
+        else idx = this.gameLit ? 1 + (Math.floor(time * 3 + a.phase) % 2) : 0;
+      } else if (a.kind === "neon")
+        idx = this.party
+          ? Math.floor(time * 4) % 2
+          : this.gameLit
+            ? 1
+            : Math.floor(time * 0.5 + a.phase) % 7 === 0
+              ? 1
+              : 0;
       else idx = Math.floor(time * a.fps + a.phase) % a.frames.length;
       const tex = a.frames[idx]!;
       if (a.sprite.texture !== tex) a.sprite.texture = tex;
     }
-    // monitors: animate on-screens at ~2 fps
-    const blink = Math.floor(time * 2);
+    // monitors: per-state speed (running output scrolls, reading flips pages)
+    const lampsOn = this.night > 0.35;
     for (const d of this.desks.values()) {
+      const working = d.state !== "off" && d.state !== "idle";
+      d.lamp.visible = lampsOn;
+      if (lampsOn) {
+        const lt = deskLampTextures()[working ? 1 : 0]!;
+        if (d.lamp.texture !== lt) d.lamp.texture = lt;
+      }
+      d.lampGlow.visible = lampsOn && working;
       if (d.state === "off") {
         d.glow.visible = false;
         continue;
       }
       const frames = MONITOR[d.state];
-      const tex = monitorTextures()[frames[(blink + d.desk) % frames.length]!]!;
+      const tick = Math.floor(time * MONITOR_FPS[d.state] + d.desk * 1.7 + d.pod * 0.9);
+      const tex = monitorTextures()[frames[tick % frames.length]!]!;
       if (d.monitor.texture !== tex) d.monitor.texture = tex;
       d.glow.alpha =
         d.state === "run" ? 0.55 + 0.15 * Math.sin(time * 4 + d.desk) : 0.35 * this.night;
       d.glow.visible = d.glow.alpha > 0.01;
+    }
+    // weather drifting by in the window panes
+    const wn = WEATHER_FRAMES[this.weather];
+    if (wn > 1) {
+      const f = Math.floor(time * (this.weather === "rain" ? 6 : 0.25)) % wn;
+      for (const p of this.panes) {
+        const t = windowPane(this.sky, p.rect.w, p.rect.h, this.weather, f);
+        if (p.sprite.texture !== t) p.sprite.texture = t;
+      }
+    }
+    // party lights in the game corner
+    for (const [i, { sprite: g, y }] of this.partyGlows.entries()) {
+      g.visible = this.party;
+      if (!this.party) continue;
+      const cols = [C.neon, C.cyan, C.lemon, C.pink, C.leaf];
+      g.texture = glowTexture(30, cols[(Math.floor(time * 3) + i) % cols.length]!);
+      g.alpha = 0.35 + 0.25 * Math.sin(time * 7 + i * 1.3);
+      g.y = Math.round(y + Math.sin(time * 2 + i) * 6);
     }
     // coffee steam
     for (const p of this.steam) {

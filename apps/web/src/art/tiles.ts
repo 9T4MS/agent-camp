@@ -335,33 +335,77 @@ export function renderTerrain(map: OfficeMap): TerrainArt {
 
 /** Sky panes for windows: day / dusk / night variants (cached by size). */
 const paneCache = new Map<string, Texture>();
-export function windowPane(kind: "day" | "dusk" | "night", w: number, h: number): Texture {
-  const key = `${kind}:${w}x${h}`;
+export type Weather = "sun" | "clouds" | "rain";
+/** Frames a weather animates through in the window panes. */
+export const WEATHER_FRAMES: Record<Weather, number> = { sun: 1, clouds: 4, rain: 3 };
+
+export function windowPane(
+  kind: "day" | "dusk" | "night",
+  w: number,
+  h: number,
+  weather: Weather = "sun",
+  frame = 0,
+): Texture {
+  const key = `${kind}:${w}x${h}:${weather}:${frame}`;
   const hit = paneCache.get(key);
   if (hit) return hit;
   const pc = new PixelCanvas(w, h);
+  const grey = weather !== "sun";
   const bands =
     kind === "day"
-      ? [C.sky, C.sky, C.cyan, C.cyan, C.white]
+      ? grey
+        ? weather === "rain"
+          ? [C.slate, C.grey, C.grey, C.silver, C.silver]
+          : [C.sky, C.silver, C.cyan, C.cyan, C.white]
+        : [C.sky, C.sky, C.cyan, C.cyan, C.white]
       : kind === "dusk"
-        ? [C.plum, C.berry, C.pink, C.orange, C.amber]
+        ? grey
+          ? [C.dusk, C.plum, C.berry, C.pink, C.pink]
+          : [C.plum, C.berry, C.pink, C.orange, C.amber]
         : [C.night, C.night, C.ink, C.ink, C.dusk];
   for (let y = 0; y < h; y++) {
     const b = bands[Math.min(bands.length - 1, Math.floor((y / h) * bands.length))]!;
     pc.hline(0, y, w, b);
   }
-  if (kind === "day") {
+  if (kind === "day" && weather === "sun") {
     pc.round(3, 4, 8, 3, C.white);
     pc.round(5, 2, 5, 3, C.white);
     pc.round(15, 9, 6, 3, C.white);
+    pc.ellipse(w - 7, 1, 5, 5, C.lemon);
   } else if (kind === "night") {
-    pc.set(3, 3, C.white);
-    pc.set(14, 6, C.white);
-    pc.set(9, 11, C.silver);
-    pc.set(19, 2, C.silver);
+    if (!grey) {
+      pc.set(3, 3, C.white);
+      pc.set(14, 6, C.white);
+      pc.set(9, 11, C.silver);
+      pc.set(19, 2, C.silver);
+    }
     pc.round(16, 2, 4, 4, C.cream);
-  } else {
+  } else if (kind === "dusk" && !grey) {
     pc.ellipse(8, h - 7, 8, 8, C.lemon);
+  }
+  if (grey) {
+    // drifting clouds (wrap around the pane)
+    const cloud = weather === "rain" ? (kind === "night" ? C.dusk : C.grey) : C.white;
+    const shade = weather === "rain" ? (kind === "night" ? C.ink : C.slate) : C.silver;
+    const n = WEATHER_FRAMES[weather];
+    for (const [cx, cy, cw] of [
+      [2, 2, 10],
+      [14, 6, 8],
+    ] as const) {
+      const x0 = (cx + Math.round((frame * w) / n / 2)) % w;
+      for (const dx of [0, -w]) {
+        pc.round(x0 + dx, cy + 1, cw, 3, shade);
+        pc.round(x0 + dx, cy, cw, 3, cloud);
+        pc.round(x0 + dx + 2, cy - 1, cw - 5, 2, cloud);
+      }
+    }
+    if (weather === "rain") {
+      for (let i = 0; i < 7; i++) {
+        const x = (i * 7 + 3) % w;
+        const y = (i * 5 + frame * 4) % h;
+        pc.vline(x, y, 2, kind === "night" ? C.sky : C.cyan);
+      }
+    }
   }
   // window cross bars
   pc.vline(Math.floor(w / 2), 0, h, C.white);

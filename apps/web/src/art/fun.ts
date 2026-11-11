@@ -394,3 +394,187 @@ export const leafTexture = once(() => {
   pc.outline(0, 0, 6, 5, C.forest);
   return Texture.from(pc.toCanvas());
 });
+
+// ---- slapstick: /clear zaps, ghosts, graveyard, chef -----------------------------------------
+/** Lightning bolt from the monitor down to the chair (3 frames, 13x30). */
+export const boltTextures = once(() => {
+  const fw = 13;
+  const fh = 30;
+  const pc = new PixelCanvas(fw * 3, fh);
+  const shapes = [
+    [6, 5, 7, 4, 8, 3, 6, 5, 7, 4, 6, 5, 7, 5],
+    [5, 6, 4, 6, 7, 8, 5, 6, 4, 5, 6, 7, 6, 5],
+    [7, 6, 8, 5, 4, 5, 7, 8, 6, 5, 4, 6, 7, 6],
+  ];
+  shapes.forEach((xs, f) => {
+    pc.at(f * fw, 0);
+    xs.forEach((x, k) => {
+      pc.rect(x - 1, k * 2, 3, 2, f === 1 ? C.white : C.lemon);
+      pc.vline(x, k * 2, 2, C.white);
+    });
+    pc.at(0, 0);
+    pc.outline(f * fw, 0, fw, fh, C.amber);
+  });
+  return framesOf(pc, fw, fh, 3);
+});
+
+/** Charred little pile with smoke (3 frames, 16x16). */
+export const pileTextures = once(() => {
+  const fw = 16;
+  const pc = new PixelCanvas(fw * 3, fw);
+  for (let f = 0; f < 3; f++) {
+    pc.at(f * fw + 1, 0);
+    pc.ellipse(1, 10, 12, 5, C.ink);
+    pc.ellipse(3, 9, 8, 4, C.slate);
+    pc.set(5, 10, C.orange);
+    pc.set(8, 11, C.red);
+    pc.set(6, 9, C.night);
+    pc.set(9, 9, C.night);
+    // smoke puffs drifting up
+    const sx = [5, 7, 6][f]!;
+    pc.rect(sx, 6 - f, 2, 2, C.silver);
+    pc.rect(sx + (f % 2 ? -2 : 2), 3 - f, 2, 2, C.grey);
+    if (f > 0) pc.set(sx + 1, 1, C.grey);
+    pc.at(0, 0);
+  }
+  pc.outline(0, 7, fw * 3, 9);
+  return framesOf(pc, fw, fw, 3);
+});
+
+/** Tombstone at the desk: "RIP" + a short label (project · minutes). */
+const tombs = new Map<string, Texture>();
+export function tombstoneTexture(label: string): Texture {
+  const hit = tombs.get(label);
+  if (hit) return hit;
+  const tw = Math.max(measureText("RIP"), measureText(label));
+  const w = tw + 6;
+  const h = 2 * FONT_HEIGHT + 8;
+  const pc = new PixelCanvas(w + 2, h + 3);
+  pc.at(1, 1);
+  pc.rect(0, 3, w, h - 3, C.grey);
+  pc.rect(2, 0, w - 4, 3, C.grey);
+  pc.rect(1, 1, w - 2, 2, C.grey);
+  pc.hline(2, 0, w - 4, C.silver);
+  pc.vline(0, 3, h - 3, C.silver);
+  pc.vline(w - 1, 3, h - 3, C.slate);
+  drawText(pc, Math.floor((w - measureText("RIP")) / 2), 3, "RIP", C.night);
+  drawText(pc, Math.floor((w - measureText(label)) / 2), 4 + FONT_HEIGHT + 1, label, C.ink);
+  pc.hline(-1, h - 1, w + 2, C.moss);
+  pc.at(0, 0);
+  pc.outline();
+  const t = Texture.from(pc.toCanvas());
+  tombs.set(label, t);
+  return t;
+}
+
+/** Wobbly cartoon ghost (2 frames, 14x16). */
+export const ghostTextures = once(() => {
+  const fw = 14;
+  const fh = 16;
+  const pc = new PixelCanvas(fw * 2, fh);
+  for (let f = 0; f < 2; f++) {
+    pc.at(f * fw + 1, 1);
+    pc.ellipse(0, 0, 12, 10, C.white);
+    pc.rect(0, 5, 12, 7, C.white);
+    for (let x = 0; x < 12; x += 3) pc.rect(x + (f ? 1 : 0), 12, 2, 2, C.white);
+    pc.vline(11, 4, 8, C.silver);
+    pc.rect(3, 4, 2, 2, C.night);
+    pc.rect(7, 4, 2, 2, C.night);
+    pc.rect(5, 8, 2, f ? 2 : 1, C.night);
+    pc.at(0, 0);
+    pc.outline(f * fw, 0, fw, fh, C.slate);
+  }
+  return framesOf(pc, fw, fh, 2);
+});
+
+/** Small garden headstones: [upright, crooked, flat (crashed)] (8x10). */
+export const headstoneTextures = once(() => {
+  const fw = 9;
+  const fh = 10;
+  const pc = new PixelCanvas(fw * 3, fh);
+  pc.at(1, 1);
+  pc.rect(0, 2, 6, 6, C.grey);
+  pc.rect(1, 1, 4, 1, C.grey);
+  pc.hline(2, 0, 2, C.silver);
+  pc.vline(2, 3, 3, C.slate);
+  pc.hline(1, 4, 3, C.slate);
+  pc.hline(-1, 8, 8, C.moss);
+  pc.at(fw + 1, 1);
+  pc.rect(1, 2, 6, 6, C.grey);
+  pc.rect(2, 1, 4, 1, C.grey);
+  pc.rect(3, 0, 2, 1, C.silver);
+  pc.set(0, 7, C.grey);
+  pc.vline(3, 3, 3, C.slate);
+  pc.hline(2, 4, 3, C.slate);
+  pc.hline(-1, 8, 8, C.moss);
+  pc.at(fw * 2 + 1, 4);
+  pc.rect(0, 1, 7, 3, C.grey);
+  pc.hline(0, 1, 7, C.silver);
+  pc.set(3, 2, C.slate);
+  pc.hline(-1, 4, 9, C.moss);
+  pc.at(0, 0);
+  pc.outline();
+  return framesOf(pc, fw, fh, 3);
+});
+
+/** Wooden sign "TODAY'S FALLEN: n". */
+const signs = new Map<string, Texture>();
+export function fallenSignTexture(n: number): Texture {
+  const text = `FALLEN TODAY ${n}`;
+  const hit = signs.get(text);
+  if (hit) return hit;
+  const w = measureText(text) + 6;
+  const h = FONT_HEIGHT + 5;
+  const pc = new PixelCanvas(w + 2, h + 8);
+  pc.at(1, 1);
+  pc.rect(0, 0, w, h, C.tan);
+  pc.hline(0, 0, w, C.sand);
+  pc.hline(0, h - 1, w, C.wood);
+  drawText(pc, 3, 2, text, C.night);
+  pc.rect(3, h, 2, 6, C.bark);
+  pc.rect(w - 5, h, 2, 6, C.bark);
+  pc.at(0, 0);
+  pc.outline();
+  const t = Texture.from(pc.toCanvas());
+  signs.set(text, t);
+  return t;
+}
+
+/** Chef bot with a big knife, then the sandwich it actually brings: [knife a, knife b, sandwich] (14x18). */
+export const chefTextures = once(() => {
+  const fw = 16;
+  const fh = 20;
+  const pc = new PixelCanvas(fw * 3, fh);
+  for (let f = 0; f < 3; f++) {
+    pc.at(f * fw + 2, 1);
+    // toque
+    pc.rect(2, 0, 7, 4, C.white);
+    pc.rect(1, 1, 9, 2, C.white);
+    pc.hline(3, 4, 5, C.silver);
+    // body
+    pc.round(1, 5, 9, 7, C.silver);
+    pc.rect(2, 7, 7, 2, C.night);
+    pc.set(3, 7, C.red);
+    pc.set(7, 7, C.red);
+    pc.rect(2, 12, 7, 3, C.white);
+    pc.vline(3, 15, 2, C.slate);
+    pc.vline(7, 15, 2, C.slate);
+    if (f < 2) {
+      // knife raised (wobbles)
+      const kx = 10;
+      const ky = f ? 3 : 4;
+      pc.rect(kx, ky, 2, 6, C.white);
+      pc.vline(kx + 1, ky, 6, C.silver);
+      pc.rect(kx, ky + 6, 2, 3, C.bark);
+    } else {
+      // sandwich held out
+      pc.rect(9, 8, 6, 1, C.sand);
+      pc.rect(9, 9, 6, 1, C.leaf);
+      pc.rect(9, 10, 6, 1, C.red);
+      pc.rect(9, 11, 6, 1, C.sand);
+    }
+    pc.at(0, 0);
+    pc.outline(f * fw, 0, fw, fh);
+  }
+  return framesOf(pc, fw, fh, 3);
+});
