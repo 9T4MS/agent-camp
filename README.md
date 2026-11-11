@@ -135,6 +135,42 @@ anything else from a transcript. A unit test feeds a transcript containing a fak
 checks it never appears in any outgoing message. History keeps only events (who, which agent,
 project folder name, subagent counts), never content.
 
+## Dress up and play together
+
+Open **✦ Dress up & play** in the office to choose your person, preview a look, and save it
+with the office connector password. There are six combinable slots: 10 headwear options,
+5 wrist styles, 7 character outfits, 6 accent colors, 12 hand-item choices and 5 rides
+(including “none” / classic). Cat ears, neon bracelets, a costume, a held item and a ride
+can all be worn together. Three presets and a randomizer make a quick starting point.
+The preview uses the person's actual base avatar; saved costumes appear on all their sessions
+and survive connector reconnects, description changes and server restarts.
+
+- **Use item:** swing a lightsaber, fire confetti, toast a beer, puff cigarette smoke,
+  blow bubbles, flash a disco ball, cast stars, bounce a balloon, spray water,
+  shake maracas or shelter under umbrella rain.
+- **Dance / Wave:** send a visible shared gesture.
+- **High-five:** choose an online buddy; both earn one party point.
+- **Play tag:** choose an online buddy; send a tag spark and earn one point.
+- **Roll & race:** equip a car, skateboard, hoverboard or spaceship; a server dice roll
+  moves the ride along the Office GP strip and awards 1–6 points. Compete on the shared board.
+
+Actions have a short server cooldown. Costume changes and points persist; effects last only
+seconds. Other viewers (including kiosks) pick up changes about every 1.5 seconds. Reduced-motion
+preferences keep effects calmer. In `?demo=party`, the same controls work locally without a
+password, with no changes sent to the server.
+
+Access is **team-trusted**: the existing office password can edit any selected person's outfit;
+this is not individual account authentication. The party panel keeps the password in tab memory
+only. Reads respect the existing viewer login; mutations require the connector password.
+No connector update or AI key is required, but the server and web bundle must be deployed together.
+
+Local checks: `bun run lint`, `bun run typecheck`, `bun test`, `bun run test:e2e`, then
+`bun run --filter @agent-office/web build && bun tools/screenshots/party-smoke.ts`.
+The last command starts an isolated real server with two simulated participants and two browser
+viewers, exercises all usable items and games, and saves desktop/mobile screenshots under
+`/private/tmp/agent-office-party-shots` (override with `PARTY_SHOTS`). Install Chromium once with
+`bun run --filter @agent-office/screenshots install-browsers`. It never connects to the live office.
+
 ## Watching
 
 | URL                  | What                                                                  |

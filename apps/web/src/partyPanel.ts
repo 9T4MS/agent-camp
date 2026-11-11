@@ -268,13 +268,15 @@ export class PartyPanel {
     this.roster = roster;
     this.personSelect.replaceChildren();
     for (const p of people) this.personSelect.add(new Option(p.name, p.personId));
+    const previousPerson = this.person;
     if (!this.model.people.has(this.person)) {
       this.world.preview(this.person, null);
       this.person =
         people.find((p) => p.personId === "schobes")?.personId ?? people[0]?.personId ?? "";
     }
     this.personSelect.value = this.person;
-    this.loadLook();
+    if (previousPerson !== this.person || !this.dirty) this.loadLook();
+    else this.refreshTargets();
     this.updateBoard();
   }
 
@@ -282,6 +284,11 @@ export class PartyPanel {
     this.draft = { ...(this.state.profiles[this.person] ?? DEFAULT_PARTY_LOOK) };
     this.dirty = false;
     this.syncFields();
+    this.refreshTargets();
+    this.preview();
+  }
+
+  private refreshTargets() {
     const oldTarget = this.targetSelect.value;
     this.targetSelect.replaceChildren(new Option("Choose a buddy", ""));
     for (const p of this.model.people.values()) {
@@ -289,7 +296,6 @@ export class PartyPanel {
     }
     if ([...this.targetSelect.options].some((o) => o.value === oldTarget))
       this.targetSelect.value = oldTarget;
-    this.preview();
   }
 
   private preset(look: PartyLook) {
@@ -305,7 +311,9 @@ export class PartyPanel {
   }
 
   private preview() {
-    this.portrait.replaceChildren(partyPortrait(this.draft));
+    const person = this.model.people.get(this.person);
+    const agent = this.model.sessionsOf(this.person)[0]?.agent ?? "codex";
+    this.portrait.replaceChildren(partyPortrait(this.draft, person?.avatar, agent));
     const caption = document.createElement("span");
     caption.textContent = this.dirty ? "PREVIEW · save to share" : "Mix six slots. Make it yours.";
     this.portrait.append(caption);
@@ -314,6 +322,12 @@ export class PartyPanel {
   }
 
   private updateButtons() {
+    this.personSelect.disabled = this.busy;
+    this.targetSelect.disabled = this.busy;
+    for (const select of this.fields) select.disabled = this.busy;
+    for (const preset of this.drawer.querySelectorAll<HTMLButtonElement>(".party-presets button")) {
+      preset.disabled = this.busy;
+    }
     for (const b of this.actions) {
       const action = b.dataset.action;
       b.disabled =
@@ -369,8 +383,10 @@ export class PartyPanel {
       const state = PartyState.parse(await response.json());
       if (!this.busy && version === this.mutationVersion) this.apply(state);
     } catch (err) {
-      this.notice.textContent =
-        err instanceof Error ? err.message : "Party connection unavailable.";
+      if (version === this.mutationVersion) {
+        this.notice.textContent =
+          err instanceof Error ? err.message : "Party connection unavailable.";
+      }
     } finally {
       this.pollPending = false;
     }

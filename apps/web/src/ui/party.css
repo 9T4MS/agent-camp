@@ -89,8 +89,8 @@
   padding: 10px;
 }
 .party-portrait canvas {
-  width: 112px;
-  height: 112px;
+  width: 192px;
+  height: 192px;
   object-fit: contain;
   image-rendering: pixelated;
 }
