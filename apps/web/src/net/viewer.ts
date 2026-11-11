@@ -4,7 +4,7 @@
  * sends a "ping" text every 25 s (the server auto-responds "pong"). Phones freeze background
  * tabs and drop their sockets: when the page becomes visible again or the network comes
  * back, it reconnects at once instead of waiting out the backoff, and a socket that looks
- * open but stays silent after a ping is replaced.
+ * open but stays silent after a ping (on wake, or for a whole ping interval) is replaced.
  */
 import {
   backoffDelay,
@@ -50,6 +50,7 @@ export function connectViewer(opts: {
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   let lastHeard = 0;
+  let pingSent = 0;
 
   const setStatus = (s: ConnectionStatus) => {
     if (s === status) return;
@@ -76,8 +77,17 @@ export function connectViewer(opts: {
       attempt = 0;
       setStatus("open");
       clearInterval(pingTimer);
+      pingSent = 0;
       pingTimer = setInterval(() => {
-        if (ws?.readyState === WebSocket.OPEN) ws.send("ping");
+        const current = ws;
+        if (current?.readyState !== WebSocket.OPEN) return;
+        // a socket that stays open but silent (deploy, NAT timeout) never fires onclose
+        if (pingSent > lastHeard) {
+          replace(current);
+          return;
+        }
+        pingSent = performance.now();
+        current.send("ping");
       }, PING_MS);
     };
     ws.onmessage = (ev) => {
@@ -106,6 +116,17 @@ export function connectViewer(opts: {
     retryTimer = setTimeout(open, backoffDelay(attempt++));
   };
 
+  const replace = (current: WebSocket) => {
+    current.onclose = null;
+    current.onmessage = null;
+    current.close();
+    clearInterval(pingTimer);
+    ws = null;
+    attempt = 0;
+    setStatus("reconnecting");
+    open();
+  };
+
   const wake = () => {
     if (closed || document.visibilityState !== "visible") return;
     if (ws?.readyState === WebSocket.OPEN) {
@@ -117,14 +138,7 @@ export function connectViewer(opts: {
       wakeTimer = setTimeout(() => {
         if (ws !== current || lastHeard >= sent) return;
         // a dead socket can take a minute to report its close: drop it and open a new one
-        current.onclose = null;
-        current.onmessage = null;
-        current.close();
-        clearInterval(pingTimer);
-        ws = null;
-        attempt = 0;
-        setStatus("reconnecting");
-        open();
+        replace(current);
       }, WAKE_PONG_MS);
     } else if (!ws) {
       // waiting out a backoff: try right now
