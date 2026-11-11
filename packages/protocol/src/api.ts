@@ -68,6 +68,14 @@ export const StatsResponse = z.object({
   }),
   /** personId -> latest display name seen (best effort) */
   names: z.record(z.string(), z.string()),
+  /** wall of shame, today in the office time zone (top 5 each; waits in ms) */
+  shame: z
+    .object({
+      clears: z.array(LeaderboardEntry),
+      waits: z.array(LeaderboardEntry),
+      fires: z.array(LeaderboardEntry),
+    })
+    .optional(),
 });
 export type StatsResponse = z.infer<typeof StatsResponse>;
 

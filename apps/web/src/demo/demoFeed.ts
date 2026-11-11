@@ -187,7 +187,9 @@ export class DemoFeed {
     // every third session runs on the devbox (no rand() call: keeps seeded demos unchanged)
     const machine = this.sessionCounter % 3 === 2 ? "devbox" : "MacBook";
     // fixed context ramp per session (no rand(): seeded demos stay the same); some smoke, one burns
-    const context = [0.15, 0.35, 0.55, 0.2, 0.85, 0.4, 0.65][this.sessionCounter % 7]!;
+    const context = [0.15, 0.35, 0.55, 0.2, 0.3, 0.4, 0.65, 0.1, 0.25, 0.45, 0.85, 0.3, 0.2, 0.5][
+      this.sessionCounter % 14
+    ]!;
     const key = `demo${(this.sessionCounter++).toString(36).padStart(6, "0")}${Math.floor(this.rand() * 1e6)}`;
     return {
       sessionId: sessionIdOf("demo-laptop", key),

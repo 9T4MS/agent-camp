@@ -135,6 +135,39 @@ function board(
   return card(title, `<ol class="board">${items}</ol>`);
 }
 
+const mins = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+
+/** Today's wall of shame: a WANTED poster for each crime's top offender, runners-up below. */
+function shameWall(s: StatsResponse, person: (id: string) => string): string {
+  const sh = s.shame;
+  if (!sh) return "";
+  const crimes = [
+    { title: "Serial /clearer", list: sh.clears, fmt: (v: number) => plural(v, "/clear") },
+    { title: "Left an agent hanging", list: sh.waits, fmt: (v: number) => `waited ${mins(v)}` },
+    { title: "Arsonist", list: sh.fires, fmt: (v: number) => plural(v, "fire") },
+  ];
+  const posters = crimes
+    .map((c) => {
+      const [top, ...rest] = c.list;
+      if (!top)
+        return `<div class="wanted empty"><div class="w-head">WANTED</div><div class="w-crime">${esc(c.title)}</div><div class="w-name">nobody… yet</div></div>`;
+      const others = rest
+        .map((e) => `<li>${esc(person(e.key))} <span>${esc(c.fmt(e.value))}</span></li>`)
+        .join("");
+      return `<div class="wanted"><div class="w-head">WANTED</div>
+        <div class="w-name">${esc(person(top.key))}</div>
+        <div class="w-crime">${esc(c.title)}</div>
+        <div class="w-proof">${esc(c.fmt(top.value))}</div>
+        <div class="w-reward">reward: 1 coffee</div>
+        ${others ? `<ol class="w-rest">${others}</ol>` : ""}</div>`;
+    })
+    .join("");
+  return card("Wall of shame · today", `<div class="shame">${posters}</div>`);
+}
+
 function render(main: HTMLElement, s: StatsResponse) {
   // names only exist for people seen live since the last deploy; prettify the slug otherwise
   const person = (id: string) =>
@@ -164,6 +197,7 @@ function render(main: HTMLElement, s: StatsResponse) {
       <span class="pixel-chip"><span class="lbl">busiest day</span><span class="num">${esc(s.weekdays[busiestDay] ?? "-")}</span></span>
       <span class="pixel-chip"><span class="lbl">${fmtDate(s.range.from)} – ${fmtDate(s.range.to)}</span></span>
     </div>
+    ${shameWall(s, person)}
     ${heatmap(s)}
     ${agentSplit(s)}
     <div class="boards">

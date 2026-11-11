@@ -29,6 +29,7 @@ import {
 } from "@agent-office/protocol";
 import { diff, EMPTY_STATE, type OfficeState } from "./diff.ts";
 import { historyRow, logLine, lookupIn } from "./events.ts";
+import { ShameTracker } from "./shame.ts";
 import type { Store } from "./store.ts";
 
 export type HubConfig = {
@@ -55,6 +56,8 @@ export type Binding = {
   connectorVersion: string;
   /** user-chosen machine label, copied into every SessionView of this connector */
   machine?: string;
+  /** opt-in "MM-DD" */
+  birthday?: string;
 };
 
 type ConnectorRec = Binding & {
@@ -105,6 +108,29 @@ export const defaultAvatarKey = (name: string, desc: string | undefined) =>
 /** Trim and collapse whitespace ("  Martin  K " -> "Martin K"). */
 export const cleanName = (name: string) => name.trim().replace(/\s+/g, " ");
 
+/** "YYYY-MM-DD" of `ts` in an IANA zone (bad zone -> UTC). */
+export function dayKeyIn(timeZone: string, ts: number): string {
+  const o = { year: "numeric", month: "2-digit", day: "2-digit" } as const;
+  try {
+    return new Intl.DateTimeFormat("en-CA", { ...o, timeZone }).format(ts);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { ...o, timeZone: "UTC" }).format(ts);
+  }
+}
+
+/** "MM-DD" of `now` in an IANA zone (bad zone -> UTC). */
+export function monthDayIn(timeZone: string, now: number): string {
+  const o = { month: "2-digit", day: "2-digit" } as const;
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", { ...o, timeZone }).formatToParts(now);
+  } catch {
+    parts = new Intl.DateTimeFormat("en-US", { ...o, timeZone: "UTC" }).formatToParts(now);
+  }
+  const v = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${v("month")}-${v("day")}`;
+}
+
 function safeEqual(a: string, b: string): boolean {
   let diffBits = a.length ^ b.length;
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -127,11 +153,13 @@ export class Hub {
   private recent = new Map<string, { activity: Activity; at: number }[]>();
   /** sink for readable event lines */
   log: (line: string) => void = () => {};
+  readonly shame: ShameTracker;
 
   constructor(
     private cfg: HubConfig,
     private store: Store,
   ) {
+    this.shame = new ShameTracker(store, (ts) => dayKeyIn(cfg.timezone, ts));
     try {
       this.names = JSON.parse(store.kvGet(NAMES_KEY) ?? "{}");
     } catch {
@@ -325,6 +353,7 @@ export class Hub {
       connectorVersion: d.connectorVersion,
       ...(desc ? { selfDescription: desc } : {}),
       ...(machine ? { machine } : {}),
+      ...(d.birthday ? { birthday: d.birthday } : {}),
     };
     // a hello on a socket that was bound to another clientId: drop the old binding
     this.sockets.set(socketId, binding);
@@ -466,6 +495,7 @@ export class Hub {
     const events = diff(prev, next, now);
     this.current = next;
     this.trackActivity(events, now);
+    this.shame.record(events, prev, now);
     if (events.length > 0) {
       const lookup = lookupIn(next, prev);
       const prevLookup = lookupIn(prev, next);
@@ -501,6 +531,7 @@ export class Hub {
   private derive(now: number): OfficeState {
     this.derivedAt = now;
     const people: PersonView[] = [];
+    const today = monthDayIn(this.cfg.timezone, now);
     const sorted = [...this.people.values()].sort(
       (a, b) => a.joinedAt - b.joinedAt || a.personId.localeCompare(b.personId),
     );
@@ -524,12 +555,16 @@ export class Hub {
         }
       }
       sessions.sort((a, b) => a.startedAt - b.startedAt || a.sessionId.localeCompare(b.sessionId));
+      let birthday = false;
+      for (const c of this.connectors.values())
+        if (c.personId === p.personId && c.birthday === today) birthday = true;
       people.push({
         personId: p.personId,
         name: p.name,
         avatar: p.avatar,
         sessions,
         joinedAt: p.joinedAt,
+        ...(birthday ? { birthday } : {}),
       });
     }
     return { people };

@@ -82,6 +82,11 @@ const POKES: { kind: InteractionKind; label: string; title: string }[] = [
     label: "&#128196; Paper ball",
     title: "Throw a paper ball (only in the office)",
   },
+  {
+    kind: "tomato",
+    label: "&#127813; Tomato",
+    title: "Throw a tomato: a red splat for 10 min (only in the office)",
+  },
 ];
 const NAME_KEY = "agent-office.viewerName";
 

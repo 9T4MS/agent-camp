@@ -23,15 +23,36 @@ import {
 import { pixelTexture } from "../art/fx.ts";
 import type { OfficeModel } from "../state/officeModel.ts";
 import type { WaitSpot } from "./cat.ts";
+import {
+  CakeDrone,
+  FireAlarm,
+  Flood,
+  Kaiju,
+  MafiaCoffee,
+  Meteors,
+  Raccoons,
+  Tornado,
+} from "./chaos.ts";
 import type { Effects } from "./effects.ts";
 import {
+  catBossWindow,
+  eclipseDark,
+  type ForcedEvent,
+  floodLevel,
   forcedSky,
+  kaijuAt,
   localDayKey,
   PARTY_HELPERS,
+  parseForcedEvent,
   pizzaWindow,
+  RACCOON_RAID_H,
+  raccoonPhase,
+  rareEventOf,
   type Season,
   type SkyNow,
   skyAt,
+  tornadoAt,
+  trashOut,
   type Weather,
 } from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
@@ -52,6 +73,14 @@ export type LifeHooks = {
   longWaiters(): WaitSpot[];
   /** the pizza landed: idle people head over */
   onPizza(): void;
+  /** agents on fire right now (3+ for a while sets off the fire alarm) */
+  burning?: () => number;
+  /** fire alarm: everyone to this garden spot, or back to work (null) */
+  evacuate?: (spot: Point | null) => void;
+  /** where a person sits (the birthday cake lands next to it) */
+  personSpot?: (personId: string) => Point | null;
+  /** Friday meeting: the cat sits here with a tie, or is just a cat again (null) */
+  catBoss?: (spot: Point | null) => void;
 };
 
 export type LifeOptions = {
@@ -60,7 +89,14 @@ export type LifeOptions = {
   season?: Season;
   /** seconds until the drone shows up once a pizza window starts */
   droneDelay?: number;
+  /** `?event=`: show one chaos event now (screenshots, demos) */
+  forceEvent?: string | null;
+  /** `?birthday=<personId>`: that person has their birthday today */
+  forceBirthday?: string | null;
 };
+
+/** forced kaiju (`?event=kaiju`): 40 s walk, 10 s pause, again */
+const KAIJU_LOOP = 50;
 
 const tileOf = (p: Point): Point => ({ x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) });
 const center = (t: Point): Point => ({ x: t.x * TILE + 8, y: t.y * TILE + 12 });
@@ -553,6 +589,19 @@ export class OfficeLife {
   private day = "";
   private readonly effects: Effects;
   private partyRand = seededRandom("party");
+  private alarm: FireAlarm;
+  private mafia: MafiaCoffee;
+  private raccoons: Raccoons;
+  private kaiju: Kaiju;
+  private cake: CakeDrone;
+  private tornado: Tornado;
+  private meteors: Meteors;
+  private flood: Flood;
+  private readonly forced: ForcedEvent | null;
+  private readonly forcedBirthday: string | null;
+  private bossSpot: Point | null = null;
+  /** seconds since boot (forced events loop on it) */
+  private clock = 0;
 
   constructor(
     private readonly scene: OfficeScene,
@@ -586,6 +635,22 @@ export class OfficeLife {
       effects,
     );
     this.outdoors = new Outdoors(scene, effects, opts.season ?? "summer");
+    const url = typeof location === "undefined" ? null : new URLSearchParams(location.search);
+    this.forced = parseForcedEvent(opts.forceEvent ?? url?.get("event"));
+    this.forcedBirthday = opts.forceBirthday ?? url?.get("birthday") ?? null;
+    this.alarm = new FireAlarm(scene, effects, (spot) => hooks.evacuate?.(spot));
+    this.mafia = new MafiaCoffee(scene, effects);
+    this.raccoons = new Raccoons(scene, effects);
+    this.kaiju = new Kaiju(scene, effects);
+    this.cake = new CakeDrone(
+      scene,
+      effects,
+      (id) => hooks.personSpot?.(id) ?? this.deskOf(id),
+      (id) => model.people.get(id)?.name ?? id,
+    );
+    this.tornado = new Tornado(scene, effects);
+    this.meteors = new Meteors(scene);
+    this.flood = new Flood(scene);
     this.ball.anchor.set(0.5);
     this.ball.visible = false;
     this.ball.label = "actor";
@@ -595,6 +660,33 @@ export class OfficeLife {
   /** Rebuilt map (desk floor grew): actors keep going, labels re-attach them. */
   reattach() {
     this.graveyard.relayout();
+    this.raccoons.relayout();
+  }
+
+  /** Food truck open: where idle people queue (just inside the main door), else null. */
+  truckSpot(): Point | null {
+    if (this.outdoors.truckParked() === null) return null;
+    const d = this.scene.map.door;
+    return { x: d.x * TILE + 8, y: (d.y - 1) * TILE + 12 };
+  }
+
+  /** Someone grabbed a coffee: the machine remembers. */
+  coffeeDrunk(personId: string, name: string) {
+    this.mafia.drunk(personId, name, this.day);
+  }
+
+  /** Fallback when no personSpot hook is wired: the middle of the person's pod. */
+  private deskOf(personId: string): Point | null {
+    const p = this.model.people.get(personId);
+    if (!p) return null;
+    const r = this.scene.deskRects()[p.pod];
+    return r ? { x: r.x + r.w / 2, y: r.y + r.h } : null;
+  }
+
+  /** Head of the meeting table (the boss cat's seat). */
+  private bossChair(): Point {
+    const t = this.scene.map.objects.find((o) => o.kind === "meetingTable");
+    return t ? { x: t.x * TILE - 4, y: t.y * TILE + 22 } : { x: 38 * TILE, y: 16 * TILE };
   }
 
   /** the car on the street was clicked (it goes to /stats) */
@@ -613,6 +705,7 @@ export class OfficeLife {
   }
 
   update(dt: number, time: number) {
+    this.clock += dt;
     this.acc += dt;
     if (this.acc >= 0.5) {
       this.acc = 0;
@@ -622,7 +715,33 @@ export class OfficeLife {
     this.drone.update(dt, time);
     const night = this.scene.night > 0.5;
     const wet = this.sky.precip > 0.15;
-    this.birds.update(dt, time, !night && !wet);
+    const hour = this.hooks.hour();
+    const f = this.forced;
+    const kaiju = f === "kaiju" ? (this.clock % KAIJU_LOOP) / 40 : kaijuAt(this.day, hour);
+    const kaijuP = kaiju !== null && kaiju < 1 ? kaiju : null;
+    const tornado = f === "tornado" ? (this.clock % 36) / 30 : tornadoAt(this.day, hour);
+    const tornadoP = tornado !== null && tornado < 1 ? tornado : null;
+    this.birds.update(dt, time, !night && !wet && kaijuP === null && tornadoP === null);
+    this.kaiju.update(kaijuP);
+    this.tornado.update(dt, time, tornadoP);
+    const meteors = f === "meteors" || (rareEventOf(this.day, hour) === "meteors" && night);
+    this.meteors.update(dt, meteors, hour);
+    const raid =
+      f === "raccoons"
+        ? this.clock % 80
+        : ((p) => (p === null ? null : p * 3600))(raccoonPhase(this.day, hour));
+    const trash = f === "raccoons" || (this.day !== "" && trashOut(this.day, hour));
+    this.raccoons.update(
+      dt,
+      time,
+      raid !== null && raid < RACCOON_RAID_H * 3600 ? raid : null,
+      trash,
+    );
+    this.alarm.update(dt, time);
+    this.mafia.update(dt, this.day);
+    this.cake.update(dt, time);
+    const level = f === "flood" ? Math.min(1, 0.3 + this.clock / 8) : this.floodNow;
+    this.flood.update(time, level, this.ducks);
     this.chef.update(dt, time);
     this.outdoors.update(dt, time, this.sky, this.hooks.hour(), this.day);
     // ping-pong rally
@@ -642,6 +761,29 @@ export class OfficeLife {
     }
   }
 
+  private floodNow = 0;
+  private ducks = 2;
+
+  private chaosSlow(day: string, hour: number) {
+    const f = this.forced;
+    const season = this.opts.season ?? "summer";
+    this.floodNow = this.opts.weather ? 0 : floodLevel(day, hour, season);
+    this.ducks = 2 + (day.charCodeAt(day.length - 1) % 3);
+    this.alarm.slow(this.hooks.burning?.() ?? 0, 0.5, f === "alarm");
+    const dark = f === "eclipse" ? Math.min(0.95, this.clock / 6) : eclipseDark(day, hour);
+    this.scene.setEclipse(dark);
+    this.outdoors.eclipse = dark;
+    const boss = f === "catboss" || catBossWindow(day, hour) ? this.bossChair() : null;
+    if ((boss === null) !== (this.bossSpot === null)) {
+      this.bossSpot = boss;
+      this.hooks.catBoss?.(boss);
+    }
+    const birthdays = [...this.model.people.values()]
+      .filter((p) => p.birthday || p.personId === this.forcedBirthday)
+      .map((p) => p.personId);
+    this.cake.slow(birthdays, day, Date.now());
+  }
+
   private slow() {
     const day = localDayKey(this.model.timezone);
     if (day !== this.day) {
@@ -652,7 +794,9 @@ export class OfficeLife {
     this.sky = this.opts.weather
       ? forcedSky(this.opts.weather)
       : skyAt(day, hour, this.opts.season ?? "summer");
+    if (this.forced === "flood" && !this.opts.weather) this.sky = forcedSky("rain");
     this.scene.weather = this.sky.weather;
+    this.chaosSlow(day, hour);
     this.outdoors.slow(day, hour);
     this.drone.slow(day);
     this.chef.slow();

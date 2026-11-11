@@ -18,6 +18,8 @@ export type Config = {
   share_project_names: boolean;
   /** show pokes from the office as macOS notifications */
   notifications: boolean;
+  /** opt-in "MM-DD": the office brings a cake that day */
+  birthday?: string;
   client_id: string;
 };
 
@@ -29,6 +31,7 @@ export const CONFIG_KEYS = [
   "machine_name",
   "share_project_names",
   "notifications",
+  "birthday",
   "client_id",
 ] as const;
 
@@ -126,6 +129,12 @@ export function machineName(config: Pick<Config, "machine_name">, host?: string)
   return v || defaultMachineName(host);
 }
 
+/** "MM-DD" or undefined. */
+export function validBirthday(v: string | undefined): string | undefined {
+  const t = v?.trim();
+  return t && /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(t) ? t : undefined;
+}
+
 export function newClientId(): string {
   return `c_${randomBytes(9).toString("hex")}`;
 }
@@ -144,6 +153,7 @@ export function toConfig(values: Record<string, TomlValue>): Config {
     machine_name: s("machine_name"),
     share_project_names: !(share === false || share === "false"),
     notifications: !(notify === false || notify === "false"),
+    birthday: validBirthday(s("birthday")),
     client_id: clientId && /^[A-Za-z0-9_-]{1,64}$/.test(clientId) ? clientId : newClientId(),
   };
 }
@@ -171,6 +181,7 @@ export function saveConfig(path: string, config: Config): void {
       machine_name: config.machine_name,
       share_project_names: config.share_project_names,
       notifications: config.notifications,
+      birthday: config.birthday,
       client_id: config.client_id,
     }),
     { mode: 0o600 },

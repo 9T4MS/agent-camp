@@ -3,6 +3,7 @@
  * Pooled sprites for particles, no per-frame allocation.
  */
 import { type Container, Sprite, type Texture } from "pixi.js";
+import { tomatoTexture } from "../art/drama.ts";
 import { paperBallTexture, sparkleTextures } from "../art/fun.ts";
 import { CONFETTI_COLORS, pixelTexture, puffTextures } from "../art/fx.ts";
 import { C, hexNum } from "../art/palette.ts";
@@ -36,6 +37,8 @@ type Throw = {
   t: number;
   dur: number;
   onHit: () => void;
+  /** a tomato splats on impact instead of bouncing */
+  splat?: boolean;
 };
 
 export class Effects {
@@ -179,6 +182,24 @@ export class Effects {
     this.throws.push({ sprite: s, from: { x: fx, y: fy }, to: { x: tx, y: ty }, t: 0, dur, onHit });
   }
 
+  /** A tomato lobbed in an arc; it bursts on the target. */
+  throwTomato(fx: number, fy: number, tx: number, ty: number, onHit: () => void = () => {}) {
+    const s = new Sprite(tomatoTexture());
+    s.anchor.set(0.5);
+    s.position.set(Math.round(fx), Math.round(fy));
+    this.layer.addChild(s);
+    const dur = Math.min(1.1, 0.45 + Math.hypot(tx - fx, ty - fy) / 260);
+    this.throws.push({
+      sprite: s,
+      from: { x: fx, y: fy },
+      to: { x: tx, y: ty },
+      t: 0,
+      dur,
+      onHit,
+      splat: true,
+    });
+  }
+
   after(seconds: number, fn: () => void) {
     this.later.push({ t: seconds, fn });
   }
@@ -197,6 +218,17 @@ export class Effects {
       if (k < 1) continue;
       this.throws.splice(i, 1);
       b.onHit();
+      if (b.splat) {
+        this.burst(b.to.x, b.to.y, [C.red, C.wine, C.pink], {
+          count: 14,
+          speed: 40,
+          life: 0.9,
+          floor: b.to.y + 20,
+        });
+        this.layer.removeChild(b.sprite);
+        b.sprite.destroy();
+        continue;
+      }
       // bounce off the head and roll to a stop on the floor, then fade
       const bounce: Throw = {
         sprite: b.sprite,

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "person.birthdayChanged",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "personId": "anna",
+    "birthday": true
+  }
+}

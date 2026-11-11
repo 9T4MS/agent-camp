@@ -237,13 +237,21 @@ export class OfficeApp {
     if (path === "/api/stats" && method === "GET") {
       const days = Number(url.searchParams.get("days") ?? 0);
       const since = days > 0 ? this.now() - days * 86_400_000 : 0;
-      return json(
-        computeStats(this.store.history(since), {
+      const sh = this.hub.shame.snapshot(this.now());
+      const top = (m: Record<string, number>) =>
+        Object.entries(m)
+          .filter(([, v]) => v > 0)
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 5)
+          .map(([key, value]) => ({ key, value }));
+      return json({
+        ...computeStats(this.store.history(since), {
           timezone: this.timezone,
           now: this.now(),
           names: this.hub.knownNames(),
         }),
-      );
+        shame: { clears: top(sh.clears), waits: top(sh.longestWaitMs), fires: top(sh.fires) },
+      });
     }
 
     const person = /^\/api\/people\/([^/]{1,64})$/.exec(path);
@@ -348,14 +356,17 @@ export class OfficeApp {
       return json({ error: "not in the office" }, { status: 404 });
 
     let delivered = 0;
-    if (r.personId && r.kind !== "paper" && r.kind !== "pet") {
+    const kind = r.kind;
+    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer" || kind === "message";
+    const officeOnly = !pokes;
+    if (r.personId && pokes) {
       if (now - (this.lastPoke.get(r.personId) ?? 0) < POKE_PER_PERSON_MS)
         return json({ error: "they were just poked, give them a moment" }, { status: 429 });
       this.lastPoke.set(r.personId, now);
       const from = r.from || undefined;
-      const text = r.kind === "message" ? r.text! : `${from ?? "Someone"} ${POKE_TEXT[r.kind]}`;
+      const text = kind === "message" ? r.text! : `${from ?? "Someone"} ${POKE_TEXT[kind]}`;
       const poke = JSON.stringify(
-        envelope("connector.poked", { kind: r.kind, text, ...(from ? { from } : {}) }),
+        envelope("connector.poked", { kind, text, ...(from ? { from } : {}) }),
       );
       for (const socketId of this.hub.liveSocketsOf(r.personId, now)) {
         if (this.transport.sendToConnector?.(socketId, poke)) delivered++;
@@ -367,7 +378,7 @@ export class OfficeApp {
       ...(r.personId ? { personId: r.personId } : {}),
       ...(r.from ? { from: r.from } : {}),
       ...(r.text && r.kind === "message" ? { text: r.text } : {}),
-      ...(r.personId && r.kind !== "paper" ? { delivered } : {}),
+      ...(r.personId && !officeOnly ? { delivered } : {}),
     });
     this.transport.broadcast(JSON.stringify(event));
     this.hub.log(`interaction ${r.kind} ${r.personId ?? "-"} delivered=${delivered}`);

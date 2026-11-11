@@ -554,6 +554,15 @@ export class OfficeScene {
 
   /** Called ~once a minute by living.ts. */
   setDaylight(night: number, sky: "day" | "dusk" | "night", tint: string, alpha: number) {
+    this.daylight = { night, sky, tint, alpha };
+    if (this.eclipse > 0) {
+      // the eclipse darkens the day like a dusk, deep enough for the forest eyes to show
+      const k = this.eclipse;
+      night = Math.max(night, k);
+      alpha = Math.max(alpha, 0.62 * k);
+      if (k > 0.5) tint = C.dusk;
+      if (k > 0.65) sky = "night";
+    }
     this.overlay.tint = hexNum(tint);
     this.overlay.alpha = alpha;
     this.overlay.visible = alpha > 0.01;
@@ -567,6 +576,23 @@ export class OfficeScene {
     this.night = night;
   }
   night = 0;
+  private daylight: { night: number; sky: "day" | "dusk" | "night"; tint: string; alpha: number } =
+    { night: 0, sky: "day", tint: C.amber, alpha: 0 };
+  /** solar eclipse darkness 0..1 (life.ts) */
+  private eclipse = 0;
+
+  setEclipse(k: number) {
+    if (Math.abs(k - this.eclipse) < 0.01) return;
+    this.eclipse = k;
+    const d = this.daylight;
+    this.setDaylight(d.night, d.sky, d.tint, d.alpha);
+  }
+
+  private shakeAmp = 0;
+  /** Rumble the whole office for a moment (the kaiju stomps). */
+  shake(px: number) {
+    this.shakeAmp = Math.max(this.shakeAmp, px);
+  }
 
   /** Local hour (living.ts, every 2 s): plants sprout their new leaves through the day. */
   setHour(hour: number) {
@@ -574,6 +600,14 @@ export class OfficeScene {
   }
 
   update(time: number, dt: number) {
+    if (this.shakeAmp > 0.05) {
+      const a = this.shakeAmp;
+      this.root.pivot.set(Math.round(Math.sin(time * 61) * a), Math.round(Math.cos(time * 47) * a));
+      this.shakeAmp *= Math.exp(-dt * 6);
+    } else if (this.shakeAmp > 0) {
+      this.shakeAmp = 0;
+      this.root.pivot.set(0, 0);
+    }
     for (const a of this.anims) {
       let idx: number;
       if (a.kind === "arcade") {
