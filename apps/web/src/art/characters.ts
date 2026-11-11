@@ -129,7 +129,7 @@ export function lookKey(l: Look): string {
 }
 
 // ---- frame table ----------------------------------------------------------------------------
-type View = "down" | "up" | "left";
+export type View = "down" | "up" | "left";
 type Seat = "none" | "back" | "front";
 type Arms =
   | "down"
@@ -664,7 +664,7 @@ function layer(pc: PixelCanvas, rows: Layer, dy: number, colors: Record<string, 
   pc.sprite(0, dy, rows, colors);
 }
 
-function drawHead(pc: PixelCanvas, look: Look, view: View, dy: number) {
+export function drawHead(pc: PixelCanvas, look: Look, view: View, dy: number) {
   const s = look.skin;
   const hairC = { h: look.hair.main, H: look.hair.shade, L: look.hair.light, R: C.red };
   if (view === "left") {

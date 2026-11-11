@@ -57,6 +57,7 @@ import {
 } from "./world/map.ts";
 import { OfficeScene } from "./world/office.ts";
 import { PartyWorld } from "./world/party.ts";
+import { OfficeQueen } from "./world/queen.ts";
 
 type OfficeApi = {
   ready: boolean;
@@ -149,9 +150,17 @@ async function boot() {
     () => chars.catWaitSpots(),
   );
   chars.catEats = (sprite, x, y) => cat.tryEat(sprite, x, y);
+  const queen = new OfficeQueen(
+    scene.objects,
+    scene.map,
+    effects,
+    () => chars.pageable(),
+    (id, text) => chars.answerPage(id, text),
+  );
   if (party) {
     cat.eatChance = 0.6;
     cat.eatRange = 900;
+    queen.pageEvery = 12;
   }
   const hourValue = hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : null;
   const living = new Living(scene, model, hourValue);
@@ -226,6 +235,7 @@ async function boot() {
     if (need <= scene.map.podRows * POD_COLS) return;
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     cat.setMap(scene.map);
+    queen.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
     chars.syncSlots();
@@ -470,6 +480,10 @@ async function boot() {
       return;
     }
     const c = chars.pick(wx, wy);
+    if (queen.hit(wx, wy) && (!c || queen.y > c.y)) {
+      queen.poke();
+      return;
+    }
     if (c) {
       openSession(c.sessionId);
       return;
@@ -646,6 +660,7 @@ async function boot() {
     chars.update(dt, time);
     partyWorld.update(dt, time);
     cat.update(dt, time);
+    queen.update(dt, time);
     life.update(dt, time);
     effects.update(dt);
     living.update(dt);

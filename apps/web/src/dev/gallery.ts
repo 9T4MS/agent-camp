@@ -11,6 +11,7 @@ import { characterSheet, lookFor } from "../art/characters.ts";
 import { chairTexture, deskTexture, monitorTextures, propTexture } from "../art/desk.ts";
 import { ART, furnitureFrames } from "../art/furniture.ts";
 import { alertTextures, botTextures, bubbleTexture, catTextures, dotsTextures } from "../art/fx.ts";
+import { queenTextures } from "../art/queen.ts";
 import type { ObjectKind } from "../world/map.ts";
 
 const NAMES = [
@@ -98,6 +99,7 @@ export function showGallery(app: Application) {
     ...botTextures("claude"),
     ...botTextures("codex"),
     ...catTextures(),
+    ...queenTextures(),
     ...alertTextures(),
     ...dotsTextures(),
     bubbleTexture("typing", "agent-office"),

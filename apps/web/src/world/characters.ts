@@ -1083,6 +1083,24 @@ export class CharacterManager {
     return out.sort((a, b) => b.w - a.w);
   }
 
+  /** Seated, online people with a working or waiting agent (who the queen pages). */
+  pageable(): (WaitSpot & { waiting: boolean })[] {
+    const out: (WaitSpot & { waiting: boolean })[] = [];
+    for (const c of this.chars.values()) {
+      if (c.mode !== "seated" || this.isOffline(c) || !c.sprite.visible) continue;
+      const a = this.activityOf(c);
+      if (a === "idle") continue;
+      out.push({ x: c.x, y: c.y, id: c.sessionId, waiting: a === "waiting" });
+    }
+    return out;
+  }
+
+  /** A paged person answers from their chair. */
+  answerPage(sessionId: string, text: string) {
+    const c = this.chars.get(sessionId);
+    if (c && !c.removed && c.mode === "seated") this.say(c, text);
+  }
+
   catWaitSpots(): WaitSpot[] {
     return this.waitingFor(WAIT_CAT_MS);
   }
