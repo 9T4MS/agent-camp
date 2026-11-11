@@ -43,9 +43,10 @@ same password the first time you open it.
 
 Paste it where Claude can run commands on your Mac: the **Code** tab of the Claude desktop
 app, or Claude Code in a terminal or IDE. A normal chat or Claude Design can't install it. The
-office shows sessions of Claude Code, Codex and Pi running on your Mac, and Cowork sessions of
-the Claude desktop app if you turn them on (see [Cowork](#cowork)). Claude Design and
-claude.ai chats run in the cloud and don't appear.
+office shows sessions of Claude Code, Codex and Pi running on your Mac. Designers who work in
+Claude Design in the Claude desktop app can get a desk too, and so can older Cowork sessions,
+if you turn them on (see [Claude Design and Cowork](#claude-design-and-cowork)). claude.ai
+chats run in the cloud and don't appear.
 
 ### By hand
 
@@ -134,7 +135,26 @@ without one never changes your look, and the last description you set wins. The 
 name (`agent-office configure --machine-name devbox`, or `AO_MACHINE=` for the installer)
 shows up on the agent card so you can tell the sessions apart.
 
-### Cowork
+### Claude Design and Cowork
+
+For teammates who work in the Claude desktop app instead of a terminal.
+
+**Claude Design** runs on Anthropic's servers inside the Claude app, so the connector can't
+see whether you are designing or what Claude is doing. If you are a designer and the Claude
+app is where you do your design work, say so once:
+
+```sh
+agent-office configure --claude-app design
+launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector
+```
+
+From then on, while the Claude app runs you have exactly one pink "Claude Design" desk:
+**thinking** while the app is in front, **idle** after it has been in the background for two
+minutes, and gone when you quit the app. It never shows "waiting", because the connector
+can't know that. No permission is needed, and nothing in the Claude app changes: the connector
+only checks that the app runs and asks macOS (`lsappinfo`) which app is in front. Cowork
+sessions are not shown with this setting, so you stay one desk. `agent-office configure
+--claude-app off` turns it off.
 
 **Cowork** is off by default, because it is often not coding work. Turn it on with
 `agent-office configure --cowork true` and restart the connector. Each Cowork session whose
@@ -165,7 +185,7 @@ clothing with its collar, buttons, pockets, pattern and embroidery, socks, shoes
 expression and a pose. Exact colours (`#1f3d2b`, "forest green") are used as given. All of it
 is painted by the same renderer at the same pixel size, so everyone stays in one style.
 
-Which agent a session runs (Claude, Codex, Pi) shows in its colour: if you
+Which agent a session runs (Claude, Codex, Pi, Claude Design) shows in its colour: if you
 don't name a jacket colour, your jacket takes the agent's colour as before; if you do, you
 keep your jacket and get a badge on the chest (and a patch across the shoulders from behind)
 in the agent's colour instead. Every extra
@@ -255,8 +275,11 @@ Claude Code (your own account, if you opted in) turns it into the look, which th
 the office; only when that Mac cannot does it go to the office's AI provider.
 The Giphy id of your head GIF is sent too, if you set one.
 
-With `cowork` on (see [Cowork](#cowork)), Cowork sessions are sent like Claude Code
-sessions, with the project name always "Cowork".
+With `claude_app = "design"` (see [Claude Design and Cowork](#claude-design-and-cowork)),
+the connector sends one Claude Design desk while the Claude app runs, with only "the app is
+in front or not" as its activity. Nothing about its windows or content is read. With
+`cowork` on, Cowork sessions are sent like Claude Code sessions, with the project name always
+"Cowork".
 
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).

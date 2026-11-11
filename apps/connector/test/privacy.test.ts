@@ -3,11 +3,12 @@
  * sure nothing but status metadata leaves the machine.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseConnectorMessage } from "@agent-office/protocol";
 import { helloDescription } from "../src/cli.ts";
 import { Daemon } from "../src/daemon.ts";
+import { CLAUDE_BUNDLE_ID, DesignWatcher, fakeFrontmost } from "../src/desktop.ts";
 import { Detector } from "../src/detect/index.ts";
 import { silent } from "../src/log.ts";
 import { agentDirs } from "../src/paths.ts";
@@ -67,6 +68,7 @@ describe("privacy", () => {
       processes: fakeProcesses([]),
       assumeProcesses: true,
       cowork: true,
+      design: new DesignWatcher(fakeFrontmost(CLAUDE_BUNDLE_ID)),
     });
     const d = new Daemon({
       server: srv.url,
@@ -82,6 +84,7 @@ describe("privacy", () => {
       detector,
       log: silent,
       version: "0.1.0",
+      statusFile: join(h.home, "cfg", "status.json"),
       pollMs: 30,
       debounceMs: 10,
       client: { rand: () => 0 },
@@ -90,6 +93,9 @@ describe("privacy", () => {
     await waitFor(() => srv.of("presence.snapshot").length >= 1, 3000, "snapshot");
     await d.stop(true);
     await waitFor(() => srv.of("connector.bye").length === 1, 2000, "bye");
+    // `agent-office status` reads the Claude Design watch state from the status file
+    const status = JSON.parse(readFileSync(join(h.home, "cfg", "status.json"), "utf8"));
+    expect(status.designWindow).toBe("watching");
 
     // hello carries only what the user typed in (name, description, machine label) + versions
     const helloMsg = srv.of("connector.hello")[0]!;
@@ -109,15 +115,20 @@ describe("privacy", () => {
     expect((helloMsg.data.selfDescription as string).length).toBe(200);
     expect(helloMsg.data.machine).toBe("devbox");
     const snap = srv.of("presence.snapshot")[0]!;
-    // 4 from fixtures/home + the Cowork session
+    // 4 from fixtures/home + the Cowork session + the Claude Design desk
     const sent = snap.data.sessions as Record<string, unknown>[];
-    expect(sent.length).toBe(5);
+    expect(sent.length).toBe(6);
     expect(sent.find((s) => s.project === "Cowork")).toMatchObject({ agent: "claude" });
+    const design = sent.find((s) => s.agent === "design")!;
+    expect(Object.keys(design).sort()).toEqual(
+      ["activity", "agent", "sessionKey", "startedAt", "subagents"].sort(),
+    );
     for (const raw of srv.received) expect(parseConnectorMessage(raw).ok).toBe(true);
     assertClean(srv.received, h.home);
     // the only per-session fields are the allowed ones (context: a 0..1 number, when known)
     const allowed = ["activity", "agent", "project", "sessionKey", "startedAt", "subagents"];
     for (const s of sent) {
+      if (s.agent === "design") continue; // checked above: it has no project
       const keys = Object.keys(s).filter((k) => k !== "context");
       expect(keys.sort()).toEqual(allowed.sort());
       if ("context" in s) expect(typeof s.context).toBe("number");

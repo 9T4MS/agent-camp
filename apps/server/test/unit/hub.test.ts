@@ -144,6 +144,25 @@ describe("hub: sessions", () => {
     expect(hub.state().people[0]?.sessions).toEqual([]);
   });
 
+  test("a Claude Design window (no project) reaches viewers as agent design", () => {
+    const { hub, lines } = setup();
+    hub.onConnectorMessage("s1", hello("Dana", "c1"), 0);
+    // what the connector sends: JSON, so `project` is absent rather than undefined
+    const design = JSON.parse(
+      JSON.stringify(snap(s("d", { agent: "design", project: undefined, activity: "thinking" }))),
+    );
+    const started = hub.onConnectorMessage("s1", design, 1).events;
+    expect(types(started)).toEqual(["session.started"]);
+    for (const e of started)
+      expect(parseViewerMessage(JSON.parse(JSON.stringify(e))).ok).toBe(true);
+    expect(lines.at(-1)).toContain("session.started dana design");
+    const view = hub.state().people[0]?.sessions[0];
+    expect(view).toMatchObject({ agent: "design", activity: "thinking", subagents: 0 });
+    expect(view?.project).toBeUndefined();
+    const snapshot = parseViewerMessage(JSON.parse(JSON.stringify(hub.snapshot(2))));
+    expect(snapshot.ok).toBe(true);
+  });
+
   test("session ids are clientId:sessionKey", () => {
     const { hub } = setup();
     hub.onConnectorMessage("s1", hello("Martin", "c1"), 0);

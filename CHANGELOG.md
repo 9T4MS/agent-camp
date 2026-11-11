@@ -20,3 +20,4 @@ banner after a deploy.
 - East street block: Feierabend bar, weed shop and smokers' corner
 - Prom queen: a teammate without a coding agent pages the developers
 - Cowork sessions of the Claude desktop app can get a desk too (project "Cowork"): `agent-office configure --cowork true`
+- Designers get a pink Claude Design desk while their Claude app runs: `agent-office configure --claude-app design` (it shows that you are there, not what Claude is doing)

@@ -61,7 +61,7 @@ describe("stats", () => {
     expect(st.heatmap[0]![9]).toBe(4); // Monday 09h Vienna
     expect(st.heatmap[1]![9]).toBe(2); // Tuesday
     expect(st.heatmap.flat().reduce((a, b) => a + b, 0)).toBe(6);
-    expect(st.agentSplit).toEqual({ claude: 3, codex: 1, pi: 2, unknown: 0 });
+    expect(st.agentSplit).toEqual({ claude: 3, codex: 1, pi: 2, design: 0, unknown: 0 });
     expect(st.leaderboards.mostSessions).toEqual([
       { key: "anna", value: 4 },
       { key: "bob", value: 2 },

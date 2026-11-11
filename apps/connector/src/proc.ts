@@ -11,7 +11,7 @@
  * hosted agents (e.g. purrness subagent workers) as the host's helpers, except model backends.
  *
  * The Claude desktop app (`Claude.app`) is not an agent process, but we note whether it runs:
- * its Cowork sessions only count while it does.
+ * its Cowork sessions and the Claude Design desk only count while it does.
  */
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";

@@ -67,6 +67,7 @@ const SHOWCASE: [Partial<AvatarSpec>, AgentKind][] = [
   ],
   [{ outfit: "flannel-red", leftHand: "coffee", rightHand: "phone" }, "codex"],
   [{ outfit: "tee", accessory: "none", rightHand: "beer" }, "pi"],
+  [{ outfit: "tee", accessory: "none", leftHand: "coffee" }, "design"],
   [{ outfit: "hoodie", leftHand: "phone" }, "unknown"],
 ];
 

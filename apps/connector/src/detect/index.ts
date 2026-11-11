@@ -13,6 +13,10 @@
  * With `assumeProcesses` every agent counts as running, every pid in a pid file as alive, and
  * the Claude desktop app as running.
  *
+ * Claude Design is not a transcript at all: with `design` set (the person declared that their
+ * Claude app is Claude Design), the running Claude app adds one `design` session (presence
+ * only, see ../desktop.ts).
+ *
  * An agent process running inside another agent (`ProcInfo.hostPid`, e.g. the Claude Agent SDK
  * binary that Pi's Claude bridge spawns as its model backend) is not a session of its own: it
  * never counts as running, and a session its pid file ties it to is hidden for good, so the
@@ -29,6 +33,7 @@ import {
   type SessionInfo,
   TRANSCRIPT_LIVE_MS,
 } from "@agent-office/protocol";
+import type { DesignWatcher, DesignWatchStatus } from "../desktop.ts";
 import type { AgentDirs } from "../paths.ts";
 import type { ProcessSource, ProcInfo } from "../proc.ts";
 import { deriveActivity } from "./activity.ts";
@@ -49,6 +54,8 @@ export type DetectorOptions = {
   assumeProcesses?: boolean;
   /** show Cowork sessions of the Claude desktop app (opt-in: often not coding work) */
   cowork?: boolean;
+  /** the Claude app counts as Claude Design: one `design` desk while it runs (opt-in) */
+  design?: DesignWatcher;
   now?: () => number;
 };
 
@@ -65,6 +72,9 @@ export function projectName(cwd: string | undefined): string | undefined {
 }
 
 const MAX_SESSIONS = 200;
+
+/** Raw id of the one Claude Design session per machine (hashed like every session key). */
+export const DESIGN_RAW_ID = "claude-app";
 
 /** Hosted processes keep a quiet desk busy for at most this much transcript silence. */
 export const HOSTED_BUSY_MAX_MS = 10 * 60_000;
@@ -209,8 +219,34 @@ export class Detector {
     }
     this.tail.retain(keep);
     if (this.metaCache.size > 2000) this.metaCache.clear();
+    const design = await this.designSession(now, desktop);
+    if (design) sessions.push(design);
     sessions.sort((a, b) => a.startedAt - b.startedAt || a.sessionKey.localeCompare(b.sessionKey));
     return sessions.slice(0, MAX_SESSIONS);
+  }
+
+  /** The Claude Design watch state for `agent-office status`; undefined when not watching. */
+  get designStatus(): DesignWatchStatus | undefined {
+    return this.opts.design?.status;
+  }
+
+  /** One `design` session while the Claude app runs. */
+  private async designSession(now: number, desktop: boolean): Promise<SessionInfo | null> {
+    const watcher = this.opts.design;
+    if (!watcher) return null;
+    try {
+      const p = await watcher.poll(now, desktop);
+      if (!p) return null;
+      return {
+        sessionKey: sessionKeyFor(this.opts.clientId, "design", DESIGN_RAW_ID),
+        agent: "design",
+        activity: p.activity,
+        subagents: 0,
+        startedAt: Math.max(0, Math.min(now, Math.floor(p.startedAt))),
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**

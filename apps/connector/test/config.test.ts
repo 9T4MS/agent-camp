@@ -43,6 +43,7 @@ describe("config.toml", () => {
         machine_name: "devbox",
         share_project_names: false,
         helpers: "cats" as const,
+        claude_app: "design" as const,
         cowork: true,
       };
       saveConfig(path, written);
@@ -85,6 +86,7 @@ describe("config.toml", () => {
         notifications: true,
         look_generator: "auto",
         helpers: "robots",
+        claude_app: "off",
         cowork: false,
         client_id: "c_abc",
         name: "Zoe",
@@ -197,6 +199,45 @@ describe("cowork", () => {
       expect((await run("configure", "--get", "cowork")).out).toBe("true");
       expect((await run("configure", "--cowork", "false")).code).toBe(0);
       expect((await run("configure", "--get", "cowork")).out).toBe("false");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("claude app", () => {
+  test("off by default; design or off, anything else falls back to off", () => {
+    expect(toConfig({}).claude_app).toBe("off");
+    expect(toConfig({ claude_app: "design" }).claude_app).toBe("design");
+    expect(toConfig({ claude_app: " Design " }).claude_app).toBe("design");
+    expect(toConfig({ claude_app: "yes" }).claude_app).toBe("off");
+    expect(toConfig({ claude_app: true }).claude_app).toBe("off");
+  });
+
+  test("configure --claude-app writes it and explains it; bad values exit 2", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
+    try {
+      const main = join(import.meta.dir, "..", "src", "main.ts");
+      const env = { ...process.env, AGENT_OFFICE_CONFIG_DIR: dir };
+      const run = async (...args: string[]) => {
+        const p = Bun.spawn([process.execPath, main, ...args], {
+          env,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const out = await new Response(p.stdout).text();
+        return { code: await p.exited, out: out.trim() };
+      };
+      expect((await run("configure", "--get", "claude_app")).out).toBe("off");
+      const on = await run("configure", "--claude-app", "design");
+      expect(on.code).toBe(0);
+      expect(on.out).toContain("counts as Claude Design");
+      expect(on.out).toContain("No permission is needed");
+      expect((await run("configure", "--get", "claude_app")).out).toBe("design");
+      expect((await run("configure", "--claude-app", "maybe")).code).toBe(2);
+      expect((await run("configure", "--get", "claude_app")).out).toBe("design");
+      expect((await run("configure", "--claude-app", "off")).code).toBe(0);
+      expect((await run("configure", "--get", "claude_app")).out).toBe("off");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

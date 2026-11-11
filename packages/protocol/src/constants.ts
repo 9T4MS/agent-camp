@@ -87,6 +87,7 @@ export const AGENT_COLORS = {
   claude: "#be4a2f",
   codex: "#0099db",
   pi: "#63c74d",
+  design: "#b55088",
   unknown: "#8b9bb4",
 } as const satisfies Record<string, PaletteColor>;
 
@@ -95,6 +96,7 @@ export const AGENT_PALETTES = {
   claude: { light: "#d77643", main: "#be4a2f", shade: "#733e39" },
   codex: { light: "#2ce8f5", main: "#0099db", shade: "#124e89" },
   pi: { light: "#fee761", main: "#63c74d", shade: "#3e8948" },
+  design: { light: "#f6757a", main: "#b55088", shade: "#68386c" },
   unknown: { light: "#c0cbdc", main: "#8b9bb4", shade: "#5a6988" },
 } as const satisfies Record<keyof typeof AGENT_COLORS, Record<string, PaletteColor>>;
 

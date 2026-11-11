@@ -27,6 +27,13 @@
         "activity": "idle",
         "subagents": 0,
         "startedAt": 1793174000000
+      },
+      {
+        "sessionKey": "d351970000c0ffee",
+        "agent": "design",
+        "activity": "thinking",
+        "subagents": 0,
+        "startedAt": 1793174100000
       }
     ]
   }

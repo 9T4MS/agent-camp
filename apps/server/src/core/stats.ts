@@ -70,7 +70,13 @@ export function computeStats(rows: readonly HistoryRow[], opts: StatsOptions): S
   const sessions = new Map<string, number>();
   const subagents = new Map<string, number>();
   const projects = new Map<string, number>();
-  const agentSplit: Record<string, number> = { claude: 0, codex: 0, pi: 0, unknown: 0 };
+  const agentSplit: Record<string, number> = {
+    claude: 0,
+    codex: 0,
+    pi: 0,
+    design: 0,
+    unknown: 0,
+  };
   const running = new Map<string, number>();
   const parallel = new Map<string, number>();
   let totalSessions = 0;

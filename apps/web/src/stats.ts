@@ -17,6 +17,7 @@ const AGENT_LABELS: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   pi: "Pi",
+  design: "Design",
   unknown: "Other",
 };
 
@@ -92,7 +93,7 @@ function agentSplit(s: StatsResponse): string {
   const color = (k: string) => AGENT_COLORS[k as keyof typeof AGENT_COLORS] ?? AGENT_COLORS.unknown;
   if (total === 0)
     return card("Claude vs Codex vs Pi", `<p class="board-empty">No sessions in this range.</p>`);
-  const order = ["claude", "codex", "pi", "unknown"];
+  const order = ["claude", "codex", "pi", "design", "unknown"];
   entries.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   const pct = (v: number) => Math.round((v / total) * 1000) / 10;
   const bar = entries

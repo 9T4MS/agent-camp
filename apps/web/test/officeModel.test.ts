@@ -208,6 +208,14 @@ describe("OfficeModel", () => {
     expect(st.byAgent).toMatchObject({ claude: 1, codex: 1 });
   });
 
+  test("a Claude Design session is counted as its own agent kind", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(
+      snap([person("Dana", [sess("d1", { agent: "design", activity: "thinking" }), sess("d2")])]),
+    );
+    expect(m.stats().byAgent).toEqual({ claude: 1, codex: 0, pi: 0, design: 1, unknown: 0 });
+  });
+
   test("pods and desks are stable and reuse the lowest free slot", () => {
     const m = new OfficeModel(() => T0);
     m.apply(snap([person("Anna", [sess("a1")]), person("Ben", [sess("b1")])]));

@@ -16,6 +16,7 @@ import {
 import {
   CONFIG_KEYS,
   type Config,
+  claudeAppSetting,
   loadConfig,
   lookGeneratorSetting,
   machineName,
@@ -24,7 +25,8 @@ import {
   validBirthday,
   validHelpers,
 } from "./config.ts";
-import { Daemon, type StatusFile } from "./daemon.ts";
+import { Daemon, DESIGN_STATUS_TEXT, type StatusFile } from "./daemon.ts";
+import { DesignWatcher, systemFrontmost } from "./desktop.ts";
 import { Detector } from "./detect/index.ts";
 import { log } from "./log.ts";
 import { bunSpawn, describeGenerators, detectGenerators, LookGenerators } from "./lookgen.ts";
@@ -101,6 +103,8 @@ Commands:
                            service after changing)
       --birthday MM-DD     opt-in: the office brings you a cake that day ("" removes it)
       --helpers robots|cats   what your subagents look like in the office (default robots)
+      --claude-app design|off   opt-in (macOS): your Claude desktop app counts as Claude
+                           Design, one desk while it runs (default off)
       --cowork true|false  opt-in: show Cowork sessions of the Claude desktop app
   gif [GIPHY-LINK|off]
                     show any GIF from giphy.com over your head (paste the page or media
@@ -201,13 +205,16 @@ async function cmdRun(args: Args): Promise<number> {
   }
   const clientId = existed ? config.client_id : (env.AGENT_OFFICE_CLIENT_ID ?? newClientId());
 
+  // the person's Claude app is Claude Design: one desk while it runs, and no Cowork desks
+  const claudeDesign = config.claude_app === "design" && process.platform === "darwin";
   const detector = new Detector({
     dirs: agentDirs(env, home),
     clientId,
     shareProjectNames: config.share_project_names,
     processes: systemProcesses(),
     assumeProcesses,
-    cowork: config.cowork,
+    cowork: config.cowork && !claudeDesign,
+    ...(claudeDesign ? { design: new DesignWatcher(systemFrontmost()) } : {}),
   });
 
   if (flags.once) {
@@ -390,6 +397,15 @@ async function cmdConfigure(args: Args): Promise<number> {
     }
     next.look_generator = v;
   }
+  const claudeApp = flagStr(flags, "claude-app");
+  if (claudeApp !== undefined) {
+    const v = claudeAppSetting(claudeApp);
+    if (!v) {
+      console.error("claude-app must be design or off");
+      return 2;
+    }
+    next.claude_app = v;
+  }
   const cowork = flags.cowork;
   if (cowork !== undefined) next.cowork = !(cowork === "false" || cowork === "0");
   if (next.name && next.name.trim().length > 40) {
@@ -421,6 +437,13 @@ async function cmdConfigure(args: Args): Promise<number> {
     `saved ${path} (server: ${next.server ?? "-"}, name: ${next.name ?? "-"}, ` +
       `password: ${next.password ? "set" : "not set"})`,
   );
+  if (claudeApp !== undefined) {
+    console.log(
+      next.claude_app === "design"
+        ? `Your Claude app now counts as Claude Design. ${DESIGN_HELP}`
+        : `Claude app: off. Restart the connector to apply: ${RESTART_HINT}`,
+    );
+  }
   if (cowork !== undefined && next.cowork) {
     console.log(`Cowork sessions are on. Restart the connector to apply: ${RESTART_HINT}`);
   }
@@ -428,6 +451,11 @@ async function cmdConfigure(args: Args): Promise<number> {
 }
 
 const RESTART_HINT = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_LABEL}`;
+
+export const DESIGN_HELP = `Restart the connector to apply: ${RESTART_HINT}
+While the Claude app runs you have one Claude Design desk: thinking while the app is in
+front, idle after two minutes in the background. No permission is needed; the office only
+learns that the app runs and whether it is in front.`;
 
 // ---- gif ----------------------------------------------------------------------------------
 const GIF_OFF = new Set(["off", "none", "no", "clear", "remove", "-"]);
@@ -531,7 +559,7 @@ async function launchdState(): Promise<string | null> {
 export function formatSessions(sessions: StatusFile["sessions"], now = Date.now()): string[] {
   return sessions.map((s) => {
     const sub = s.subagents ? `${s.subagents} subagent${s.subagents === 1 ? "" : "s"}` : "";
-    return `    ${s.agent.padEnd(7)}${(s.project ?? "(hidden)").padEnd(22)}${s.activity.padEnd(10)}${sub.padEnd(14)}started ${ago(now - s.startedAt)}`;
+    return `    ${s.agent.padEnd(7)}${(s.project ?? (s.agent === "design" ? "Claude app" : "(hidden)")).padEnd(22)}${s.activity.padEnd(10)}${sub.padEnd(14)}started ${ago(now - s.startedAt)}`;
   });
 }
 
@@ -569,6 +597,18 @@ async function cmdStatus(): Promise<number> {
       lines.push(`  sessions  ${status.sessions.length} live`);
       lines.push(...formatSessions(status.sessions, now));
     }
+  }
+  if (config.claude_app === "design") {
+    const fresh = status && now - status.updatedAt < 10_000 && pidAlive(status.pid);
+    lines.push(
+      `  design    ${
+        process.platform !== "darwin"
+          ? "on, but only macOS is supported"
+          : fresh && status?.designWindow
+            ? DESIGN_STATUS_TEXT[status.designWindow]
+            : `on (restart the connector to apply: ${RESTART_HINT})`
+      }`,
+    );
   }
   const ld = await launchdState();
   if (ld) lines.push(`  launchd   ${ld}`);

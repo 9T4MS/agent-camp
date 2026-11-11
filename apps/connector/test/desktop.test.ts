@@ -1,9 +1,17 @@
-/** Claude desktop app: Cowork sessions (transcripts). */
+/** Claude desktop app: Cowork sessions (transcripts) and the declared Claude Design desk. */
 import { afterEach, describe, expect, test } from "bun:test";
-import { IDLE_AFTER_MS } from "@agent-office/protocol";
+import { IDLE_AFTER_MS, type SessionInfo } from "@agent-office/protocol";
+import {
+  CLAUDE_BUNDLE_ID,
+  DesignWatcher,
+  FRONT_QUERY_MS,
+  fakeFrontmost,
+  parseBundleId,
+  systemFrontmost,
+} from "../src/desktop.ts";
 import { toolActivity } from "../src/detect/activity.ts";
 import { COWORK_LIVE_MS, findCoworkTranscripts, RESCAN_MS } from "../src/detect/cowork.ts";
-import { Detector, sessionKeyFor } from "../src/detect/index.ts";
+import { DESIGN_RAW_ID, Detector, sessionKeyFor } from "../src/detect/index.ts";
 import { agentDirs } from "../src/paths.ts";
 import { claudeDesktopInPs, fakeProcesses, isClaudeDesktopArgs, parsePs } from "../src/proc.ts";
 import { addCowork, COWORK_ID, type FakeHome, makeHome, P } from "./helpers.ts";
@@ -23,6 +31,7 @@ function quietHome(): FakeHome {
 function detector(opts: {
   desktop?: boolean;
   now?: () => number;
+  design?: DesignWatcher;
   share?: boolean;
   cowork?: boolean;
 }) {
@@ -33,6 +42,7 @@ function detector(opts: {
     processes: fakeProcesses([], {}, opts.desktop ?? true),
     now: opts.now ?? (() => T0),
     cowork: opts.cowork ?? true,
+    ...(opts.design ? { design: opts.design } : {}),
   });
 }
 
@@ -182,5 +192,145 @@ describe("Cowork sessions", () => {
     h = quietHome();
     expect(findCoworkTranscripts(agentDirs({}, h.home).claudeDesktop, T0)).toEqual([]);
     expect(findCoworkTranscripts("/nonexistent/claude", T0)).toEqual([]);
+  });
+});
+
+describe("Claude Design: which app is in front", () => {
+  test("the bundle id is read from lsappinfo's answer", () => {
+    expect(
+      parseBundleId('[ NULL ]  ASN:0x0-0x2a82a8: (in front)\n    bundleID="com.google.Chrome"\n'),
+    ).toBe("com.google.Chrome");
+    expect(parseBundleId('"CFBundleIdentifier"="com.anthropic.claudefordesktop"\n')).toBe(
+      CLAUDE_BUNDLE_ID,
+    );
+    expect(parseBundleId("")).toBeNull();
+    expect(parseBundleId("bundleID=[ NULL ]")).toBeNull();
+  });
+
+  test("asks lsappinfo for the front app, then its bundle id; failures give null", async () => {
+    const calls: string[][] = [];
+    const ok = systemFrontmost(async (cmd) => {
+      calls.push(cmd);
+      return cmd[1] === "front"
+        ? { code: 0, out: "ASN:0x0-0x2d62d6:\n" }
+        : { code: 0, out: `bundleID="${CLAUDE_BUNDLE_ID}"\n` };
+    });
+    expect(await ok.frontmost()).toBe(CLAUDE_BUNDLE_ID);
+    expect(calls).toEqual([
+      ["lsappinfo", "front"],
+      ["lsappinfo", "info", "-only", "bundleid", "ASN:0x0-0x2d62d6:"],
+    ]);
+    const q = (front: { code: number | null; out: string }) =>
+      systemFrontmost(async (cmd) =>
+        cmd[1] === "front" ? front : { code: 0, out: "" },
+      ).frontmost();
+    expect(await q({ code: 1, out: "" })).toBeNull();
+    expect(await q({ code: null, out: "" })).toBeNull(); // timed out
+    expect(await q({ code: 0, out: "something; rm -rf /" })).toBeNull(); // not an ASN: not passed on
+    const broken = systemFrontmost(async () => {
+      throw new Error("spawn failed");
+    });
+    expect(await broken.frontmost()).toBeNull();
+  });
+});
+
+describe("Claude Design: the desk", () => {
+  /** A watcher whose frontmost answer and query count the test controls. */
+  function scripted(first: string | null) {
+    const s = { front: first, queries: 0 };
+    const watcher = new DesignWatcher(
+      fakeFrontmost(() => {
+        s.queries++;
+        return s.front;
+      }),
+    );
+    return { s, watcher };
+  }
+  const CLAUDE = CLAUDE_BUNDLE_ID;
+  const OTHER = "com.google.Chrome";
+
+  test("one desk while the app runs: thinking in front, idle after IDLE_AFTER_MS, gone when it quits", async () => {
+    const { s, watcher } = scripted(CLAUDE);
+    expect(await watcher.poll(T0, true)).toEqual({ activity: "thinking", startedAt: T0 });
+    s.front = OTHER;
+    let now = T0 + FRONT_QUERY_MS;
+    expect(await watcher.poll(now, true)).toEqual({ activity: "thinking", startedAt: T0 });
+    now = T0 + IDLE_AFTER_MS + FRONT_QUERY_MS;
+    expect(await watcher.poll(now, true)).toEqual({ activity: "idle", startedAt: T0 });
+    s.front = CLAUDE;
+    now += FRONT_QUERY_MS;
+    expect(await watcher.poll(now, true)).toEqual({ activity: "thinking", startedAt: T0 });
+    // the app quits: gone at once; started again: a new session
+    expect(await watcher.poll(now + 1_000, false)).toBeNull();
+    expect(await watcher.poll(now + 2_000, true)).toEqual({
+      activity: "thinking",
+      startedAt: now + 2_000,
+    });
+    expect(watcher.status).toBe("watching");
+  });
+
+  test("the app running in the background is an idle desk, never waiting", async () => {
+    const { watcher } = scripted(OTHER);
+    expect(await watcher.poll(T0, true)).toEqual({ activity: "idle", startedAt: T0 });
+  });
+
+  test("macOS is asked at most every FRONT_QUERY_MS, and not at all without the app", async () => {
+    const { s, watcher } = scripted(CLAUDE);
+    expect(await watcher.poll(T0, false)).toBeNull();
+    expect(s.queries).toBe(0);
+    await watcher.poll(T0, true);
+    await watcher.poll(T0 + 2_000, true);
+    await watcher.poll(T0 + 4_000, true);
+    expect(s.queries).toBe(1);
+    await watcher.poll(T0 + FRONT_QUERY_MS, true);
+    expect(s.queries).toBe(2);
+  });
+
+  test("a failed query keeps the same session; it only drifts to idle", async () => {
+    const { s, watcher } = scripted(CLAUDE);
+    await watcher.poll(T0, true);
+    s.front = null;
+    expect(await watcher.poll(T0 + FRONT_QUERY_MS, true)).toEqual({
+      activity: "thinking",
+      startedAt: T0,
+    });
+    expect(watcher.status).toBe("error");
+    expect(await watcher.poll(T0 + IDLE_AFTER_MS + 1, true)).toEqual({
+      activity: "idle",
+      startedAt: T0,
+    });
+    s.front = CLAUDE;
+    expect(await watcher.poll(T0 + IDLE_AFTER_MS + 1 + FRONT_QUERY_MS, true)).toEqual({
+      activity: "thinking",
+      startedAt: T0,
+    });
+    expect(watcher.status).toBe("watching");
+  });
+
+  test("the detector adds one design session with nothing but presence", async () => {
+    h = quietHome();
+    const { watcher } = scripted(CLAUDE);
+    const d = detector({ design: watcher });
+    const sessions: SessionInfo[] = await d.poll();
+    expect(sessions).toEqual([
+      {
+        sessionKey: sessionKeyFor("c_test", "design", DESIGN_RAW_ID),
+        agent: "design",
+        activity: "thinking",
+        subagents: 0,
+        startedAt: T0,
+      },
+    ]);
+    expect(d.designStatus).toBe("watching");
+    const off = detector({});
+    expect(await off.poll()).toEqual([]);
+    expect(off.designStatus).toBeUndefined();
+  });
+
+  test("no design session while the Claude app is closed", async () => {
+    h = quietHome();
+    const { s, watcher } = scripted(CLAUDE);
+    expect(await detector({ design: watcher, desktop: false }).poll()).toEqual([]);
+    expect(s.queries).toBe(0);
   });
 });

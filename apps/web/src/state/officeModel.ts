@@ -190,7 +190,13 @@ export class OfficeModel {
 
   stats(): OfficeStats {
     this.rollDay();
-    const byAgent: Record<AgentKind, number> = { claude: 0, codex: 0, pi: 0, unknown: 0 };
+    const byAgent: Record<AgentKind, number> = {
+      claude: 0,
+      codex: 0,
+      pi: 0,
+      design: 0,
+      unknown: 0,
+    };
     let subagents = 0;
     for (const s of this.sessions.values()) {
       byAgent[s.agent]++;
