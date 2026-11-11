@@ -1466,12 +1466,22 @@ describe("OfficeApp look editor", () => {
     expect((await post(app, "/api/people/tom/claim"))!.status).toBe(200);
     expect(toConnector.map((m) => m.socketId)).toEqual(["s1"]);
     const code = /\b(\d{6})\b/.exec(JSON.parse(toConnector[0]!.data).data.text)![1]!;
+    // the code is for "this is me" in general (looks, games), so the text names no feature
+    expect(JSON.parse(toConnector[0]!.data).data.text).toStartWith("Your Agent Office code: ");
     // resend is throttled
     advance(5_000);
     expect((await post(app, "/api/people/tom/claim", {}, "8.8.8.8"))!.status).toBe(429);
     const wrong = code === "000000" ? "111111" : "000000";
-    for (let i = 0; i < 5; i++)
-      expect((await post(app, "/api/people/tom/claim/verify", { code: wrong }))!.status).toBe(403);
+    const errors: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = (await post(app, "/api/people/tom/claim/verify", { code: wrong }))!;
+      expect(r.status).toBe(403);
+      errors.push(((await r.json()) as { error: string }).error);
+    }
+    // the browser shows how many tries are left
+    expect(errors[0]).toBe("wrong code, 4 tries left");
+    expect(errors[3]).toBe("wrong code, 1 try left");
+    expect(errors[4]).toBe("wrong code, that one is used up: send a new one");
     // too many wrong tries burn the code, even the right one no longer works
     expect((await post(app, "/api/people/tom/claim/verify", { code }))!.status).toBe(410);
     advance(30_000);
