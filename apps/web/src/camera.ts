@@ -34,6 +34,8 @@ export class Camera {
   private tourT = 0;
   private followT = 0;
   private hold: boolean;
+  /** last placed by zoomToFit (re-fit on resize) */
+  private fitted = false;
   onTap: (wx: number, wy: number) => void = () => {};
   onDoubleTap: (wx: number, wy: number) => boolean = () => false;
 
@@ -71,18 +73,22 @@ export class Camera {
     t.zoom = Math.min(MAX_ZOOM, Math.max(this.minZoom(), t.zoom));
     const s = this.screen();
     const w = this.worldSize();
+    const inset = this.opts.topInset ?? 0;
+    // the HUD covers the top `inset` px: the usable view is centered below it
+    const shiftY = inset / 2 / t.zoom;
     const halfW = s.width / 2 / t.zoom;
-    const halfH = s.height / 2 / t.zoom;
+    const halfH = (s.height - inset) / 2 / t.zoom;
     const margin = 2 * TILE;
     const clampAxis = (v: number, half: number, size: number) =>
       half * 2 >= size + margin * 2
         ? size / 2
         : Math.min(size + margin - half, Math.max(half - margin, v));
     t.x = clampAxis(t.x, halfW, w.width);
-    t.y = clampAxis(t.y, halfH, w.height);
+    t.y = clampAxis(t.y + shiftY, halfH, w.height) - shiftY;
   }
 
   set(view: Partial<View>, instant = false) {
+    this.fitted = false;
     Object.assign(this.target, view);
     this.clampTarget();
     if (instant) {
@@ -98,6 +104,7 @@ export class Camera {
     const inset = this.opts.topInset ?? 0;
     const z = this.fitZoom();
     this.set({ x: w.width / 2, y: w.height / 2 - inset / 2 / z, zoom: z }, instant);
+    this.fitted = true;
   }
 
   focus(x: number, y: number, zoom?: number) {
@@ -114,12 +121,17 @@ export class Camera {
     this.set({ x: (a.x + a.w / 2) * TILE, y: (a.y + a.h / 2) * TILE, zoom }, instant);
   }
 
-  /** Something happened at (x, y): the auto-pilot goes there for a while. */
-  notify(x: number, y: number) {
+  /**
+   * Something happened at (x, y): the auto-pilot goes there for a while. `rush` pans there
+   * quickly (e.g. a join, so the door + confetti are in view when they happen).
+   */
+  notify(x: number, y: number, opts: { zoom?: number; hold?: number; rush?: boolean } = {}) {
     if (!this.auto) return;
-    this.followT = FOLLOW_S;
-    this.set({ x, y, zoom: 3 });
+    this.followT = Math.max(this.followT, opts.hold ?? FOLLOW_S);
+    if (opts.rush) this.rushT = 1.6;
+    this.set({ x, y, zoom: opts.zoom ?? 3 });
   }
+  private rushT = 0;
 
   screenToWorld(sx: number, sy: number) {
     const s = this.screen();
@@ -276,7 +288,8 @@ export class Camera {
 
   update(dt: number) {
     if (this.auto) this.tour(dt);
-    const k = 1 - Math.exp(-dt * (this.auto ? 1.4 : 9));
+    if (this.rushT > 0) this.rushT -= dt;
+    const k = 1 - Math.exp(-dt * (!this.auto ? 9 : this.rushT > 0 ? 3.2 : 1.4));
     this.x += (this.target.x - this.x) * k;
     this.y += (this.target.y - this.y) * k;
     this.zoom += (this.target.zoom - this.zoom) * k;
@@ -304,7 +317,14 @@ export class Camera {
     };
   }
 
+  /** The world grew (more pod rows): keep a fitted view fitted. */
+  worldChanged() {
+    if (this.fitted) this.zoomToFit();
+    else this.clampTarget();
+  }
+
   resized() {
-    this.clampTarget();
+    if (this.fitted) this.zoomToFit(true);
+    else this.clampTarget();
   }
 }

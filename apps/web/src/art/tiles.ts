@@ -5,7 +5,7 @@
  */
 import { hashString } from "@agent-office/protocol";
 import { Texture } from "pixi.js";
-import { type OfficeMap, podOrigin, type Terrain, TILE } from "../world/map.ts";
+import { type OfficeMap, type Terrain, TILE } from "../world/map.ts";
 import { drawText } from "./font.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
@@ -190,21 +190,69 @@ const isWall = (t: Terrain | undefined) =>
 /** Window rectangles (pixel coords) for the animated sky panes. */
 export type WindowRect = { x: number; y: number; w: number; h: number };
 
-function drawRug(pc: PixelCanvas, x: number, y: number, w: number, h: number) {
-  pc.round(x, y, w, h, C.wine);
-  pc.rect(x + 2, y + 2, w - 4, h - 4, C.cream);
-  pc.rect(x + 4, y + 4, w - 8, h - 8, C.peach);
+/** Rug color sets: border, band, field, motif. */
+const RUGS = [
+  [C.wine, C.cream, C.peach, C.red],
+  [C.navy, C.sky, C.dusk, C.cyan],
+  [C.pine, C.lemon, C.moss, C.amber],
+  [C.plum, C.pink, C.berry, C.peach],
+] as const;
+
+function drawRug(pc: PixelCanvas, x: number, y: number, w: number, h: number, variant = 0) {
+  const [border, band, field, motif] = RUGS[variant % RUGS.length]!;
+  pc.round(x, y, w, h, border);
+  pc.rect(x + 2, y + 2, w - 4, h - 4, band);
+  pc.rect(x + 4, y + 4, w - 8, h - 8, field);
   for (let i = x + 6; i < x + w - 6; i += 6) {
     const cy = y + Math.floor(h / 2);
-    pc.set(i, cy, C.red);
-    pc.set(i + 1, cy - 1, C.red);
-    pc.set(i + 1, cy + 1, C.red);
-    pc.set(i + 2, cy, C.red);
+    pc.set(i, cy, motif);
+    pc.set(i + 1, cy - 1, motif);
+    pc.set(i + 1, cy + 1, motif);
+    pc.set(i + 2, cy, motif);
   }
   for (let i = x + 1; i < x + w - 1; i += 2) {
-    pc.set(i, y - 1, C.cream);
-    pc.set(i, y + h, C.cream);
+    pc.set(i, y - 1, band);
+    pc.set(i, y + h, band);
   }
+}
+
+const rugCache = new Map<string, Texture>();
+/** A loose rug sprite (nooks between pods). The texture has a 1 px fringe margin. */
+export function rugTexture(w: number, h: number, variant: number): Texture {
+  const key = `${w}x${h}:${variant}`;
+  const hit = rugCache.get(key);
+  if (hit) return hit;
+  const pc = new PixelCanvas(w, h + 2);
+  drawRug(pc, 0, 1, w, h, variant);
+  const t = Texture.from(pc.toCanvas());
+  rugCache.set(key, t);
+  return t;
+}
+
+/** Pod floor mats (under the chairs): one color pair per person. */
+export const POD_MATS = [
+  [C.wood, C.sand, C.cream, C.tan],
+  [C.forest, C.moss, C.leaf, C.pine],
+  [C.dusk, C.slate, C.grey, C.ink],
+  [C.tan, C.peach, C.cream, C.tan],
+  [C.cocoa, C.bark, C.wood, C.cocoa],
+  [C.ink, C.dusk, C.slate, C.ink],
+] as const;
+const matCache = new Map<string, Texture>();
+export function podMatTexture(w: number, variant: number): Texture {
+  const key = `${w}:${variant}`;
+  const hit = matCache.get(key);
+  if (hit) return hit;
+  const [edge, fill, dotA, dotB] = POD_MATS[variant % POD_MATS.length]!;
+  const h = 22;
+  const pc = new PixelCanvas(w, h);
+  pc.round(0, 0, w, h, edge);
+  pc.round(1, 1, w - 2, h - 2, fill);
+  for (let i = 3; i < w - 3; i += 4) pc.set(i, 3, dotA);
+  for (let i = 5; i < w - 3; i += 4) pc.set(i, h - 4, dotB);
+  const t = Texture.from(pc.toCanvas());
+  matCache.set(key, t);
+  return t;
 }
 
 export type TerrainArt = { texture: Texture; windows: WindowRect[]; canvas: HTMLCanvasElement };
@@ -281,17 +329,6 @@ export function renderTerrain(map: OfficeMap): TerrainArt {
       drawText(pc, x + 7, y + 2, "HI!", C.cream);
     }
   }
-  for (let pod = 0; pod < map.podRows * 3; pod++) {
-    const o = podOrigin(pod);
-    const x = o.x * TILE - 4;
-    const y = o.y * TILE + 30;
-    const w = 8 * TILE + 8;
-    const h = 22;
-    pc.round(x, y, w, h, C.wood);
-    pc.round(x + 1, y + 1, w - 2, h - 2, C.sand);
-    for (let i = x + 3; i < x + w - 3; i += 4) pc.set(i, y + 3, C.cream);
-    for (let i = x + 5; i < x + w - 3; i += 4) pc.set(i, y + h - 4, C.tan);
-  }
   const canvas = pc.toCanvas();
   return { texture: Texture.from(canvas), windows, canvas };
 }
@@ -332,4 +369,77 @@ export function windowPane(kind: "day" | "dusk" | "night", w: number, h: number)
   const t = Texture.from(pc.toCanvas());
   paneCache.set(key, t);
   return t;
+}
+
+/** How far the outdoor surroundings reach past the map on every side (px). */
+export const SURROUND = 12 * TILE;
+
+export type SurroundPiece = { texture: Texture; x: number; y: number };
+
+/**
+ * The world outside the building: a darker lawn with round trees and a street below the
+ * sidewalk, so zoom-to-fit letterboxes into scenery instead of a flat color. Four strips
+ * around the map (no overdraw under the terrain sprite).
+ */
+export function renderSurround(map: OfficeMap): SurroundPiece[] {
+  const W = map.width * TILE;
+  const H = map.height * TILE;
+  const M = SURROUND;
+  const streetY = H + 10;
+  const streetH = 44;
+  const strips = [
+    { x: -M, y: -M, w: W + 2 * M, h: M },
+    { x: -M, y: H, w: W + 2 * M, h: M },
+    { x: -M, y: 0, w: M, h: H },
+    { x: W, y: 0, w: M, h: H },
+  ];
+  // trees on a jittered grid, kept off the street and away from the building
+  const trees: { x: number; y: number; r: number; v: number }[] = [];
+  for (let gy = -M; gy < H + M; gy += 56) {
+    for (let gx = -M; gx < W + M; gx += 60) {
+      const x = gx + Math.floor(rnd(gx, gy, 21) * 40);
+      const y = gy + Math.floor(rnd(gx, gy, 22) * 36);
+      const r = 9 + Math.floor(rnd(gx, gy, 23) * 7);
+      const near = x > -r - 6 && x < W + r + 6 && y > -r - 10 && y < H + r + 10;
+      const street = y > streetY - 14 && y < streetY + streetH + r + 6;
+      if (near || street || rnd(gx, gy, 24) < 0.35) continue;
+      trees.push({ x, y, r, v: Math.floor(rnd(gx, gy, 25) * 3) });
+    }
+  }
+  return strips.map((st) => {
+    const pc = new PixelCanvas(st.w, st.h);
+    for (let y = 0; y < st.h; y++) {
+      for (let x = 0; x < st.w; x++) {
+        const wx = st.x + x;
+        const wy = st.y + y;
+        let c: string;
+        if (wy >= streetY && wy < streetY + streetH) {
+          const ly = wy - streetY;
+          if (ly < 2) c = C.slate;
+          else if (ly >= streetH - 2) c = C.slate;
+          else if (Math.abs(ly - streetH / 2) < 1 && (wx & 31) < 16) c = C.lemon;
+          else c = rnd(wx, wy, 26) < 0.04 ? C.dusk : C.ink;
+        } else if (wy >= H && wy < streetY) {
+          c = (wx & 15) === 15 || ((wy - H) & 15) === 9 ? C.slate : C.grey;
+        } else {
+          const r = rnd(wx, wy, 27);
+          c = r < 0.06 ? C.moss : r < 0.12 ? C.pine : C.forest;
+        }
+        pc.set(x, y, c);
+      }
+    }
+    pc.at(-st.x, -st.y);
+    for (const t of trees) {
+      pc.ellipse(t.x - t.r, t.y + t.r - 4, t.r * 2, 8, C.pine);
+      pc.rect(t.x - 2, t.y, 4, t.r, C.bark);
+      const top = t.y - t.r - 6;
+      const main = [C.moss, C.forest, C.leaf][t.v]!;
+      pc.ellipse(t.x - t.r - 1, top - 1, t.r * 2 + 2, t.r * 2 + 2, C.night);
+      pc.ellipse(t.x - t.r, top, t.r * 2, t.r * 2, t.v === 1 ? C.pine : C.forest);
+      pc.ellipse(t.x - t.r + 1, top, t.r * 2 - 3, t.r * 2 - 4, main);
+      pc.ellipse(t.x - t.r / 2, top + 2, t.r, t.r - 2, t.v === 2 ? C.lemon : C.leaf, 140);
+    }
+    pc.at(0, 0);
+    return { texture: Texture.from(pc.toCanvas()), x: st.x, y: st.y };
+  });
 }

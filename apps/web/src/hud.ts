@@ -74,7 +74,12 @@ export class Hud {
   private clock: HTMLElement;
   private banner: HTMLElement;
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
-  private bannerQueue: { title: string; sub: string }[] = [];
+  private bannerQueue: {
+    title: string;
+    sub: string;
+    portrait: HTMLCanvasElement | null;
+    joins?: string[];
+  }[] = [];
   private panel: HTMLElement;
   private reconnect: HTMLElement;
   readonly minimapHost: HTMLElement;
@@ -154,8 +159,27 @@ export class Hud {
     this.reconnect.classList.toggle("show", status === "reconnecting");
   }
 
-  showBanner(title: string, sub = "") {
-    this.bannerQueue.push({ title, sub });
+  showBanner(title: string, sub = "", opts: { portrait?: HTMLCanvasElement | null } = {}) {
+    this.bannerQueue.push({ title, sub, portrait: opts.portrait ?? null });
+    if (!this.bannerTimer) this.nextBanner();
+  }
+
+  /** "Anna joined" banner; joins that pile up while one is showing merge into one banner. */
+  showJoin(name: string, portrait: HTMLCanvasElement | null) {
+    const pending = this.bannerQueue.at(-1);
+    if (pending?.joins) {
+      pending.joins.push(name);
+      const [a, b] = pending.joins;
+      const n = pending.joins.length;
+      pending.title = n === 2 ? `${a} & ${b} joined` : `${a}, ${b} +${n - 2} joined`;
+      return;
+    }
+    this.bannerQueue.push({
+      title: `${name} joined`,
+      sub: "welcome to the office!",
+      portrait,
+      joins: [name],
+    });
     if (!this.bannerTimer) this.nextBanner();
   }
 
@@ -165,12 +189,19 @@ export class Hud {
       this.bannerTimer = undefined;
       return;
     }
-    this.banner.innerHTML = `${esc(b.title)}${b.sub ? `<div class="sub">${esc(b.sub)}</div>` : ""}`;
+    this.banner.innerHTML = `<div class="text"><div class="title">${esc(b.title)}</div>${
+      b.sub ? `<div class="sub">${esc(b.sub)}</div>` : ""
+    }</div>`;
+    if (b.portrait) {
+      b.portrait.className = "banner-portrait";
+      this.banner.prepend(b.portrait);
+    }
+    this.banner.classList.toggle("with-portrait", !!b.portrait);
     this.banner.classList.add("show");
     this.bannerTimer = setTimeout(() => {
       this.banner.classList.remove("show");
       this.bannerTimer = setTimeout(() => this.nextBanner(), 450);
-    }, 3200);
+    }, 4200);
   }
 
   openPanel(personId: string) {

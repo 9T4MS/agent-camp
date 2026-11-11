@@ -16,29 +16,33 @@ function sheet(pc: PixelCanvas, fw: number, fh: number, n: number): Texture[] {
   );
 }
 
-let deskTex: Texture | null = null;
-/** 32x28 desk, placed with its top-left at (tileX*16, tileY*16 + 4). */
-export function deskTexture(): Texture {
-  if (deskTex) return deskTex;
-  const pc = new PixelCanvas(34, 30);
+const deskTex = new Map<number, Texture>();
+/** wx28 desk (w = 32, 26 or 24), placed with its top-left at (x - 1, tileY*16 + 3). */
+export function deskTexture(w = 32): Texture {
+  const hit = deskTex.get(w);
+  if (hit) return hit;
+  const pc = new PixelCanvas(w + 2, 30);
   pc.at(1, 1);
-  pc.rect(0, 0, 32, 13, C.sand);
-  pc.hline(0, 0, 32, C.cream);
-  pc.rect(0, 13, 32, 9, C.tan);
-  pc.hline(0, 13, 32, C.wood);
-  pc.rect(19, 15, 11, 5, C.wood);
-  pc.hline(22, 17, 5, C.sand);
+  pc.rect(0, 0, w, 13, C.sand);
+  pc.hline(0, 0, w, C.cream);
+  pc.rect(0, 13, w, 9, C.tan);
+  pc.hline(0, 13, w, C.wood);
+  const dw = Math.round(w / 3);
+  pc.rect(w - dw - 2, 15, dw, 5, C.wood);
+  pc.hline(w - dw + 1, 17, dw - 6, C.sand);
   pc.rect(1, 22, 3, 6, C.bark);
-  pc.rect(28, 22, 3, 6, C.bark);
-  pc.hline(4, 22, 24, C.bark);
+  pc.rect(w - 4, 22, 3, 6, C.bark);
+  pc.hline(4, 22, w - 8, C.bark);
   // keyboard + mouse
-  pc.rect(9, 8, 13, 3, C.silver);
-  pc.hline(10, 9, 11, C.white);
-  pc.rect(24, 8, 2, 3, C.silver);
+  const kx = Math.round(w / 2) - 7;
+  pc.rect(kx, 8, 13, 3, C.silver);
+  pc.hline(kx + 1, 9, 11, C.white);
+  if (w >= 30) pc.rect(kx + 15, 8, 2, 3, C.silver);
   pc.at(0, 0);
   pc.outline();
-  deskTex = Texture.from(pc.toCanvas());
-  return deskTex;
+  const t = Texture.from(pc.toCanvas());
+  deskTex.set(w, t);
+  return t;
 }
 
 export const MONITOR = {

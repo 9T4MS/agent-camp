@@ -69,7 +69,8 @@ export type OfficeStats = {
   byAgent: Record<AgentKind, number>;
 };
 
-const DESKS_PER_POD = 4;
+/** sessions beyond this many desks roam (renderer: `MAX_DESKS` in world/map.ts) */
+const DESKS_PER_POD = 6;
 
 function dayKey(ts: number): string {
   const d = new Date(ts);

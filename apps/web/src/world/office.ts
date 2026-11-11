@@ -20,16 +20,29 @@ import {
 import { furnitureFrames, furnitureMeta } from "../art/furniture.ts";
 import { glowTexture, pixelTexture, whiteboardTexture } from "../art/fx.ts";
 import { C, hexNum } from "../art/palette.ts";
-import { renderTerrain, type WindowRect, windowPane } from "../art/tiles.ts";
 import {
-  DESKS_PER_POD,
-  deskTile,
+  podMatTexture,
+  renderSurround,
+  renderTerrain,
+  rugTexture,
+  SURROUND,
+  type WindowRect,
+  windowPane,
+} from "../art/tiles.ts";
+import {
+  deskPitch,
+  deskPx,
   FOOTPRINTS,
   type MapObject,
+  nookLayout,
   type OfficeMap,
   POD_COLS,
+  type Poi,
+  podBlockTiles,
+  podDeskSpan,
   podOrigin,
   seatPoint,
+  setSlotBlocked,
   TILE,
 } from "./map.ts";
 
@@ -52,7 +65,30 @@ export type DeskView = {
   seat: { x: number; y: number };
 };
 
-type PodView = { nameplate: Sprite | null; props: Sprite[]; personId: string | null };
+export type PodOwner = {
+  personId: string;
+  name: string;
+  avatar: AvatarSpec;
+  accent: string;
+  /** index into POD_MATS (personal floor mat color) */
+  mat: number;
+};
+/** What a pod slot shows: someone's pod (n desks), the free-desk placeholder, or a nook. */
+export type SlotSpec =
+  | { kind: "pod"; desks: number; owner: PodOwner }
+  | { kind: "free" }
+  | { kind: "nook" };
+
+type SlotView = {
+  key: string;
+  spec: SlotSpec;
+  desks: number;
+  /** every display object this slot added (removed on change) */
+  items: { layer: Container; obj: Sprite }[];
+  /** textures made just for this slot (nameplates), destroyed with it */
+  owned: Texture[];
+  pois: Poi[];
+};
 
 export class OfficeScene {
   readonly root = new Container();
@@ -64,7 +100,9 @@ export class OfficeScene {
   readonly fx = new Container();
   terrainCanvas!: HTMLCanvasElement;
   readonly desks = new Map<string, DeskView>();
-  private pods: PodView[] = [];
+  private slots: SlotView[] = [];
+  /** points of interest added by nooks (idle characters visit them too) */
+  nookPois: Poi[] = [];
   private anims: Anim[] = [];
   private lampGlows: Glow[] = [];
   private panes: { sprite: Sprite; rect: WindowRect }[] = [];
@@ -100,12 +138,14 @@ export class OfficeScene {
       (c) => c.label === "character" || c.label === "actor",
     );
     for (const c of keepChars) this.objects.removeChild(c);
-    for (const layer of [this.floor, this.decals, this.objects, this.glows]) {
+    for (const c of this.floor.removeChildren()) c.destroy({ texture: true, textureSource: true });
+    for (const layer of [this.decals, this.objects, this.glows]) {
       for (const c of layer.removeChildren()) c.destroy();
     }
     this.map = map;
     this.desks.clear();
-    this.pods = [];
+    this.slots = [];
+    this.nookPois = [];
     this.anims = [];
     this.lampGlows = [];
     this.panes = [];
@@ -119,8 +159,14 @@ export class OfficeScene {
     const terrain = renderTerrain(this.map);
     this.terrainCanvas = terrain.canvas;
     this.floor.addChild(new Sprite(terrain.texture));
-    this.overlay.width = this.widthPx;
-    this.overlay.height = this.heightPx;
+    for (const piece of renderSurround(this.map)) {
+      const s = new Sprite(piece.texture);
+      s.position.set(piece.x, piece.y);
+      this.floor.addChild(s);
+    }
+    this.overlay.position.set(-SURROUND, -SURROUND);
+    this.overlay.width = this.widthPx + 2 * SURROUND;
+    this.overlay.height = this.heightPx + 2 * SURROUND;
 
     for (const rect of terrain.windows) {
       const s = new Sprite(windowPane("day", rect.w, rect.h));
@@ -130,7 +176,7 @@ export class OfficeScene {
       this.addGlow(rect.x + rect.w / 2, rect.y + rect.h + 6, 20, C.cyan, 0.0, "window");
     }
     for (const ob of this.map.objects) this.placeObject(ob);
-    for (let pod = 0; pod < this.map.podRows * POD_COLS; pod++) this.buildPod(pod);
+    for (let pod = 0; pod < this.slotCount; pod++) this.setSlot(pod, { kind: "nook" });
 
     const d = this.map.door;
     this.door = new Sprite(doorTextures()[0]!);
@@ -156,10 +202,16 @@ export class OfficeScene {
     this.lampGlows.push({ sprite: s, base, kind });
   }
 
-  private placeObject(ob: MapObject) {
+  get slotCount() {
+    return this.map.podRows * POD_COLS;
+  }
+
+  private placeObject(ob: MapObject): Sprite[] {
     const frames = furnitureFrames(ob.kind, ob.variant ?? 0);
     const meta = furnitureMeta(ob.kind);
-    if (!frames || !meta) return;
+    if (!frames || !meta) return [];
+    const added: Sprite[] = [];
+    const glowsBefore = this.lampGlows.length;
     const fp = FOOTPRINTS[ob.kind];
     const fx = ob.x * TILE;
     const bottom = (ob.y + fp.h) * TILE + meta.dy;
@@ -170,6 +222,7 @@ export class OfficeScene {
     );
     s.zIndex = bottom + meta.z;
     this.objects.addChild(s);
+    added.push(s);
     const left = s.x + meta.pad;
     const top = s.y + meta.pad;
     if (frames.length > 1) {
@@ -214,33 +267,158 @@ export class OfficeScene {
       default:
         break;
     }
+    for (const g of this.lampGlows.slice(glowsBefore)) added.push(g.sprite);
+    return added;
   }
 
-  private buildPod(pod: number) {
+  /** Show a slot as someone's pod, the free-desk placeholder or a cozy nook (idempotent). */
+  setSlot(pod: number, spec: SlotSpec): boolean {
+    if (pod >= this.slotCount) return false;
+    const key =
+      spec.kind === "pod"
+        ? `pod:${spec.desks}:${spec.owner.personId}:${spec.owner.name}:${JSON.stringify(spec.owner.avatar)}:${spec.owner.mat}`
+        : spec.kind;
+    const old = this.slots[pod];
+    if (old && old.key === key) return false;
+    if (old) this.clearSlot(pod, old);
+    const view: SlotView = { key, spec, desks: 0, items: [], owned: [], pois: [] };
+    this.slots[pod] = view;
+    if (spec.kind === "nook") this.buildNook(pod, view);
+    else this.buildPod(pod, view, spec.kind === "pod" ? spec.desks : 2, spec);
+    return true;
+  }
+
+  /** Desk rows of pods (and the free desk) in world px, for the minimap. */
+  deskRects(): { x: number; y: number; w: number; h: number; mine: boolean }[] {
+    const out: { x: number; y: number; w: number; h: number; mine: boolean }[] = [];
+    this.slots.forEach((v, pod) => {
+      if (v.spec.kind === "nook") return;
+      const n = v.spec.kind === "pod" ? v.spec.desks : 2;
+      const span = podDeskSpan(pod, n);
+      out.push({ x: span.x, y: podOrigin(pod).y * TILE, w: span.w, h: 28, mine: v.desks > 0 });
+    });
+    return out;
+  }
+
+  slotDesks(pod: number): number {
+    return this.slots[pod]?.desks ?? 0;
+  }
+
+  private clearSlot(pod: number, view: SlotView) {
+    for (const { layer, obj } of view.items) {
+      layer.removeChild(obj);
+      obj.destroy();
+    }
+    for (const t of view.owned) t.destroy(true);
+    const gone = new Set(view.items.map((i) => i.obj));
+    this.anims = this.anims.filter((a) => !gone.has(a.sprite));
+    this.lampGlows = this.lampGlows.filter((g) => !gone.has(g.sprite));
+    for (let d = 0; d < view.desks; d++) this.desks.delete(`${pod}:${d}`);
+    if (view.pois.length) this.nookPois = this.nookPois.filter((p) => !view.pois.includes(p));
+    setSlotBlocked(this.map, pod, []);
+  }
+
+  private track(view: SlotView, layer: Container, ...objs: Sprite[]) {
+    for (const obj of objs) {
+      layer.addChild(obj);
+      view.items.push({ layer, obj });
+    }
+  }
+
+  private buildNook(pod: number, view: SlotView) {
+    const nook = nookLayout(pod);
+    const rug = new Sprite(rugTexture(nook.rug.w, nook.rug.h, nook.rug.variant));
+    rug.position.set(nook.rug.x, nook.rug.y - 1);
+    this.track(view, this.decals, rug);
+    for (const ob of nook.objects) {
+      for (const s of this.placeObject(ob)) {
+        // placeObject already added them to their layer; just remember them
+        view.items.push({ layer: s.parent as Container, obj: s });
+      }
+    }
+    view.pois = nook.pois;
+    this.nookPois.push(...nook.pois);
+    setSlotBlocked(this.map, pod, nook.block);
+  }
+
+  private buildPod(pod: number, view: SlotView, n: number, spec: SlotSpec) {
     const o = podOrigin(pod);
-    this.pods[pod] = { nameplate: null, props: [], personId: null };
-    for (let d = 0; d < DESKS_PER_POD; d++) {
-      const t = deskTile(pod, d);
-      const desk = new Sprite(deskTexture());
-      desk.position.set(t.x * TILE - 1, t.y * TILE + 3);
-      desk.zIndex = t.y * TILE + 32;
+    const pitch = deskPitch(n);
+    const span = podDeskSpan(pod, n);
+    view.desks = spec.kind === "pod" ? n : 0;
+    const owner = spec.kind === "pod" ? spec.owner : null;
+    const mat = new Sprite(podMatTexture(span.w + 12, owner ? owner.mat : 0));
+    mat.position.set(span.x - 6, o.y * TILE + 30);
+    this.track(view, this.decals, mat);
+    for (let d = 0; d < n; d++) {
+      const t = deskPx(pod, d, n);
+      const desk = new Sprite(deskTexture(pitch));
+      desk.position.set(t.x - 1, t.y + 3);
+      desk.zIndex = t.y + 32;
       const monitor = new Sprite(monitorTextures()[MONITOR.off[0]]!);
-      monitor.position.set(t.x * TILE + 6, t.y * TILE - 5);
+      monitor.position.set(t.x + Math.round(pitch / 2) - 10, t.y - 5);
       monitor.zIndex = desk.zIndex + 0.5;
-      const seat = seatPoint(pod, d);
+      const seat = seatPoint(pod, d, n);
       const chair = new Sprite(chairTexture());
       chair.position.set(seat.x - 8, seat.y - 4);
       chair.zIndex = seat.y + 1;
+      this.track(view, this.objects, desk, monitor, chair);
+      if (!owner) continue;
       const glow = new Sprite(glowTexture(14, C.leaf));
       glow.anchor.set(0.5);
-      glow.position.set(t.x * TILE + 16, t.y * TILE + 2);
+      glow.position.set(t.x + Math.round(pitch / 2), t.y + 2);
       glow.alpha = 0;
       glow.visible = false;
-      this.glows.addChild(glow);
-      this.objects.addChild(desk, monitor, chair);
+      this.track(view, this.glows, glow);
       this.desks.set(`${pod}:${d}`, { pod, desk: d, chair, monitor, glow, state: "off", seat });
     }
-    void o;
+    setSlotBlocked(this.map, pod, podBlockTiles(pod, n));
+    const plate = new Sprite(
+      owner ? nameplateTexture(owner.name, owner.accent) : nameplateTexture("free desk", C.grey),
+    );
+    plate.position.set(Math.round(span.x + span.w / 2 - plate.width / 2), (o.y + 3) * TILE + 2);
+    if (!owner) plate.alpha = 0.75;
+    this.track(view, this.decals, plate);
+    view.owned.push(plate.texture);
+    if (!owner) {
+      // a welcome plant on the free desk
+      const t = deskPx(pod, 1, n);
+      const tex = propTexture("plant");
+      const s = new Sprite(tex);
+      s.position.set(t.x + pitch - 9, t.y + 14 - tex.height);
+      s.zIndex = t.y + 33;
+      this.track(view, this.objects, s);
+      return;
+    }
+    // personal touches: the avatar's desk props spread over the desks, mess by level
+    owner.avatar.deskProps.forEach((prop, i) => {
+      const desk = i === 0 ? 0 : i === 1 ? n - 1 : Math.min(n - 1, 1);
+      const t = deskPx(pod, desk, n);
+      const tex = propTexture(prop);
+      const s = new Sprite(tex);
+      const right = i % 2 === 1;
+      s.position.set(t.x + (right ? pitch - 9 : -1), t.y + 14 - tex.height);
+      s.zIndex = t.y + 33;
+      this.track(view, this.objects, s);
+    });
+    const mess = messTextures();
+    const level = owner.avatar.deskMess;
+    for (let i = 0; i < level * 2; i++) {
+      const desk = (i * 3 + 1) % n;
+      const t = deskPx(pod, desk, n);
+      const s = new Sprite(mess[(i + pod) % mess.length]!);
+      s.position.set(t.x + (i % 2 ? 2 : pitch - 10), t.y + 11 - (i % 3));
+      s.zIndex = t.y + 32.6;
+      this.track(view, this.objects, s);
+    }
+    if (level >= 2) {
+      // chaos spills onto the floor mat
+      for (let i = 0; i < level - 1; i++) {
+        const s = new Sprite(mess[(i * 2 + 1) % mess.length]!);
+        s.position.set(span.x + span.w - 4 - i * 9, o.y * TILE + 46 + (i % 2) * 3);
+        this.track(view, this.decals, s);
+      }
+    }
   }
 
   desk(pod: number, desk: number): DeskView | undefined {
@@ -253,51 +431,6 @@ export class OfficeScene {
     d.state = state;
     d.monitor.texture = monitorTextures()[MONITOR[state][0]]!;
     d.glow.texture = glowTexture(14, state === "run" ? C.leaf : state === "wait" ? C.amber : C.sky);
-  }
-
-  /** Show the owner's name + desk props on a pod (null clears it). */
-  setPodOwner(
-    pod: number,
-    owner: { personId: string; name: string; avatar: AvatarSpec; accent: string } | null,
-  ) {
-    const p = this.pods[pod];
-    if (!p) return;
-    if (p.nameplate) {
-      this.decals.removeChild(p.nameplate);
-      p.nameplate.destroy({ texture: true, textureSource: true });
-      p.nameplate = null;
-    }
-    for (const s of p.props) {
-      this.objects.removeChild(s);
-      s.destroy();
-    }
-    p.props = [];
-    p.personId = owner?.personId ?? null;
-    if (!owner) return;
-    const o = podOrigin(pod);
-    const plate = new Sprite(nameplateTexture(owner.name, owner.accent));
-    plate.position.set(Math.round((o.x + 4) * TILE - plate.width / 2), (o.y + 3) * TILE + 2);
-    this.decals.addChild(plate);
-    p.nameplate = plate;
-    owner.avatar.deskProps.forEach((prop, i) => {
-      const t = deskTile(pod, i % DESKS_PER_POD);
-      const tex = propTexture(prop);
-      const s = new Sprite(tex);
-      const right = i % 2 === 1;
-      s.position.set(t.x * TILE + (right ? 24 : -1), t.y * TILE + 14 - tex.height);
-      s.zIndex = t.y * TILE + 33;
-      this.objects.addChild(s);
-      p.props.push(s);
-    });
-    const mess = messTextures();
-    for (let i = 0; i < owner.avatar.deskMess; i++) {
-      const t = deskTile(pod, (i + 1) % DESKS_PER_POD);
-      const s = new Sprite(mess[i % mess.length]!);
-      s.position.set(t.x * TILE + (i % 2 ? 3 : 22), t.y * TILE + 12);
-      s.zIndex = t.y * TILE + 32.6;
-      this.objects.addChild(s);
-      p.props.push(s);
-    }
   }
 
   accentFor(agent: keyof typeof AGENT_PALETTES) {

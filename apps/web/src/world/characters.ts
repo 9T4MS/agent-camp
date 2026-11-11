@@ -8,6 +8,7 @@
 import {
   type Activity,
   type AgentKind,
+  hashString,
   seededRandom,
   sessionVariation,
 } from "@agent-office/protocol";
@@ -22,30 +23,40 @@ import {
 import type { MonitorState } from "../art/desk.ts";
 import { alertTextures, bubbleTexture, dotsTextures } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
+import { POD_MATS } from "../art/tiles.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
 import type { Effects } from "./effects.ts";
 import { HelperSwarm } from "./helpers.ts";
 import {
   chairTile,
-  DESKS_PER_POD,
+  clampDesks,
   type Facing,
+  MAX_DESKS,
   type Poi,
   type Point,
   podAisle,
+  podDeskSpan,
   TILE,
 } from "./map.ts";
 import type { OfficeScene } from "./office.ts";
 import { findPath } from "./pathing.ts";
 
 const WALK_SPEED = 44;
-const BUBBLE_SECONDS = 3.5;
+const BUBBLE_SECONDS = 2.6;
+/** at most this many speech bubbles at once (one per pod) so busy floors stay readable */
+const MAX_BUBBLES = 6;
 
 export type Moment = {
-  kind: "joined" | "started" | "waiting" | "left";
+  /** joined = someone is about to come in (camera heads to the door); arrived = door opens */
+  kind: "joined" | "arrived" | "started" | "waiting" | "left";
   x: number;
   y: number;
   name: string;
+  personId?: string;
 };
+
+/** Seconds between `person.joined` and the door/confetti, so an auto camera can get there. */
+const JOIN_LEAD = 1.8;
 
 type Mode = "queued" | "walking" | "seated" | "poi" | "waving" | "leaving";
 type Goal = "desk" | "poi" | "exit";
@@ -95,7 +106,7 @@ export class SessionCharacter {
   }
 
   get hasDesk() {
-    return this.desk < DESKS_PER_POD;
+    return this.desk < MAX_DESKS;
   }
 }
 
@@ -103,8 +114,11 @@ export class CharacterManager {
   readonly chars = new Map<string, SessionCharacter>();
   private poiTaken = new Map<string, string>();
   private rand = seededRandom("characters");
-  private pendingPodClear = new Map<number, number>();
+  /** desks per pod, kept at the high-water mark while the same person owns it */
+  private podDesks = new Map<number, { personId: string; n: number }>();
   onMoment: (m: Moment) => void = () => {};
+  /** pending join celebrations (door opens, confetti, banner) */
+  private joins: { personId: string; t: number; done: boolean }[] = [];
 
   constructor(
     private readonly scene: OfficeScene,
@@ -118,27 +132,24 @@ export class CharacterManager {
       case "personAdded": {
         const p = this.model.people.get(ch.personId);
         if (!p) return;
-        this.pendingPodClear.delete(p.pod);
-        this.scene.setPodOwner(p.pod, {
-          personId: p.personId,
-          name: p.name,
-          avatar: p.avatar,
-          accent: C.leaf,
-        });
+        this.syncSlots();
         if (!ch.instant) {
           const door = this.doorPoint();
-          this.effects.confetti(door.x, door.y - 8, 46, this.rand);
-          this.onMoment({ kind: "joined", x: door.x, y: door.y - 40, name: p.name });
+          this.joins.push({ personId: p.personId, t: JOIN_LEAD, done: false });
+          this.onMoment({
+            kind: "joined",
+            x: door.x,
+            y: door.y - 44,
+            name: p.name,
+            personId: p.personId,
+          });
         }
         break;
       }
-      case "personRemoved": {
-        const pod = [...this.chars.values()].find((c) => c.personId === ch.personId)?.pod;
-        // pod already reassigned in the model; clear when its owner's characters are gone
-        const podIdx = pod ?? this.findPodOf(ch.personId);
-        if (podIdx !== undefined) this.pendingPodClear.set(podIdx, ch.instant ? 0 : 7);
+      case "personRemoved":
+        // the pod stays until the person's characters have walked out (see destroy())
+        this.syncSlots();
         break;
-      }
       case "avatarChanged": {
         const p = this.model.people.get(ch.personId);
         if (!p) return;
@@ -147,12 +158,7 @@ export class CharacterManager {
           const s = this.model.sessions.get(c.sessionId);
           if (s) c.sheet = this.sheetFor(p, s);
         }
-        this.scene.setPodOwner(p.pod, {
-          personId: p.personId,
-          name: p.name,
-          avatar: p.avatar,
-          accent: C.leaf,
-        });
+        this.syncSlots();
         break;
       }
       case "sessionAdded":
@@ -187,9 +193,68 @@ export class CharacterManager {
     }
   }
 
-  private findPodOf(personId: string): number | undefined {
-    for (const c of this.chars.values()) if (c.personId === personId) return c.pod;
-    return undefined;
+  /**
+   * Bring the pod slots in line with the model: owned slots become pods with one desk per
+   * session (2..6, never shrinking while the same person owns it), a slot still holding
+   * characters of someone who left keeps its desks, the first free slot shows the
+   * "free desk" placeholder and every other slot is a cozy nook.
+   */
+  syncSlots() {
+    const owners = new Map<number, PersonState>();
+    for (const p of this.model.people.values()) owners.set(p.pod, p);
+    const lingering = new Set<number>();
+    const deskNeed = new Map<number, number>();
+    for (const c of this.chars.values()) {
+      const owner = owners.get(c.pod);
+      if (!owner || owner.personId !== c.personId) lingering.add(c.pod);
+      else if (c.hasDesk) deskNeed.set(c.pod, Math.max(deskNeed.get(c.pod) ?? 0, c.desk + 1));
+    }
+    let freeShown = false;
+    const changed: number[] = [];
+    for (let pod = 0; pod < this.scene.slotCount; pod++) {
+      const p = owners.get(pod);
+      let did = false;
+      if (p) {
+        let need = deskNeed.get(pod) ?? 0;
+        for (const s of this.model.sessionsOf(p.personId))
+          if (s.desk < MAX_DESKS) need = Math.max(need, s.desk + 1);
+        const hw = this.podDesks.get(pod);
+        const n = clampDesks(Math.max(need, hw?.personId === p.personId ? hw.n : 0));
+        this.podDesks.set(pod, { personId: p.personId, n });
+        did = this.scene.setSlot(pod, {
+          kind: "pod",
+          desks: n,
+          owner: {
+            personId: p.personId,
+            name: p.name,
+            avatar: p.avatar,
+            accent: C.leaf,
+            mat: hashString(p.personId) % POD_MATS.length,
+          },
+        });
+      } else if (lingering.has(pod)) {
+        continue;
+      } else {
+        this.podDesks.delete(pod);
+        did = this.scene.setSlot(pod, { kind: freeShown ? "nook" : "free" });
+        freeShown = true;
+      }
+      if (did) changed.push(pod);
+    }
+    if (changed.length === 0) return;
+    const pois = new Set([...this.scene.map.pois, ...this.scene.nookPois]);
+    for (const c of this.chars.values()) {
+      if (c.poi && !pois.has(c.poi)) {
+        // the nook they were lounging in became someone's pod
+        this.releasePoi(c);
+        if (c.mode === "poi" || c.mode === "walking") this.idleWander(c);
+      }
+      if (!changed.includes(c.pod)) continue;
+      const seat = this.seatOf(c.pod, c.desk);
+      c.helpers.setArea(podAisle(c.pod), seat);
+      if (c.mode === "seated" && c.hasDesk) this.sit(c);
+      else if (c.mode === "walking" && c.goal === "desk") this.goToDesk(c);
+    }
   }
 
   private nameOf(personId: string) {
@@ -211,6 +276,7 @@ export class CharacterManager {
     const p = s && this.model.people.get(s.personId);
     if (!s || !p) return;
     if (this.chars.has(sessionId)) return;
+    this.syncSlots();
     const seat = this.seatOf(p.pod, s.desk);
     const helpers = new HelperSwarm(
       this.scene.objects,
@@ -251,6 +317,9 @@ export class CharacterManager {
       // stagger siblings walking in together
       const queued = [...this.chars.values()].filter((o) => o.mode === "queued").length;
       c.delay = (queued - 1) * 0.9;
+      // someone new: walk in right as the door opens and the confetti pops
+      const join = this.joins.find((j) => j.personId === p.personId);
+      if (join) c.delay = Math.max(c.delay, join.t + 0.35);
       c.sprite.visible = false;
       helpers.set(s.subagents, false);
       const name = p.name;
@@ -294,6 +363,7 @@ export class CharacterManager {
     c.bubble.destroy();
     c.marker.destroy();
     this.chars.delete(c.sessionId);
+    this.syncSlots();
   }
 
   private otherAtDesk(c: SessionCharacter) {
@@ -305,7 +375,7 @@ export class CharacterManager {
 
   // ---- helpers --------------------------------------------------------------------------
   private seatOf(pod: number, desk: number): Point {
-    if (desk >= DESKS_PER_POD) {
+    if (desk >= MAX_DESKS) {
       const a = podAisle(pod);
       return { x: a.x + a.w / 2, y: a.y + 10 };
     }
@@ -347,7 +417,11 @@ export class CharacterManager {
       this.idleWander(c);
       return;
     }
-    this.walkTo(c, chairTile(c.pod, c.desk), "desk", this.seatOf(c.pod, c.desk));
+    this.walkTo(c, this.chairOf(c), "desk", this.seatOf(c.pod, c.desk));
+  }
+
+  private chairOf(c: SessionCharacter): Point {
+    return chairTile(c.pod, c.desk, Math.max(this.scene.slotDesks(c.pod), c.desk + 1));
   }
 
   private releasePoi(c: SessionCharacter) {
@@ -356,8 +430,14 @@ export class CharacterManager {
   }
 
   private idleWander(c: SessionCharacter) {
-    const pois = this.scene.map.pois.filter((p) => !this.poiTaken.has(p.id));
+    // mostly the coffee machine, lounge and garden (PLAN), sometimes a nook between pods
+    const free = (list: readonly Poi[]) => list.filter((p) => !this.poiTaken.has(p.id));
+    const nooks = free(this.scene.nookPois);
+    let pois = nooks.length > 0 && this.rand() < 0.25 ? nooks : free(this.scene.map.pois);
+    if (pois.length === 0) pois = nooks;
     if (pois.length === 0) return;
+    const favourites = pois.filter((p) => p.area !== "desks" && p.area !== "meeting");
+    if (favourites.length > 0 && this.rand() < 0.7) pois = favourites;
     const poi = pois[Math.floor(this.rand() * pois.length)]!;
     this.releasePoi(c);
     this.poiTaken.set(poi.id, c.sessionId);
@@ -366,9 +446,31 @@ export class CharacterManager {
   }
 
   private showBubble(c: SessionCharacter, activity: Activity, project: string) {
+    // one bubble per pod: a new one quickly fades its neighbour's; and a global cap
+    let shown = 0;
+    let oldest: SessionCharacter | null = null;
+    for (const o of this.chars.values()) {
+      if (o === c || o.bubbleT <= 0) continue;
+      if (o.pod === c.pod && o.hasDesk && c.hasDesk) o.bubbleT = Math.min(o.bubbleT, 0.25);
+      else {
+        shown++;
+        if (!oldest || o.bubbleT < oldest.bubbleT) oldest = o;
+      }
+    }
+    if (shown >= MAX_BUBBLES && oldest) oldest.bubbleT = Math.min(oldest.bubbleT, 0.25);
     c.bubble.texture = bubbleTexture(activity, project);
     c.bubble.visible = true;
     c.bubbleT = BUBBLE_SECONDS;
+  }
+
+  /** Bubble x: seated characters keep their bubble over their own pod. */
+  private bubbleX(c: SessionCharacter): number {
+    if (c.mode !== "seated" || !c.hasDesk) return c.x;
+    const n = this.scene.slotDesks(c.pod);
+    if (n === 0) return c.x;
+    const span = podDeskSpan(c.pod, n);
+    const half = c.bubble.width / 2;
+    return Math.max(span.x + half - 4, Math.min(span.x + span.w - half + 4, c.x));
   }
 
   private place(c: SessionCharacter) {
@@ -382,23 +484,27 @@ export class CharacterManager {
 
   // ---- per frame ------------------------------------------------------------------------
   update(dt: number, time: number) {
-    for (const [pod, t] of this.pendingPodClear) {
-      const left = t - dt;
-      const owner = [...this.model.people.values()].find((p) => p.pod === pod);
-      const busy = [...this.chars.values()].some(
-        (c) => c.pod === pod && (!owner || c.personId !== owner.personId),
-      );
-      if (owner && !busy) {
-        this.pendingPodClear.delete(pod);
-        continue;
-      }
-      if (left <= 0 && !busy) {
-        this.pendingPodClear.delete(pod);
-        if (!owner) this.scene.setPodOwner(pod, null);
-      } else this.pendingPodClear.set(pod, left);
-    }
     let doorBusy = false;
     const door = this.doorPoint();
+    for (const j of this.joins) {
+      j.t -= dt;
+      if (!j.done && j.t <= 0) {
+        j.done = true;
+        const p = this.model.people.get(j.personId);
+        this.effects.confetti(door.x - 14, door.y - 6, 40, this.rand, 0.35);
+        this.effects.confetti(door.x + 14, door.y - 6, 40, this.rand, -0.35);
+        if (p)
+          this.onMoment({
+            kind: "arrived",
+            x: door.x,
+            y: door.y - 44,
+            name: p.name,
+            personId: p.personId,
+          });
+      }
+      if (j.t > -3.2 && j.t < 0.4) doorBusy = true;
+    }
+    this.joins = this.joins.filter((j) => j.t > -3.2);
     for (const c of [...this.chars.values()]) {
       this.step(c, dt, time);
       if (c.removed) continue;
@@ -423,8 +529,7 @@ export class CharacterManager {
         c.delay -= dt;
         if (c.delay <= 0) {
           c.sprite.visible = true;
-          if (c.hasDesk)
-            this.walkTo(c, chairTile(c.pod, c.desk), "desk", this.seatOf(c.pod, c.desk));
+          if (c.hasDesk) this.goToDesk(c);
           else this.idleWander(c);
         }
         break;
@@ -482,15 +587,20 @@ export class CharacterManager {
       c.bubble.visible = c.bubbleT > 0;
     }
     const headY = c.y - (c.mode === "seated" || c.anim === "sitFront" ? 21 : 24);
-    c.bubble.position.set(Math.round(c.x), Math.round(headY - 1));
+    if (c.bubble.visible) {
+      // stagger heights between neighbouring pods (and desks) so bubbles don't stack up
+      const lift = c.mode === "seated" ? (c.pod % 2) * 6 + (c.desk % 2) * 2 : 0;
+      c.bubble.position.set(Math.round(this.bubbleX(c)), Math.round(headY - 1 - lift));
+    }
     if (c.mode === "seated" && c.bubbleT <= 0) {
       if (activity === "waiting") {
         const frames = alertTextures();
         c.marker.texture = frames[Math.floor(time * 3) % 2]!;
         c.marker.visible = true;
+        // on the left of the head: the raised hand (right side) stays visible
         c.marker.position.set(
-          Math.round(c.x + 5),
-          Math.round(headY - 3 + Math.round(Math.sin(time * 6))),
+          Math.round(c.x - 7),
+          Math.round(headY - 2 + Math.round(Math.sin(time * 6))),
         );
       } else if (activity === "thinking") {
         const frames = dotsTextures();

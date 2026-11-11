@@ -110,7 +110,13 @@ export class DemoFeed {
     const nPeople = Math.min(this.opts.people ?? 12, DEMO_NAMES.length);
     const nSessions = Math.max(nPeople, this.opts.sessions ?? 30);
     const counts = Array.from({ length: nPeople }, () => 1);
-    for (let left = nSessions - nPeople; left > 0; ) {
+    let left = nSessions - nPeople;
+    // one power user with a big pod (5 desks) when there are sessions to spare
+    if (nPeople > 3 && left >= 8) {
+      counts[3] = 5;
+      left -= 4;
+    }
+    while (left > 0) {
       const i = Math.floor(this.rand() * nPeople);
       if (counts[i]! < 4) {
         counts[i]!++;
@@ -120,6 +126,8 @@ export class DemoFeed {
     const people = counts.map((c) => this.makePerson(c));
     // guarantee the interesting states are visible
     const all = people.flatMap((p) => p.sessions);
+    // realistic mix: mostly busy, a few idle, exactly two people waiting on their human
+    for (const s of all) if (s.activity === "waiting") s.activity = "thinking";
     if (all[1]) all[1].activity = "waiting";
     if (all[7]) all[7].activity = "waiting";
     if (all[2]) all[2].subagents = 8;
@@ -148,12 +156,19 @@ export class DemoFeed {
 
   private activity(): Activity {
     const r = this.rand();
-    if (r < 0.3) return "typing";
-    if (r < 0.48) return "reading";
-    if (r < 0.62) return "running";
-    if (r < 0.78) return "thinking";
+    if (r < 0.32) return "typing";
+    if (r < 0.52) return "reading";
+    if (r < 0.67) return "running";
+    if (r < 0.83) return "thinking";
     if (r < 0.88) return "waiting";
     return "idle";
+  }
+
+  private waitingCount(): number {
+    let n = 0;
+    for (const p of this.people.values())
+      for (const s of p.sessions) if (s.activity === "waiting") n++;
+    return n;
   }
 
   private makeSession(
@@ -253,6 +268,9 @@ export class DemoFeed {
     if (s && r < 0.62) {
       let a = this.activity();
       if (a === s.activity) a = this.pick(ACTIVITIES);
+      // someone answered: waiting sessions get back to work; never more than 2 waiting
+      if (s.activity === "waiting") a = this.rand() < 0.6 ? "typing" : "thinking";
+      else if (a === "waiting" && this.waitingCount() >= 2) a = "reading";
       this.setActivity(p.personId, s, a);
     } else if (s && r < 0.84) {
       const up = s.subagents === 0 || (s.subagents < 9 && this.rand() < 0.55);
@@ -267,7 +285,7 @@ export class DemoFeed {
     } else if (s && r < 0.9 && p.sessions.length > 1) {
       p.sessions.splice(p.sessions.indexOf(s), 1);
       this.emit(envelope("session.ended", { personId: p.personId, sessionId: s.sessionId }));
-    } else if (r < 0.96 && p.sessions.length < 4) {
+    } else if (r < 0.96 && p.sessions.length < 6) {
       const ns = this.makeSession(this.agent(), "thinking", 0);
       ns.startedAt = this.now();
       p.sessions.push(ns);

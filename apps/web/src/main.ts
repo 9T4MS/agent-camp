@@ -75,7 +75,7 @@ async function boot() {
   const app = new Application();
   await app.init({
     resizeTo: host,
-    background: C.night,
+    background: C.pine,
     antialias: false,
     roundPixels: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -111,6 +111,7 @@ async function boot() {
   camera.attach(app.canvas);
   const minimap = new Minimap(hud.minimapHost, camera, chars);
   minimap.setTerrain(scene.terrainCanvas);
+  minimap.desks = () => scene.deskRects();
 
   // initial view
   if (zoomParam === "fit") camera.zoomToFit(true);
@@ -127,8 +128,8 @@ async function boot() {
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     cat.setMap(scene.map);
     minimap.setTerrain(scene.terrainCanvas);
-    for (const p of model.people.values())
-      chars.handle({ kind: "avatarChanged", personId: p.personId });
+    chars.syncSlots();
+    camera.worldChanged();
   };
 
   let snapshotSeen = false;
@@ -139,14 +140,19 @@ async function boot() {
       chars.handle(ch);
       if (ch.kind === "officeRenamed") hud.setOfficeName(ch.name);
     }
-    if (msg.type === "office.snapshot") snapshotSeen = true;
+    if (msg.type === "office.snapshot") {
+      snapshotSeen = true;
+      chars.syncSlots();
+    }
     hud.setStats(model.stats());
     living.poke();
   };
 
   chars.onMoment = (m) => {
-    camera.notify(m.x, m.y);
-    if (m.kind === "joined") hud.showBanner(`${m.name} joined`, "welcome to the office!");
+    if (m.kind === "joined") camera.notify(m.x, m.y, { zoom: 3, hold: 10, rush: true });
+    else if (m.kind === "arrived") {
+      hud.showJoin(m.name, m.personId ? hud.portrait(m.personId) : null);
+    } else camera.notify(m.x, m.y);
   };
 
   camera.onTap = (wx, wy) => {

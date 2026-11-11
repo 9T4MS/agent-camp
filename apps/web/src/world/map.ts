@@ -3,7 +3,8 @@
  * furniture objects, named areas and points of interest. Pure data + helpers, no Pixi.
  *
  * Layout (x 0..63):
- *   x 1..32   main desk floor (pods of 4 desks, 3 columns, rows grow as people join)
+ *   x 1..32   main desk floor (pod slots, 3 columns: desks only for people who are here,
+ *             cozy nooks elsewhere; rows grow as people join)
  *   x 34..49  kitchen + lounge (top), meeting room (middle), game corner (bottom)
  *   x 51..62  garden; main door in the bottom wall at x 16..17
  *
@@ -92,12 +93,21 @@ const BASE_ROWS: readonly string[] = [
 
 /** Template row repeated (6 per pod row) when the desk floor grows. */
 const GROW_ROW = `${DESK_ROW}#gggggggggggggggg#${G_PATH}`;
-/** Rows are inserted before this y (the bottom wall). */
-const GROW_AT = 28;
+/** Rows are inserted before this y (the last floor row, so things along the bottom wall move with it). */
+const GROW_AT = 27;
 export const BASE_POD_ROWS = 4;
 
 // ---- pods -----------------------------------------------------------------------------------
+/**
+ * The desk floor is a grid of pod *slots* (3 per row). A slot only gets desks once a person
+ * owns it; empty slots are cozy nooks (see `NOOKS`), the next free one shows a 2-desk
+ * "free desk" placeholder. A pod has 2..6 desks (one per session, the pod grows with them):
+ * up to 4 at a 32 px pitch, 5 at 26 px and 6 at 24 px so every pod fits its 10-tile slot.
+ */
 export const POD_COLS = 3;
+export const MIN_DESKS = 2;
+export const MAX_DESKS = 6;
+/** @deprecated kept for older imports: desks of a "classic" 4-desk pod */
 export const DESKS_PER_POD = 4;
 const POD_X0 = 3;
 const POD_Y0 = 4;
@@ -106,32 +116,74 @@ const POD_H = 6;
 
 export type Point = { x: number; y: number };
 
-/** Top-left tile of a pod's first desk. Pods fill row-major, 3 per row. */
+/** Top-left tile of a slot's (classic, 4-desk) first desk. Slots fill row-major, 3 per row. */
 export function podOrigin(pod: number): Point {
   return { x: POD_X0 + (pod % POD_COLS) * POD_W, y: POD_Y0 + Math.floor(pod / POD_COLS) * POD_H };
 }
-/** Top-left tile of a desk (each desk is 2x2 tiles: monitor/top + front). */
-export function deskTile(pod: number, desk: number): Point {
-  const o = podOrigin(pod);
-  return { x: o.x + desk * 2, y: o.y };
+/** Pixel x of the slot's center line. */
+export function podCenterX(pod: number): number {
+  return (podOrigin(pod).x + 4) * TILE;
+}
+export function deskPitch(n: number): number {
+  return n <= 4 ? 32 : n === 5 ? 26 : 24;
+}
+export function clampDesks(n: number): number {
+  return Math.max(MIN_DESKS, Math.min(MAX_DESKS, n));
+}
+/** Pixel rect of a pod's desk row (n desks). */
+export function podDeskSpan(pod: number, n: number): { x: number; w: number } {
+  const w = n * deskPitch(n);
+  // big pods start one tile left of the slot so the 1-tile gap to the next slot stays open
+  if (n > 4) return { x: (podOrigin(pod).x - 1) * TILE + Math.floor((9 * TILE - w) / 2), w };
+  return { x: Math.round(podCenterX(pod) - w / 2), w };
+}
+/** Pixel position of a desk's top-left (desk top surface starts at y + 3). */
+export function deskPx(pod: number, desk: number, n: number): Point {
+  const span = podDeskSpan(pod, n);
+  return { x: span.x + desk * deskPitch(n), y: podOrigin(pod).y * TILE };
+}
+/** Pixel position of a seated character's feet (centered on the desk). */
+export function seatPoint(pod: number, desk: number, n: number = DESKS_PER_POD): Point {
+  const d = deskPx(pod, desk, n);
+  return { x: d.x + Math.round(deskPitch(n) / 2), y: d.y + 34 };
 }
 /** Walkable tile right in front of the desk where the chair stands. */
-export function chairTile(pod: number, desk: number): Point {
-  const d = deskTile(pod, desk);
-  return { x: d.x, y: d.y + 2 };
+export function chairTile(pod: number, desk: number, n: number = DESKS_PER_POD): Point {
+  const s = seatPoint(pod, desk, n);
+  return { x: Math.floor(s.x / TILE), y: podOrigin(pod).y + 2 };
 }
-/** Pixel position of a seated character's feet (between the desk's two tiles). */
-export function seatPoint(pod: number, desk: number): Point {
-  const d = deskTile(pod, desk);
-  return { x: (d.x + 1) * TILE, y: d.y * TILE + 34 };
+/** Tiles covered by a pod's desks (blocked for walking). */
+export function podDeskTiles(pod: number, n: number): { x0: number; x1: number; y: number } {
+  const span = podDeskSpan(pod, n);
+  return {
+    x0: Math.floor(span.x / TILE),
+    x1: Math.floor((span.x + span.w - 1) / TILE),
+    y: podOrigin(pod).y,
+  };
 }
 /** Pixel rect of the floor strip in front of a pod (nameplate + aisle), for helper bots. */
 export function podAisle(pod: number): { x: number; y: number; w: number; h: number } {
   const o = podOrigin(pod);
-  return { x: o.x * TILE, y: (o.y + 4) * TILE + 4, w: DESKS_PER_POD * 2 * TILE, h: TILE + 6 };
+  return { x: o.x * TILE, y: (o.y + 4) * TILE + 4, w: 8 * TILE, h: TILE + 6 };
 }
 export function podRowsFor(podCount: number): number {
   return Math.max(BASE_POD_ROWS, Math.ceil(podCount / POD_COLS));
+}
+
+/** Block (or free) the tiles of a slot: desks of an n-desk pod, or a nook's furniture. */
+export function setSlotBlocked(map: OfficeMap, pod: number, tiles: readonly Point[]) {
+  const o = podOrigin(pod);
+  // reset the slot's furniture band (rows y..y+3, the 10 slot columns minus the aisles)
+  for (let y = o.y; y < o.y + 4; y++) {
+    for (let x = o.x - 1; x <= o.x + 8; x++) map.setWalkable(x, y, map.baseWalkable(x, y));
+  }
+  for (const t of tiles) map.setWalkable(t.x, t.y, false);
+}
+export function podBlockTiles(pod: number, n: number): Point[] {
+  const t = podDeskTiles(pod, n);
+  const out: Point[] = [];
+  for (let x = t.x0; x <= t.x1; x++) out.push({ x, y: t.y }, { x, y: t.y + 1 });
+  return out;
 }
 
 // ---- objects --------------------------------------------------------------------------------
@@ -314,6 +366,156 @@ const BASE_POIS: readonly Poi[] = [
   poi("plant-d", "desks", 2, 3, "left", "stand"),
 ];
 
+// ---- nooks (empty pod slots) ------------------------------------------------------------------
+type NookSpec = {
+  name: string;
+  /** rug in tiles relative to the slot origin */
+  rug: { dx: number; dy: number; w: number; h: number; variant: number };
+  objects: readonly { kind: ObjectKind; dx: number; dy: number; variant?: number }[];
+  pois: readonly { dx: number; dy: number; face: Facing; pose: PoiPose; sx: number; sy: number }[];
+};
+/** Cozy corners for unoccupied slots (8x4 tiles; the slot's aisles stay free). */
+const NOOKS: readonly NookSpec[] = [
+  {
+    name: "reading",
+    rug: { dx: 2, dy: 1, w: 5, h: 3, variant: 0 },
+    objects: [
+      { kind: "bookshelf", dx: 0, dy: 0 },
+      { kind: "armchair", dx: 3, dy: 1 },
+      { kind: "armchair", dx: 5, dy: 1 },
+      { kind: "coffeeTable", dx: 4, dy: 2 },
+      { kind: "plant", dx: 7, dy: 1, variant: 2 },
+    ],
+    pois: [
+      { dx: 3, dy: 2, face: "down", pose: "sit", sx: 3, sy: 1 },
+      { dx: 5, dy: 2, face: "down", pose: "sit", sx: 5, sy: 1 },
+    ],
+  },
+  {
+    name: "greenery",
+    rug: { dx: 2, dy: 2, w: 3, h: 2, variant: 3 },
+    objects: [
+      { kind: "plantBig", dx: 1, dy: 1 },
+      { kind: "plant", dx: 2, dy: 1, variant: 2 },
+      { kind: "beanbag", dx: 3, dy: 2, variant: 1 },
+      { kind: "plant", dx: 6, dy: 2, variant: 1 },
+      { kind: "plantBig", dx: 7, dy: 1 },
+    ],
+    pois: [{ dx: 3, dy: 2, face: "down", pose: "sitBack", sx: 3, sy: 2 }],
+  },
+  {
+    name: "movie",
+    rug: { dx: 2, dy: 1, w: 4, h: 3, variant: 1 },
+    objects: [
+      { kind: "tv", dx: 3, dy: 0 },
+      { kind: "beanbag", dx: 3, dy: 2, variant: 0 },
+      { kind: "beanbag", dx: 4, dy: 2, variant: 2 },
+      { kind: "plant", dx: 6, dy: 0, variant: 1 },
+    ],
+    pois: [
+      { dx: 3, dy: 2, face: "up", pose: "sitBack", sx: 3, sy: 2 },
+      { dx: 4, dy: 2, face: "up", pose: "sitBack", sx: 4, sy: 2 },
+    ],
+  },
+  {
+    name: "open",
+    rug: { dx: 3, dy: 1, w: 3, h: 2, variant: 2 },
+    objects: [
+      { kind: "floorLamp", dx: 2, dy: 1 },
+      { kind: "plant", dx: 6, dy: 1, variant: 0 },
+    ],
+    pois: [{ dx: 4, dy: 2, face: "down", pose: "stand", sx: 4, sy: 2 }],
+  },
+  {
+    name: "sofa",
+    rug: { dx: 1, dy: 1, w: 5, h: 3, variant: 2 },
+    objects: [
+      { kind: "plant", dx: 0, dy: 1, variant: 0 },
+      { kind: "sofa", dx: 2, dy: 1 },
+      { kind: "floorLamp", dx: 5, dy: 1 },
+      { kind: "coffeeTable", dx: 3, dy: 3 },
+    ],
+    pois: [
+      { dx: 2, dy: 2, face: "down", pose: "sit", sx: 2, sy: 1 },
+      { dx: 4, dy: 2, face: "down", pose: "sit", sx: 4, sy: 1 },
+    ],
+  },
+  {
+    name: "beanbags",
+    rug: { dx: 2, dy: 1, w: 4, h: 3, variant: 3 },
+    objects: [
+      { kind: "beanbag", dx: 2, dy: 2, variant: 2 },
+      { kind: "beanbag", dx: 4, dy: 2, variant: 0 },
+      { kind: "coffeeTable", dx: 3, dy: 2 },
+      { kind: "plantBig", dx: 7, dy: 0 },
+    ],
+    pois: [
+      { dx: 2, dy: 2, face: "right", pose: "sitBack", sx: 2, sy: 2 },
+      { dx: 4, dy: 2, face: "left", pose: "sitBack", sx: 4, sy: 2 },
+    ],
+  },
+];
+/** Nook per slot: row and column neighbours always differ. */
+const NOOK_ORDER = [0, 2, 4, 3, 1, 5, 4, 5, 0, 2, 3, 1];
+
+export type NookLayout = {
+  name: string;
+  rug: { x: number; y: number; w: number; h: number; variant: number };
+  objects: MapObject[];
+  pois: Poi[];
+  block: Point[];
+};
+
+/** Which nook an empty slot shows (neighbours differ). */
+export function nookVariant(pod: number): number {
+  return (
+    (NOOK_ORDER[pod % NOOK_ORDER.length]! + Math.floor(pod / NOOK_ORDER.length)) % NOOKS.length
+  );
+}
+
+export function nookLayout(pod: number): NookLayout {
+  const spec = NOOKS[nookVariant(pod)]!;
+  const o = podOrigin(pod);
+  const objects = spec.objects.map((ob) => ({
+    kind: ob.kind,
+    x: o.x + ob.dx,
+    y: o.y + ob.dy,
+    ...(ob.variant !== undefined ? { variant: ob.variant } : {}),
+  }));
+  const block: Point[] = [];
+  for (const ob of objects) {
+    const fp = FOOTPRINTS[ob.kind];
+    if (!fp.solid) continue;
+    for (let j = 0; j < fp.h; j++)
+      for (let i = 0; i < fp.w; i++) block.push({ x: ob.x + i, y: ob.y + j });
+  }
+  const pois = spec.pois.map((p, i) =>
+    poi(
+      `nook-${pod}-${i}`,
+      "desks",
+      o.x + p.dx,
+      o.y + p.dy,
+      p.face,
+      p.pose,
+      seat(o.x + p.sx, o.y + p.sy),
+    ),
+  );
+  const r = spec.rug;
+  return {
+    name: spec.name,
+    rug: {
+      x: (o.x + r.dx) * TILE + 4,
+      y: (o.y + r.dy) * TILE + 4,
+      w: r.w * TILE - 8,
+      h: r.h * TILE - 8,
+      variant: r.variant,
+    },
+    objects,
+    pois,
+    block,
+  };
+}
+
 export type OfficeMap = {
   width: number;
   height: number;
@@ -329,6 +531,9 @@ export type OfficeMap = {
   walkable: Uint8Array;
   terrainAt(x: number, y: number): Terrain | undefined;
   isWalkable(x: number, y: number): boolean;
+  /** walkability from terrain + static objects only (no pods / nooks) */
+  baseWalkable(x: number, y: number): boolean;
+  setWalkable(x: number, y: number, on: boolean): void;
 };
 
 export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
@@ -378,18 +583,11 @@ export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
     if (!fp.solid) continue;
     for (let j = 0; j < fp.h; j++) for (let i = 0; i < fp.w; i++) block(ob.x + i, ob.y + j);
   }
-  for (let pod = 0; pod < podRows * POD_COLS; pod++) {
-    for (let d = 0; d < DESKS_PER_POD; d++) {
-      const t = deskTile(pod, d);
-      block(t.x, t.y);
-      block(t.x + 1, t.y);
-      block(t.x, t.y + 1);
-      block(t.x + 1, t.y + 1);
-    }
-  }
+  const base = walkable.slice();
   const isWalkable = (x: number, y: number) =>
     x >= 0 && y >= 0 && x < width && y < height && walkable[y * width + x] === 1;
 
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < width && y < height;
   return {
     width,
     height,
@@ -403,6 +601,10 @@ export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
     walkable,
     terrainAt,
     isWalkable,
+    baseWalkable: (x, y) => inside(x, y) && base[y * width + x] === 1,
+    setWalkable(x, y, on) {
+      if (inside(x, y)) walkable[y * width + x] = on ? 1 : 0;
+    },
   };
 }
 

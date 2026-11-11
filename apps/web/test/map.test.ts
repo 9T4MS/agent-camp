@@ -2,20 +2,27 @@ import { describe, expect, test } from "bun:test";
 import {
   buildOfficeMap,
   chairTile,
-  DESKS_PER_POD,
+  MAX_DESKS,
+  nookLayout,
   POD_COLS,
+  podBlockTiles,
   podRowsFor,
+  setSlotBlocked,
 } from "../src/world/map.ts";
 import { findPath } from "../src/world/pathing.ts";
 
 describe("office map", () => {
   for (const rows of [4, 6]) {
-    test(`every desk and POI is reachable from the door (${rows} pod rows)`, () => {
+    test(`every desk and POI is reachable from the door, all pods full (${rows} pod rows)`, () => {
       const map = buildOfficeMap(rows);
       expect(map.rows.every((r) => r.length === map.width)).toBe(true);
+      for (let pod = 0; pod < rows * POD_COLS; pod++)
+        setSlotBlocked(map, pod, podBlockTiles(pod, MAX_DESKS));
       for (let pod = 0; pod < rows * POD_COLS; pod++) {
-        for (let d = 0; d < DESKS_PER_POD; d++) {
-          expect(findPath(map, map.spawn, chairTile(pod, d))).not.toBeNull();
+        for (let d = 0; d < MAX_DESKS; d++) {
+          const chair = chairTile(pod, d, MAX_DESKS);
+          expect(map.isWalkable(chair.x, chair.y)).toBe(true);
+          expect(findPath(map, map.spawn, chair), `pod ${pod} desk ${d}`).not.toBeNull();
         }
       }
       for (const poi of map.pois) {
@@ -23,6 +30,24 @@ describe("office map", () => {
       }
     });
   }
+  test("nooks between pods keep desks and their own POIs reachable", () => {
+    const map = buildOfficeMap(4);
+    for (let pod = 0; pod < 4 * POD_COLS; pod++) {
+      if (pod % 2) setSlotBlocked(map, pod, nookLayout(pod).block);
+      else setSlotBlocked(map, pod, podBlockTiles(pod, pod % 4 === 0 ? MAX_DESKS : 2));
+    }
+    for (let pod = 0; pod < 4 * POD_COLS; pod++) {
+      if (pod % 2) {
+        for (const poi of nookLayout(pod).pois)
+          expect(findPath(map, map.spawn, poi.tile), poi.id).not.toBeNull();
+      } else {
+        const n = pod % 4 === 0 ? MAX_DESKS : 2;
+        for (let d = 0; d < n; d++)
+          expect(findPath(map, map.spawn, chairTile(pod, d, n))).not.toBeNull();
+      }
+    }
+    for (const poi of map.pois) expect(findPath(map, map.spawn, poi.tile), poi.id).not.toBeNull();
+  });
   test("pod rows grow with people", () => {
     expect(podRowsFor(0)).toBe(4);
     expect(podRowsFor(12)).toBe(4);

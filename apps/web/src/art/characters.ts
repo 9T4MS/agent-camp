@@ -762,6 +762,18 @@ function drawLegs(pc: PixelCanvas, view: View, phase: number) {
   pc.rect(9, 21 - rUp, 2, 1, Sh);
 }
 
+/** Raised hand drawn over the head's edge so it reads at a glance ("waiting for you!"). */
+function drawRaisedHand(pc: PixelCanvas, look: Look, arms: Arms, top: number) {
+  if (arms !== "raise0" && arms !== "raise1") return;
+  const j = look.jacket;
+  const s = look.skin;
+  const lift = arms === "raise0" ? 0 : 1;
+  pc.vline(13, top - 3 + lift, 4, j.shade);
+  pc.vline(14, top - 7 + lift, 6, j.main);
+  pc.rect(13, top - 10 + lift, 2, 3, s.main);
+  pc.set(12, top - 9 + lift, s.main); // thumb
+}
+
 function drawMug(pc: PixelCanvas, x: number, y: number) {
   pc.rect(x, y, 2, 3, C.white);
   pc.vline(x + 2, y + 1, 1, C.white);
@@ -789,6 +801,7 @@ function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec) {
       if (look.mug && f.phase === 0) drawMug(pc, 5, 15 + bob);
     }
     drawHead(pc, look, f.view, bob);
+    if (f.view === "down") drawRaisedHand(pc, look, f.arms, 12 + bob);
     return;
   }
   const S = 3; // seated: everything sits 3 px lower
@@ -807,6 +820,7 @@ function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec) {
   drawArmsFront(pc, look, f.arms === "rest" ? "down" : f.arms, 12 + S + bob, 0);
   if (look.mug && f.arms === "rest") drawMug(pc, 11, 17 + bob);
   drawHead(pc, look, "down", S + bob);
+  drawRaisedHand(pc, look, f.arms, 12 + S + bob);
 }
 
 const sheetCache = new Map<string, CharacterSheet>();

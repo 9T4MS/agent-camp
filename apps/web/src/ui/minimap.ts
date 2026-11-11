@@ -10,6 +10,8 @@ export class Minimap {
   private ctx: CanvasRenderingContext2D;
   private base: HTMLCanvasElement | null = null;
   private acc = 1;
+  /** desk pods to draw over the terrain (they are sprites, not part of it) */
+  desks: () => { x: number; y: number; w: number; h: number; mine: boolean }[] = () => [];
 
   constructor(
     host: HTMLElement,
@@ -50,6 +52,15 @@ export class Minimap {
     this.acc = 0;
     const ctx = this.ctx;
     ctx.drawImage(this.base, 0, 0);
+    for (const d of this.desks()) {
+      ctx.fillStyle = d.mine ? "#733e39" : "#b86f50";
+      ctx.fillRect(
+        Math.round(d.x * SCALE),
+        Math.round(d.y * SCALE),
+        Math.max(1, Math.round(d.w * SCALE)),
+        Math.max(1, Math.round(d.h * SCALE)),
+      );
+    }
     for (const c of this.chars.chars.values()) {
       if (!c.sprite.visible) continue;
       ctx.fillStyle = "#181425";
