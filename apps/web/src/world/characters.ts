@@ -63,7 +63,7 @@ import { flameTextures, smokeTexture } from "../art/heat.ts";
 import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
-import type { WaitSpot } from "./cat.ts";
+import type { Perch, WaitSpot } from "./cat.ts";
 import {
   CRATER_S,
   type EndedDesk,
@@ -80,6 +80,7 @@ import {
   ZOMBIE_AFTER_MS,
 } from "./dramaRules.ts";
 import type { Effects } from "./effects.ts";
+import { helperArea } from "./helperRules.ts";
 import { HelperSwarm, type HelperWorld } from "./helpers.ts";
 import {
   type EndedSession,
@@ -165,18 +166,6 @@ const ERRANDS: readonly Point[] = [
 function dayKey(ts: number): string {
   const d = new Date(ts);
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-}
-
-/** Helpers stay within a few steps of their agent's chair, inside the pod's aisle. */
-export function helperArea(
-  aisle: { x: number; y: number; w: number; h: number },
-  seat: { x: number; y: number },
-): { x: number; y: number; w: number; h: number } {
-  const x0 = Math.max(aisle.x, seat.x - 22);
-  const x1 = Math.min(aisle.x + aisle.w, seat.x + 22);
-  const y0 = Math.max(aisle.y, seat.y - 4);
-  const y1 = Math.min(aisle.y + aisle.h, seat.y + 18);
-  return x1 - x0 < 8 || y1 - y0 < 4 ? aisle : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** Context-window share where a session starts smoking / catches fire. */
@@ -307,7 +296,7 @@ export class CharacterManager {
   shopChance = 0.1;
   /** a pizza is on the meeting table: idle people gather there */
   pizzaActive: () => boolean = () => false;
-  /** the office cat may eat a finished helper (wired up in main.ts) */
+  /** an office cat may eat a finished helper (wired up in main.ts) */
   catEats: (sprite: Sprite, x: number, y: number) => boolean = () => false;
   /** office-local hour 0..24 (night ghosts) */
   hour: () => number = () => 12;
@@ -433,6 +422,10 @@ export class CharacterManager {
         if (c && (ch.context ?? 0) >= FIRE_AT) this.effects.puff(c.x, c.y - 20);
         break;
       }
+      case "helpersChanged":
+        for (const c of this.chars.values())
+          if (c.personId === ch.personId && !c.removed) c.helpers.setSkin(ch.helpers, true);
+        break;
       case "officeRenamed":
       case "interaction":
       case "birthdayChanged":
@@ -508,7 +501,7 @@ export class CharacterManager {
       }
       if (!changed.includes(c.pod) && !moved.has(c)) continue;
       const seat = this.seatOf(c.pod, c.desk);
-      c.helpers.setArea(helperArea(podAisle(c.pod), seat), seat);
+      c.helpers.setArea((n) => helperArea(podAisle(c.pod), seat, n), seat);
       if (c.mode === "seated" && c.hasDesk) this.sit(c);
       else if (c.mode === "walking" && c.goal === "desk") this.goToDesk(c);
     }
@@ -711,10 +704,11 @@ export class CharacterManager {
       this.scene.fx,
       this.effects,
       s.agent,
-      helperArea(podAisle(p.pod), seat),
+      (n) => helperArea(podAisle(p.pod), seat, n),
       seat,
       seededRandom(`helpers:${sessionId}`),
       this.helperWorld,
+      p.helpers,
     );
     const c = new SessionCharacter(
       sessionId,
@@ -1548,6 +1542,23 @@ export class CharacterManager {
     }
   }
 
+  /**
+   * Where a cat sent to someone sits: up on the desk of one of their seated agents, beside the
+   * monitor (drawn above the desk, below the person), else next to wherever they are.
+   */
+  catPerch(personId: string, pick: number): Perch | null {
+    const mine = this.charactersOf(personId);
+    const seated = mine.filter((c) => c.mode === "seated" && c.hasDesk);
+    const c = seated.length > 0 ? seated[pick % seated.length] : mine[pick % (mine.length || 1)];
+    if (!c) {
+      const spot = this.personSpot(personId);
+      return spot ? { seat: spot, desk: null, z: spot.y } : null;
+    }
+    // no desk to hop onto (not seated, or seated without a desk): sit next to them
+    if (c.mode !== "seated" || !c.hasDesk) return { seat: { x: c.x, y: c.y }, desk: null, z: c.y };
+    return { seat: { x: c.x, y: c.y }, desk: { x: c.x + 12, y: c.y - 19 }, z: c.y - 1.2 };
+  }
+
   /** Centre of a person's pod desks (cake drone target). */
   personSpot(personId: string): Point | null {
     const p = this.model.people.get(personId);
@@ -1945,7 +1956,7 @@ export class CharacterManager {
     return best;
   }
 
-  /** Characters that are idle somewhere (for the cat). */
+  /** Characters that are idle somewhere (for the cats). */
   idleSpots(): Point[] {
     const out: Point[] = [];
     for (const c of this.chars.values()) {

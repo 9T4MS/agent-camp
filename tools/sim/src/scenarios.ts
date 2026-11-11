@@ -151,11 +151,12 @@ function* randomChange(
       yield { op: "activity", clientId: l.clientId, key: s.key, activity: "waiting" };
       return;
     case "burst": {
-      // subagents are a Claude thing; bursts ramp up one by one (up to 8 for the "+N" badge)
+      // subagents are a Claude thing; bursts ramp up one by one, now and then a big swarm
       const claude = live.filter((x) => x.session.agent === "claude");
       const t = pickOne(rand, claude);
       if (!t) return;
-      const goal = Math.min(8, t.session.subagents + intBetween(rand, 1, 6));
+      const more = rand() < 0.2 ? intBetween(rand, 10, 25) : intBetween(rand, 1, 6);
+      const goal = Math.min(30, t.session.subagents + more);
       for (let n = t.session.subagents + 1; n <= goal; n++) {
         yield { op: "subagents", clientId: t.laptop.clientId, key: t.session.key, count: n };
         yield { op: "wait", ms: intBetween(rand, 150, 600) };
@@ -224,11 +225,20 @@ function* one(ctx: ScenarioContext): Script {
 }
 
 type Desk = Partial<Omit<SessionSpec, "key">> & { laptop?: number };
-/** Hand-picked busy office: mixed agents, one session with 8 subagents, Lena waiting. */
-const BUSY: { person: number; laptops: number; desks: Desk[] }[] = [
+/**
+ * Hand-picked busy office: mixed agents, one session with 8 subagents, Lena waiting, Anna's
+ * helpers are kittens.
+ */
+const BUSY: {
+  person: number;
+  laptops: number;
+  desks: Desk[];
+  helpers?: LaptopDef["helpers"];
+}[] = [
   {
     person: 0, // Anna
     laptops: 1,
+    helpers: "cats",
     desks: [
       { agent: "claude", project: "agent-office", activity: "typing", subagents: 3 },
       { agent: "codex", project: "website", activity: "reading" },
@@ -280,6 +290,7 @@ function* busySetup(ctx: ScenarioContext): Script {
     const defs: LaptopDef[] = [];
     for (let i = 0; i < row.laptops; i++) {
       const def = laptop(rand, p, i);
+      if (row.helpers) def.helpers = row.helpers;
       defs.push(def);
       yield { op: "connect", laptop: def };
     }

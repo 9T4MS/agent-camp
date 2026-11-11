@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   barOpen,
+  catCount,
   findClearedSession,
   forcedSky,
   happyHour,
@@ -53,6 +54,9 @@ describe("office life rules", () => {
     expect(pizzaWindow(18.7)).toBe("dinner");
     expect(pizzaWindow(15)).toBe(null);
     expect(pizzaWindow(19.5)).toBe(null);
+  });
+  test("one cat per two people on top of the first, at most ten", () => {
+    expect([0, 1, 2, 3, 7, 18, 19, 30].map(catCount)).toEqual([1, 1, 2, 2, 4, 10, 10, 10]);
   });
   test("tombstone label", () => {
     expect(ripLabel("web", 42 * 60_000)).toBe("web 42M");

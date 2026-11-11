@@ -6,7 +6,8 @@
  *   1. session.ended        (sessions that disappeared, incl. those of leaving people)
  *   2. person.left          (after all of that person's session.ended)
  *   3. person.joined        (person carries `sessions: []`; sessions follow as session.started)
- *   4. avatar.updated       (people present in both states whose look changed)
+ *   4. avatar.updated       (people present in both states whose look changed), then
+ *      person.birthdayChanged / person.helpersChanged
  *   5. session.started
  *   6. session.activityChanged, session.contextChanged, session.connectionChanged
  *   7. subagent.spawned / subagent.finished (one event per unit, with the running count)
@@ -66,6 +67,15 @@ export function diff(prev: OfficeState, next: OfficeState, ts: number = Date.now
         envelope(
           "person.birthdayChanged",
           { personId: n.personId, birthday: !!n.birthday },
+          { ts },
+        ),
+      );
+    }
+    if (p && (p.helpers ?? "robots") !== (n.helpers ?? "robots")) {
+      avatars.push(
+        envelope(
+          "person.helpersChanged",
+          { personId: n.personId, helpers: n.helpers ?? "robots" },
           { ts },
         ),
       );
@@ -156,6 +166,13 @@ export function applyEvents(state: OfficeState, events: readonly ViewerEvent[]):
         if (!p) break;
         if (e.data.birthday) p.birthday = true;
         else delete p.birthday;
+        break;
+      }
+      case "person.helpersChanged": {
+        const p = people.get(e.data.personId);
+        if (!p) break;
+        if (e.data.helpers === "robots") delete p.helpers;
+        else p.helpers = e.data.helpers;
         break;
       }
       case "session.started": {

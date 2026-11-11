@@ -44,6 +44,10 @@ export const ProjectName = z.string().max(80);
 export const ContextShare = z.number().min(0).max(1);
 /** User-chosen label of the machine a connector runs on ("laptop", "devbox"). Optional. */
 export const MachineName = z.string().trim().max(40);
+/** What a person's subagents look like in the office (connector `helpers`); default robots. */
+export const HELPER_SKINS = ["robots", "cats"] as const;
+export const HelperSkin = z.enum(HELPER_SKINS);
+export type HelperSkin = z.infer<typeof HelperSkin>;
 
 export function sessionIdOf(clientId: string, sessionKey: string): string {
   return `${clientId}:${sessionKey}`;
@@ -86,6 +90,8 @@ export const PersonView = z.object({
   joinedAt: EpochMs,
   /** opt-in (connector `birthday = "MM-DD"`): it is their birthday in the office time zone */
   birthday: z.boolean().optional(),
+  /** opt-in (connector `helpers = "cats"`): their subagents are kittens; omitted = robots */
+  helpers: HelperSkin.optional(),
 });
 export type PersonView = z.infer<typeof PersonView>;
 
@@ -121,6 +127,8 @@ export const ConnectorHello = msg(
       .string()
       .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)
       .optional(),
+    /** what this person's subagents look like; older connectors omit it (= robots) */
+    helpers: HelperSkin.optional(),
   }),
 );
 export const PresenceSnapshot = msg(
@@ -159,7 +167,7 @@ export const ConnectorRejected = msg(
 export const ConnectorPoked = msg(
   "connector.poked",
   z.object({
-    kind: z.enum(["wave", "coffee", "cheer", "message"]),
+    kind: z.enum(["wave", "coffee", "cheer", "message", "cat"]),
     from: z.string().max(40).optional(),
     text: z.string().max(200),
   }),
@@ -231,6 +239,11 @@ export const PersonBirthdayChanged = msg(
   "person.birthdayChanged",
   z.object({ personId: PersonId, birthday: z.boolean() }),
 );
+/** The person's helper skin changed (robots <-> cats). */
+export const PersonHelpersChanged = msg(
+  "person.helpersChanged",
+  z.object({ personId: PersonId, helpers: HelperSkin }),
+);
 export const SessionConnectionChanged = msg(
   "session.connectionChanged",
   z.object({ personId: PersonId, sessionId: SessionId, offline: z.boolean() }),
@@ -239,7 +252,9 @@ export const SessionConnectionChanged = msg(
 /**
  * wave/coffee/cheer/message  poke a person (also a notification on their Macs)
  * paper / tomato             throw a paper ball / a tomato at a person (office only)
- * pet                        pet the office cat
+ * cat                        send an office cat to sit on a person's desk (also a notification)
+ * pet / feed / yarn          pet an office cat, drop a food bowl or a yarn ball next to it
+ * laser                      a laser dot on the floor that the cats chase
  */
 export const INTERACTIONS = [
   "wave",
@@ -248,10 +263,35 @@ export const INTERACTIONS = [
   "message",
   "paper",
   "tomato",
+  "cat",
   "pet",
+  "feed",
+  "yarn",
+  "laser",
 ] as const;
 export const InteractionKind = z.enum(INTERACTIONS);
 export type InteractionKind = z.infer<typeof InteractionKind>;
+/** Interactions with the office cats themselves (no person involved). */
+export const CAT_INTERACTIONS = ["pet", "feed", "yarn", "laser"] as const;
+export type CatInteraction = (typeof CAT_INTERACTIONS)[number];
+export function isCatInteraction(kind: InteractionKind): kind is CatInteraction {
+  return (CAT_INTERACTIONS as readonly string[]).includes(kind);
+}
+/** Interactions that need a spot on the floor (`x`, `y`). */
+export const SPOT_INTERACTIONS = ["feed", "yarn", "laser"] as const;
+export function needsSpot(kind: InteractionKind): boolean {
+  return (SPOT_INTERACTIONS as readonly string[]).includes(kind);
+}
+/** At most this many office cats (one more for every two people, see the web client). */
+export const MAX_CATS = 10;
+/** Which office cat (slot 0 is the original one). */
+export const CatId = z
+  .number()
+  .int()
+  .min(0)
+  .max(MAX_CATS - 1);
+/** A floor spot in world pixels. */
+export const WorldCoord = z.number().int().min(0).max(8192);
 /** Short name a viewer signs pokes with; viewers are otherwise anonymous. */
 export const ViewerName = z.string().trim().max(40);
 export const InteractionText = z.string().trim().max(80);
@@ -266,6 +306,11 @@ export const InteractionHappened = msg(
     text: InteractionText.optional(),
     /** how many connector sockets accepted the notification */
     delivered: z.number().int().nonnegative().optional(),
+    /** cat interactions and `cat`: which office cat */
+    catId: CatId.optional(),
+    /** feed / yarn / laser: the floor spot */
+    x: WorldCoord.optional(),
+    y: WorldCoord.optional(),
   }),
 );
 
@@ -293,6 +338,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   SessionConnectionChanged,
   SessionContextChanged,
   PersonBirthdayChanged,
+  PersonHelpersChanged,
   InteractionHappened,
 ]);
 export type ServerToViewer = z.infer<typeof ServerToViewer>;

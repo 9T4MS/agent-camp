@@ -148,6 +148,28 @@ const POKES: { kind: InteractionKind; label: string; title: string }[] = [
     label: "&#127813; Tomato",
     title: "Throw a tomato: a red splat for 10 min (only in the office)",
   },
+  {
+    kind: "cat",
+    label: "&#128008; Send a cat",
+    title: "An office cat goes and sits on their desk (pops up on their Mac)",
+  },
+];
+
+/** What a viewer can do with an office cat (its card). */
+export type CatAction = "pet" | "feed" | "yarn" | "laser";
+export type CatInfo = {
+  slot: number;
+  name: string;
+  /** e.g. "orange tabby" */
+  coat: string;
+  status: string;
+  portrait: HTMLCanvasElement | null;
+};
+const CAT_ACTIONS: { kind: CatAction; label: string; title: string }[] = [
+  { kind: "pet", label: "&#9995; Pet", title: "Pet the cat (purrs for everyone watching)" },
+  { kind: "feed", label: "&#128031; Feed", title: "Put a food bowl next to the cat" },
+  { kind: "yarn", label: "&#129526; Yarn ball", title: "Toss a yarn ball to play with" },
+  { kind: "laser", label: "&#128308; Laser", title: "Then tap the floor: the cats chase the dot" },
 ];
 const NAME_KEY = "agent-office.viewerName";
 
@@ -156,6 +178,14 @@ function storedName(): string {
     return localStorage.getItem(NAME_KEY) ?? "";
   } catch {
     return "";
+  }
+}
+
+function storeName(name: string) {
+  try {
+    localStorage.setItem(NAME_KEY, name.trim());
+  } catch {
+    // private mode: the name just isn't remembered
   }
 }
 
@@ -199,7 +229,12 @@ export function badgesFor(
   if (kinds.size >= 2) out.push("Multi-agent");
   const helpers = sessions.reduce((a, s) => a + s.subagents, 0);
   if (sessions.some((s) => (s.context ?? 0) >= 0.8)) out.push("On fire");
-  if (helpers >= 5) out.push(`Swarm boss (${helpers} helpers)`);
+  if (helpers >= 5)
+    out.push(
+      person.helpers === "cats"
+        ? `Cat herder (${helpers} kittens)`
+        : `Swarm boss (${helpers} helpers)`,
+    );
   else if (helpers > 0) out.push("Delegator");
   const projects = new Set(sessions.map((s) => s.project).filter(Boolean));
   if (projects.size >= 3) out.push("Juggler");
@@ -237,6 +272,13 @@ export class Hud {
   private panelPerson: string | null = null;
   /** agent card: the session shown (panelPerson is its person) */
   private panelSession: string | null = null;
+  /** cat card: the cat's slot */
+  private panelCat: number | null = null;
+  /** name, coat and mood of an office cat; null = no such cat (anymore) */
+  catInfo: (slot: number) => CatInfo | null = () => null;
+  /** play with a cat from its card; null hides the buttons (kiosk, no server) */
+  onCatAction: ((action: CatAction, slot: number, from?: string) => Promise<PokeResult>) | null =
+    null;
   private lastStatsKey = "";
   private days = new Map<string, { at: number; data: PersonDayResponse | null }>();
   portrait: (personId: string) => HTMLCanvasElement | null = () => null;
@@ -331,6 +373,7 @@ export class Hud {
     // "since 3m" and the timeline strip move on even when nothing happens
     setInterval(() => {
       if (this.panelSession) this.renderPanel();
+      if (this.panelCat !== null) this.refreshCat();
     }, 5_000);
   }
 
@@ -433,7 +476,7 @@ export class Hud {
     const v = this.name.querySelector<HTMLElement>(".ver");
     if (!v) return;
     v.textContent = version && version !== "0.0.0" ? `v${version.replace(/^v/, "")}` : build;
-    v.title = `server ${version ?? "?"} · web build ${build}`;
+    v.title = `version ${version ?? "?"} · web build ${build}`;
   }
 
   /** A newer build is deployed: the refresh button says so. */
@@ -516,6 +559,7 @@ export class Hud {
   openPanel(personId: string) {
     if (this.opts.kiosk) return;
     this.panel.hidden = false;
+    this.panelCat = null;
     this.panelPerson = personId;
     this.panelSession = null;
     this.renderPanel();
@@ -527,6 +571,7 @@ export class Hud {
     const s = this.model.sessions.get(sessionId);
     if (!s) return false;
     this.panel.hidden = false;
+    this.panelCat = null;
     this.panelPerson = s.personId;
     this.panelSession = sessionId;
     this.loadDay(s.personId);
@@ -537,6 +582,7 @@ export class Hud {
   closePanel() {
     this.panelPerson = null;
     this.panelSession = null;
+    this.panelCat = null;
     this.panel.classList.remove("show", "card");
     this.onPanelChange();
   }
@@ -548,7 +594,96 @@ export class Hud {
   }
 
   get panelOpen() {
-    return this.panelPerson !== null && !this.panel.hidden;
+    return (this.panelPerson !== null || this.panelCat !== null) && !this.panel.hidden;
+  }
+
+  /** Slot of the cat whose card is open, if any. */
+  get openCatSlot() {
+    return this.panelCat;
+  }
+
+  /** The cat card: name, coat, what it is up to, and things to do with it. */
+  openCat(slot: number): boolean {
+    if (this.opts.kiosk) return false;
+    this.panel.hidden = false;
+    const info = this.catInfo(slot);
+    if (!info) return false;
+    this.panelPerson = null;
+    this.panelSession = null;
+    this.panelCat = slot;
+    this.panel.innerHTML = `
+      <button class="pixel-btn close" aria-label="Close">x</button>
+      <header><div class="portrait-slot"></div><div>
+        <h2>${esc(info.name)}</h2>
+        <div class="since">office cat &middot; ${esc(info.coat)}</div>
+        <div class="since cat-status">${esc(info.status)}</div>
+      </div></header>`;
+    if (info.portrait) {
+      info.portrait.className = "portrait cat";
+      this.panel.querySelector(".portrait-slot")!.replaceWith(info.portrait);
+    }
+    if (this.onCatAction) this.panel.append(this.buildCatBox(info));
+    this.panel.querySelector(".close")!.addEventListener("click", () => this.closePanel());
+    this.panel.classList.remove("card");
+    this.panel.classList.add("show");
+    this.onPanelChange();
+    return true;
+  }
+
+  /** Update the cat card's mood line (or close it when the cat walked out). */
+  refreshCat() {
+    if (this.panelCat === null) return;
+    const info = this.catInfo(this.panelCat);
+    if (!info) {
+      this.closePanel();
+      return;
+    }
+    const line = this.panel.querySelector(".cat-status");
+    if (line) line.textContent = info.status;
+  }
+
+  /** The laser was used (with its result) or cancelled: un-highlight its button. */
+  laserDone(result?: PokeResult) {
+    this.panel.querySelector(".poke-btns .armed")?.classList.remove("armed");
+    const status = this.panel.querySelector<HTMLElement>(".poke-status");
+    if (result && status && this.panelCat !== null) {
+      status.textContent = result.message;
+      status.className = `poke-status ${result.ok ? "ok" : "err"}`;
+    }
+  }
+
+  private buildCatBox(info: CatInfo): HTMLElement {
+    const box = el("div", "poke");
+    box.innerHTML = `
+      <div class="poke-title">Play with ${esc(info.name)}</div>
+      <div class="poke-btns">${CAT_ACTIONS.map(
+        (k) =>
+          `<button type="button" class="pixel-btn" data-kind="${k.kind}" title="${k.title}">${k.label}</button>`,
+      ).join("")}</div>
+      <label class="poke-from">from <input name="from" maxlength="40" placeholder="your name"></label>
+      <div class="poke-status" aria-live="polite"></div>`;
+    const status = box.querySelector<HTMLElement>(".poke-status")!;
+    const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
+    fromInput.value = storedName();
+    fromInput.addEventListener("change", () => storeName(fromInput.value));
+    for (const b of box.querySelectorAll<HTMLButtonElement>(".poke-btns button")) {
+      b.addEventListener("click", async () => {
+        if (!this.onCatAction) return;
+        const kind = b.dataset.kind as CatAction;
+        const from = fromInput.value.trim();
+        this.laserDone();
+        if (kind === "laser") b.classList.add("armed");
+        status.textContent = "...";
+        status.className = "poke-status";
+        const r = await this.onCatAction(kind, info.slot, from || undefined);
+        status.textContent = r.message;
+        status.className = `poke-status ${r.ok ? "ok" : "err"}`;
+        if (!r.ok) b.classList.remove("armed");
+        this.refreshCat();
+      });
+    }
+    box.addEventListener("keydown", (e) => e.stopPropagation());
+    return box;
   }
 
   /** Session whose agent card is open, if any. */
@@ -963,13 +1098,7 @@ export class Hud {
     const status = box.querySelector<HTMLElement>(".poke-status")!;
     const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
     fromInput.value = storedName();
-    fromInput.addEventListener("change", () => {
-      try {
-        localStorage.setItem(NAME_KEY, fromInput.value.trim());
-      } catch {
-        // private mode: the name just isn't remembered
-      }
-    });
+    fromInput.addEventListener("change", () => storeName(fromInput.value));
     const send = async (kind: InteractionKind, text?: string) => {
       if (!this.onPoke) return;
       const from = fromInput.value.trim();

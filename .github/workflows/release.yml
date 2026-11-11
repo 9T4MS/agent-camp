@@ -27,21 +27,26 @@ concurrency:
   group: release
   cancel-in-progress: false # never cancel a half-finished release/deploy
 
+# VERSION is <major>.<minor> from package.json plus the commit count of main (scripts/version.ts),
+# the same number the web build stamps into the page.
 env:
   BUN_VERSION: "1.4.4"
-  VERSION: 0.1.${{ github.run_number }}
 
 jobs:
   release:
     name: Build connector + GitHub Release
+    # a run on another branch would publish that branch's count as the latest release
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     outputs:
-      version: ${{ env.VERSION }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version counts commits
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -50,10 +55,18 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - name: Version
+        id: version
+        run: |
+          v="$(bun scripts/version.ts)"
+          test -n "$v"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Unit tests
         run: bun test
 
-      - name: Build connector binaries (${{ env.VERSION }})
+      - name: Build connector binaries
         working-directory: apps/connector
         env:
           AGENT_OFFICE_VERSION: ${{ env.VERSION }}
@@ -61,14 +74,14 @@ jobs:
           bun scripts/build.ts darwin-arm64 darwin-x64 linux-x64
           test "$(./dist/agent-office-linux-x64 version)" = "$VERSION"
 
-      - name: Create GitHub Release v${{ env.VERSION }}
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v$VERSION"
           files="apps/connector/dist/agent-office-darwin-arm64 apps/connector/dist/agent-office-darwin-x64 apps/connector/dist/agent-office-linux-x64 apps/connector/install.sh"
           if gh release view "$tag" >/dev/null 2>&1; then
-            # re-run of the same workflow run: same run_number, so refresh the assets
+            # re-run, or another run on the same commit: same version, so refresh the assets
             gh release upload "$tag" $files --clobber
           else
             gh release create "$tag" $files \
@@ -104,6 +117,8 @@ jobs:
 
       - uses: actions/checkout@v4
         if: steps.secrets.outputs.ok == 'true'
+        with:
+          fetch-depth: 0 # the web build counts commits for its version
 
       - uses: oven-sh/setup-bun@v2
         if: steps.secrets.outputs.ok == 'true'

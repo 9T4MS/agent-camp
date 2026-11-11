@@ -3,7 +3,7 @@
  * as a "/clear", the weather of every hour, seasons, the moon, when the pizza drone and the
  * food truck come, what deserves a party.
  */
-import { hashString } from "@agent-office/protocol";
+import { hashString, MAX_CATS } from "@agent-office/protocol";
 
 export type Weather = "sun" | "clouds" | "rain" | "snow";
 export type Season = "winter" | "spring" | "summer" | "autumn";
@@ -273,6 +273,11 @@ export function alarmTick(s: AlarmState, burning: number, dt: number): AlarmStat
   if (calm >= ALARM_CALM_S || onFor >= ALARM_MAX_S)
     return { on: false, hot: 0, calm: 0, onFor: 0, cooldown: ALARM_COOLDOWN_S };
   return { ...s, onFor, calm };
+}
+
+/** Office cats: one, plus one for every two people in the office, at most MAX_CATS. */
+export function catCount(people: number): number {
+  return Math.min(MAX_CATS, 1 + Math.floor(Math.max(0, people) / 2));
 }
 
 /** The cat holds a meeting: Fridays 17:00-17:45 office time. */

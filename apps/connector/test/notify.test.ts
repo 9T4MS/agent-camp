@@ -44,6 +44,11 @@ describe("notifier", () => {
     expect(linux.calls).toHaveLength(0);
   });
 
+  test("a cat from the office gets its own subtitle", () => {
+    const lines = notificationLines({ kind: "cat", from: "Martin", text: "Martin sent a cat" });
+    expect(lines).toEqual({ body: "Martin sent a cat", subtitle: "Cat delivery" });
+  });
+
   test("strips control characters", () => {
     expect(notificationLines({ kind: "wave", text: "a\nb\u0007c" }).body).toBe("a b c");
   });

@@ -6,6 +6,7 @@ section is what the "New version!" banner shows after a deploy.
 
 ## 2026-11-11
 
+- Version numbers now go 0.2.x and show up right after a deploy, the same on the page, the release and the connectors
 - 🎉 A new version now opens with a full-screen celebration banner and what changed
 - ↻ A refresh button in the top bar; it lights up when a new version is out
 - The office updates itself after a deploy everywhere, also fullscreen on a desktop (it waits until nobody is clicking around)

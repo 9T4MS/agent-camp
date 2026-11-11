@@ -746,6 +746,78 @@ async function busyGif() {
   }
 }
 
+/** A deploy must not discard an unfocused/collapsed draft or a pending send. */
+async function checkMessageReloadGuard(url: string) {
+  const ctx = await browser.newContext({
+    viewport: VIEWPORTS.laptop,
+    serviceWorkers: "block",
+    extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
+  });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__office?.ready);
+    await page.locator(".messages-launch").click();
+    const text = page.locator('textarea[aria-label="Office message"]');
+    await text.fill("Keep this unfocused draft across a release");
+    await text.press("Escape");
+    await page.clock.install();
+    let navigations = 0;
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) navigations++;
+    });
+    await page.route(url, async (route) => {
+      if (route.request().isNavigationRequest()) return route.continue();
+      await route.fulfill({
+        contentType: "text/html",
+        body: '<script type="module" src="/assets/new-release.js"></script>',
+      });
+    });
+    await page.clock.fastForward(10 * 60_000);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.locator('[title="A new version is out: refresh"]').waitFor();
+    await page.clock.fastForward(75_000);
+    assert.equal(navigations, 0, "collapsed unfocused draft blocks idle release reload");
+    assert.equal(await text.inputValue(), "Keep this unfocused draft across a release");
+
+    let pending: (() => Promise<void>) | undefined;
+    await page.route("**/api/messages", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      pending = () =>
+        route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Local pending-send check" }),
+        });
+    });
+    await page.locator(".messages-launch").click();
+    await text.press("Control+Enter");
+    await page.waitForFunction(
+      () => document.querySelector(".messages-send-status")?.textContent === "Saving…",
+    );
+    // Isolate the busy flag from text length: an in-flight request must block reload itself.
+    await text.evaluate((el) => {
+      (el as HTMLTextAreaElement).value = "";
+    });
+    await page.locator(".messages-panel").press("Escape");
+    await page.clock.fastForward(75_000);
+    assert.equal(navigations, 0, "pending send alone blocks idle release reload");
+    assert.ok(pending, "send is pending at the network boundary");
+    await pending();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".messages-send-status")
+        ?.textContent?.includes("Local pending-send check"),
+    );
+    const reloaded = page.waitForEvent("framenavigated");
+    await page.clock.fastForward(75_000);
+    await reloaded;
+    assert.equal(navigations, 1, "idle release reload resumes after draft/pending state clears");
+  } finally {
+    await ctx.close();
+  }
+}
+
 /** Real HTTP + socket history and DOM interaction checks, no real desktop notifications. */
 async function sceneMessages() {
   const name = "15-office-messages";
@@ -1004,8 +1076,9 @@ async function sceneMessages() {
     } finally {
       await mobile.close();
     }
+    await checkMessageReloadGuard(o.http);
     log(
-      "  message checks: zero live/tab history reads, browser-owned deletion after reload, history/unread, selection, plain text, lost-ack warning without resend, recovery, keyboard, draft, touch, demo and kiosk/nohud passed",
+      "  message checks: zero live/tab history reads, browser-owned deletion after reload, history/unread, selection, plain text, lost-ack warning without resend, recovery, keyboard, draft/pending release guard, touch, demo and kiosk/nohud passed",
     );
   } finally {
     o.stop();

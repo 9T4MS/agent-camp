@@ -170,6 +170,20 @@ describe("diff", () => {
     }
   });
 
+  test("helper skin changes emit person.helpersChanged and apply back", () => {
+    const prev = st(person("anna", [sess("a")]));
+    const cats = st({ ...person("anna", [sess("a")]), helpers: "cats" });
+    const toCats = diff(prev, cats);
+    expect(toCats.map((e) => e.type)).toEqual(["person.helpersChanged"]);
+    expect(toCats[0]!.type === "person.helpersChanged" && toCats[0]!.data.helpers).toBe("cats");
+    expect(applyEvents(prev, toCats)).toEqual(cats);
+    const back = diff(cats, prev);
+    expect(back[0]!.type === "person.helpersChanged" && back[0]!.data.helpers).toBe("robots");
+    expect(applyEvents(cats, back)).toEqual(prev);
+    // "robots" spelled out is the same as omitted
+    expect(diff(prev, st({ ...person("anna", [sess("a")]), helpers: "robots" }))).toEqual([]);
+  });
+
   test("diff is pure (does not mutate inputs)", () => {
     const prev = st(person("anna", [sess("a")]));
     const next = st(person("anna", [sess("a", { subagents: 2 })]), person("bob", [sess("b")]));
@@ -204,6 +218,7 @@ describe("diff", () => {
         people.push({
           ...person(id, sessions),
           avatar: avatarFromSeed(rnd() < 0.2 ? `${id}x` : id),
+          ...(rnd() < 0.3 ? { helpers: "cats" as const } : {}),
         });
       }
       return { people };
