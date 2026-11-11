@@ -106,14 +106,11 @@ export class PartyWorld {
   }
 
   private actor(personId: string): SessionCharacter | undefined {
-    for (const c of this.chars.chars.values())
-      if (
-        c.personId === personId &&
-        !c.removed &&
-        c.sprite.visible &&
-        !this.model.sessions.get(c.sessionId)?.offline
-      )
+    for (const c of this.chars.chars.values()) {
+      const session = this.model.sessions.get(c.sessionId);
+      if (c.personId === personId && !c.removed && c.sprite.visible && session && !session.offline)
         return c;
+    }
     return undefined;
   }
 
