@@ -55,8 +55,9 @@ export function shouldCelebrate(seen: SeenRelease | null, build: string, notes: 
 }
 
 /**
- * The version to put on the banner. The server learns the release number from GitHub a little
- * after the deploy, so the version it reports can still be the previous one: then null.
+ * The version to put on the banner. A build without git history falls back to the server's
+ * version, which it learns from GitHub a little after the deploy, so it can still be the
+ * previous one: then null.
  */
 export function newVersionLabel(seen: SeenRelease | null, version: string | undefined) {
   const v = version?.replace(/^v/, "");

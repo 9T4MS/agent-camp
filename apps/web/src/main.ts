@@ -232,15 +232,18 @@ async function boot() {
     life.coffeeDrunk(personId, model.people.get(personId)?.name ?? personId);
   const hud = new Hud(host, model, { kiosk });
   const celebration = new Celebration(host);
+  const officeVersion = () => __VERSION__ || model.version;
   const seenRelease = loadSeen();
   const notes = notesKey(CHANGELOG[0]);
   let celebrate = !demo && !nohud && shouldCelebrate(seenRelease, __BUILD__, notes);
-  hud.onWhatsNew = () =>
+  hud.onWhatsNew = () => {
+    const v = officeVersion();
     celebration.show({
       heading: "What's new",
-      version: model.version ? `v${model.version.replace(/^v/, "")}` : null,
+      version: v ? `v${v.replace(/^v/, "")}` : null,
       section: CHANGELOG[0],
     });
+  };
   // the top bar is 36 px (46 in kiosk) plus the notch inset in an installed app
   const hudTop = host.querySelector<HTMLElement>(".hud-top");
   const fallbackInset = kiosk ? 46 : 36;
@@ -307,14 +310,14 @@ async function boot() {
     }
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
-      hud.setVersion(model.version, __BUILD__);
+      hud.setVersion(officeVersion(), __BUILD__);
       if (!demo) {
-        const label = newVersionLabel(seenRelease, model.version);
+        const label = newVersionLabel(seenRelease, officeVersion());
         if (celebrate) {
           celebrate = false;
           celebration.show({ heading: "New version!", version: label, section: CHANGELOG[0] });
         } else if (label && celebration.open) celebration.setVersion(label);
-        saveSeen({ build: __BUILD__, version: model.version ?? seenRelease?.version, notes });
+        saveSeen({ build: __BUILD__, version: officeVersion() ?? seenRelease?.version, notes });
       }
       chars.syncSlots();
     }

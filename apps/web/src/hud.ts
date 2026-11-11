@@ -467,7 +467,7 @@ export class Hud {
     const v = this.name.querySelector<HTMLElement>(".ver");
     if (!v) return;
     v.textContent = version && version !== "0.0.0" ? `v${version.replace(/^v/, "")}` : build;
-    v.title = `server ${version ?? "?"} · web build ${build}`;
+    v.title = `version ${version ?? "?"} · web build ${build}`;
   }
 
   /** A newer build is deployed: the refresh button says so. */

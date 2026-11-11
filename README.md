@@ -356,7 +356,7 @@ GitHub.
 | Build variable   | `BUN_VERSION` = `1.4.4` (same Bun as the lockfile) |
 
 From then on every push to `main` deploys the office (Cloudflare) and publishes new connector
-binaries (GitHub Release `v0.1.N`). Connectors update themselves: the server looks up the newest
+binaries (GitHub Release `v0.2.N`: the minor from package.json, then the commit count of main). Connectors update themselves: the server looks up the newest
 GitHub release when they connect, and each connector also checks GitHub every 5 minutes. If the
 build ever complains about Bun, use the npm-only build command
 `npx -y bun@1.4.4 install --frozen-lockfile && npx -y bun@1.4.4 run --filter @agent-office/web build`.
