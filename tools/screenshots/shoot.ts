@@ -270,7 +270,84 @@ async function sceneSidePanel() {
         await sleep(30);
       }
       if (!opened) log("  side panel did not open (no character hit)");
+      // a character opens its agent card; its person chip opens the person panel
+      if (await page.evaluate(() => !!document.querySelector(".hud-panel.card"))) {
+        await page.click(".hud-panel .who");
+      }
       await sleep(700);
+      await shoot(page, `${name}-${vp}`);
+      await page.close();
+    }
+  } finally {
+    o.stop();
+  }
+}
+
+/**
+ * Agent card of Martin's busiest session. The busy scenario holds still, so the card's
+ * 30-min activity strip is filled by replaying a plausible half hour client-side under
+ * Playwright's fake clock (inject activity change, jump the clock, repeat).
+ */
+async function sceneAgentCard() {
+  const name = "11-agent-card";
+  if (!want(name)) return;
+  log(name);
+  const o = await office("busy");
+  try {
+    for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
+      const page = await (await context(vp)).newPage();
+      page.on("pageerror", (e) => log(`  page error (${vp}): ${e.message}`));
+      await page.clock.install();
+      await page.goto(`${o.http}/?hour=15`);
+      await page.waitForFunction(() => window.__office?.ready === true, null, { timeout: 30_000 });
+      await page.waitForFunction(
+        ([p, n]) =>
+          window.__office.model.people.size === p && window.__office.model.sessions.size === n,
+        [BUSY.people, BUSY.sessions] as const,
+        { timeout: 20_000 },
+      );
+      await sleep(1500);
+      const target = await page.evaluate(() => {
+        const all = [...window.__office.model.sessions.values()] as {
+          sessionId: string;
+          personId: string;
+          subagents: number;
+          activity: string;
+        }[];
+        const mine = all.filter((x) => x.personId === "martin");
+        mine.sort((a, b) => b.subagents - a.subagents);
+        return mine[0] ?? null;
+      });
+      if (!target) throw new Error("no session of martin");
+      const plan: [string, string][] = [
+        ["thinking", "03:00"],
+        ["reading", "05:00"],
+        ["typing", "08:00"],
+        ["waiting", "02:00"],
+        ["thinking", "01:00"],
+        ["typing", "06:00"],
+        [target.activity, "04:10"],
+      ];
+      let previous = target.activity;
+      for (const [activity, wait] of plan) {
+        if (activity !== previous) {
+          await page.evaluate(
+            ([sessionId, act, prev]) =>
+              window.__office.injectEvent({
+                v: 1,
+                type: "session.activityChanged",
+                id: `shot-${Math.random().toString(36).slice(2)}`,
+                ts: Date.now(),
+                data: { personId: "martin", sessionId, activity: act, previous: prev },
+              }),
+            [target.sessionId, activity, previous] as const,
+          );
+          previous = activity;
+        }
+        await page.clock.fastForward(wait);
+      }
+      await page.evaluate((id) => window.__office.openSession(id), target.sessionId);
+      await sleep(2200);
       await shoot(page, `${name}-${vp}`);
       await page.close();
     }
@@ -484,6 +561,7 @@ async function main() {
     await sceneStats();
     await sceneTimelapse();
     await sceneSidePanel();
+    await sceneAgentCard();
     await sceneTerminal();
   } finally {
     await browser.close();
@@ -505,6 +583,8 @@ declare global {
         focusPerson(personId: string, zoom?: number): boolean;
       };
       snapshotPng(): Promise<string | null>;
+      injectEvent(msg: unknown): boolean;
+      openSession(sessionId: string): boolean;
     };
   }
 }

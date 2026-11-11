@@ -93,6 +93,22 @@ export function alertTextures(): Texture[] {
   return alertFrames;
 }
 
+let selectFrames: Texture[] | null = null;
+/** Bouncing down arrow over the character whose agent card is open (2 frames). */
+export function selectArrowTextures(): Texture[] {
+  if (selectFrames) return selectFrames;
+  const rows = ["yyyyyyy", ".yyyyy.", "..yyy..", "...y..."];
+  const fw = 9;
+  const fh = 6;
+  const pc = new PixelCanvas(fw * 2, fh);
+  for (let f = 0; f < 2; f++) {
+    pc.sprite(f * fw + 1, 1, rows, { y: f ? C.lemon : C.amber });
+    pc.outline(f * fw, 0, fw, fh);
+  }
+  selectFrames = framesOf(pc, fw, fh, 2);
+  return selectFrames;
+}
+
 let dotsFrames: Texture[] | null = null;
 /** "..." thinking bubble (3 frames). */
 export function dotsTextures(): Texture[] {

@@ -5,7 +5,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { envelope, type MessageData, PresenceSnapshot } from "@agent-office/protocol";
-import { CONFIG_KEYS, type Config, loadConfig, newClientId, saveConfig } from "./config.ts";
+import {
+  CONFIG_KEYS,
+  type Config,
+  loadConfig,
+  machineName,
+  newClientId,
+  saveConfig,
+} from "./config.ts";
 import { Daemon, type StatusFile } from "./daemon.ts";
 import { Detector } from "./detect/index.ts";
 import { log } from "./log.ts";
@@ -64,11 +71,13 @@ Usage: agent-office <command> [flags]
 Commands:
   run               run the connector in the foreground (launchd runs this)
       --server URL --password PW --name NAME --description TEXT   override config
+      --machine-name LABEL  this machine's label on the agent card (default: short hostname)
       --home DIR          scan DIR instead of ~ for .claude/.codex/.pi (also AGENT_OFFICE_HOME)
       --assume-processes  treat every agent as running (tests; also AGENT_OFFICE_ASSUME_PROCESSES=1)
       --once              print one presence.snapshot JSON to stdout and exit
   configure         write ~/.config/agent-office/config.toml
       --server URL --password PW --name NAME --description TEXT
+      --machine-name LABEL  (default: short hostname; "" resets to it)
       --share-project-names true|false     --get KEY (print one value)
   status            connection state and live sessions
   logs              follow the daemon log
@@ -78,7 +87,8 @@ Commands:
   help              this text
 
 Only status metadata is sent: agent kind, hashed session id, project folder name
-(disable with share_project_names = false), activity, subagent count, start time.`;
+(disable with share_project_names = false), activity, subagent count, start time,
+and the machine label you chose (machine_name).`;
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
@@ -122,6 +132,9 @@ async function cmdRun(args: Args): Promise<number> {
   const password = flagStr(flags, "password") ?? config.password ?? "";
   const name = (flagStr(flags, "name") ?? config.name ?? "").trim();
   const description = flagStr(flags, "description") ?? config.self_description;
+  const machine = machineName({
+    machine_name: flagStr(flags, "machine-name") ?? config.machine_name,
+  });
   const home = flagStr(flags, "home");
   const assumeProcesses =
     flags["assume-processes"] === true || env.AGENT_OFFICE_ASSUME_PROCESSES === "1";
@@ -169,6 +182,7 @@ async function cmdRun(args: Args): Promise<number> {
     };
     const d = description?.trim();
     if (d) h.selfDescription = d.slice(0, 200);
+    if (machine) h.machine = machine;
     return h;
   };
 
@@ -227,7 +241,10 @@ function cmdConfigure(args: Args): number {
     return 0;
   }
   const next: Config = { ...config };
-  const set = (flag: string, key: "server" | "password" | "name" | "self_description") => {
+  const set = (
+    flag: string,
+    key: "server" | "password" | "name" | "self_description" | "machine_name",
+  ) => {
     const v = flagStr(flags, flag);
     if (v !== undefined) next[key] = v.trim() === "" && key !== "password" ? undefined : v;
   };
@@ -235,10 +252,15 @@ function cmdConfigure(args: Args): number {
   set("password", "password");
   set("name", "name");
   set("description", "self_description");
+  set("machine-name", "machine_name");
   const share = flags["share-project-names"];
   if (share !== undefined) next.share_project_names = !(share === "false" || share === "0");
   if (next.name && next.name.trim().length > 40) {
     console.error("name must be at most 40 characters");
+    return 2;
+  }
+  if (next.machine_name && next.machine_name.trim().length > 40) {
+    console.error("machine name must be at most 40 characters");
     return 2;
   }
   if (next.self_description && next.self_description.length > 200) {

@@ -82,6 +82,20 @@ describe("negative parsing", () => {
     const { id: _id, ...noId } = hello;
     expect(parseConnectorMessage(noId).ok).toBe(false);
   });
+  test("machine is optional (old connectors) and at most 40 chars", () => {
+    const { machine: _m, ...old } = hello.data;
+    const r = parseConnectorMessage({ ...hello, data: old });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.msg.type === "connector.hello") expect(r.msg.data.machine).toBeUndefined();
+    expect(parseConnectorMessage({ ...hello, data: { ...old, machine: "x".repeat(41) } }).ok).toBe(
+      false,
+    );
+    const started = load("session.started") as { data: { session: Record<string, unknown> } };
+    const { machine: _sm, ...oldSession } = started.data.session;
+    expect(
+      parseViewerMessage({ ...started, data: { ...started.data, session: oldSession } }).ok,
+    ).toBe(true);
+  });
   test("garbage never throws", () => {
     for (const g of [null, undefined, 42, "nope", "{", "[]", [], {}, { v: 1 }]) {
       expect(parseConnectorMessage(g).ok).toBe(false);

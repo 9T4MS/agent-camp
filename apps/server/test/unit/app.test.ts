@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { envelope } from "@agent-office/protocol";
+import { envelope, PersonDayResponse } from "@agent-office/protocol";
 import { OfficeApp, SNAPSHOT_MAX_BYTES, SNAPSHOT_MIN_INTERVAL_MS } from "../../src/core/app.ts";
 import { MemoryStore } from "../../src/core/store.ts";
 
@@ -115,6 +115,71 @@ describe("OfficeApp", () => {
     expect(stats.totalSessions).toBe(1);
     const csv = await (await app.handleHttp(req("/api/history.csv")))!.text();
     expect(csv).toContain("session.started,bot,codex,p");
+  });
+
+  test("same name on two machines: one person, one avatar job, machine on sessions", async () => {
+    const { app, sent } = setup();
+    let jobs = 0;
+    const resolve = app.genui.resolve.bind(app.genui);
+    app.genui.resolve = (job) => {
+      jobs++;
+      return resolve(job);
+    };
+    const hello = (name: string, clientId: string, extra: Record<string, string> = {}) =>
+      JSON.stringify(
+        envelope("connector.hello", {
+          name,
+          password: "pw",
+          clientId,
+          connectorVersion: "1.0.0",
+          ...extra,
+        }),
+      );
+    const snap = (key: string) =>
+      JSON.stringify(
+        envelope("presence.snapshot", {
+          sessions: [
+            { sessionKey: key, agent: "claude", activity: "typing", subagents: 0, startedAt: 1 },
+          ],
+        }),
+      );
+    app.connectorMessage(
+      "s1",
+      hello("Martin", "laptop", { selfDescription: "beard", machine: "laptop" }),
+    );
+    app.connectorMessage("s2", hello(" martin", "devbox", { machine: "devbox" }));
+    app.connectorMessage("s1", snap("aaaaaaaaaaaaaaaa"));
+    app.connectorMessage("s2", snap("bbbbbbbbbbbbbbbb"));
+    await Bun.sleep(1);
+    // both machines reconnect (e.g. after a network blip)
+    app.connectorMessage("s3", hello("martin", "devbox", { machine: "devbox" }));
+    app.connectorMessage(
+      "s4",
+      hello("Martin", "laptop", { selfDescription: "beard", machine: "laptop" }),
+    );
+    await Bun.sleep(1);
+    expect(jobs).toBe(1);
+    const state = JSON.parse(app.viewerSnapshot()).data;
+    expect(state.people).toHaveLength(1);
+    expect(state.people[0].name).toBe("Martin");
+    expect(state.people[0].sessions.map((x: { machine: string }) => x.machine).sort()).toEqual([
+      "devbox",
+      "laptop",
+    ]);
+    expect(sent.filter((m) => JSON.parse(m).type === "person.joined")).toHaveLength(1);
+
+    const res = (await app.handleHttp(req("/api/people/martin")))!;
+    expect(res.status).toBe(200);
+    const day = PersonDayResponse.parse(await res.json());
+    expect(day).toMatchObject({
+      personId: "martin",
+      name: "Martin",
+      online: true,
+      sessionsToday: 2,
+      peakParallelToday: 2,
+      subagentsToday: 0,
+    });
+    expect((await app.handleHttp(req("/api/people/nobody")))!.status).toBe(404);
   });
 
   test("unknown /api path -> 404, non-api -> null", async () => {

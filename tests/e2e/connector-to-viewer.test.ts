@@ -46,6 +46,7 @@ type Session = {
   project?: string;
   activity: string;
   subagents: number;
+  machine?: string;
 };
 
 class Viewer {
@@ -188,6 +189,8 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
         PASSWORD,
         "--name",
         NAME,
+        "--machine-name",
+        "e2e-box",
         "--home",
         join(home, "home"),
         "--assume-processes",
@@ -223,12 +226,20 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
       EXPECTED,
     );
     expect(new Set(started.map((s) => s.agent))).toEqual(new Set(["claude", "codex", "pi"]));
+    expect(new Set(started.map((s) => s.machine))).toEqual(new Set(["e2e-box"]));
 
     // /api/state agrees with the event stream
     const state = await apiState();
     const me = state.data.people.find((p) => p.personId === PERSON_ID);
     expect(me).toBeDefined();
     expect(me!.name).toBe(NAME);
+    // the agent card's "today" endpoint sees the same person
+    const day = (await (await fetch(`${base}/api/people/${PERSON_ID}`)).json()) as {
+      online: boolean;
+      sessionsToday: number;
+    };
+    expect(day.online).toBe(true);
+    expect(day.sessionsToday).toBeGreaterThanOrEqual(EXPECTED.length);
     expect(me!.sessions.map((s) => s.sessionId).sort()).toEqual(
       started.map((s) => s.sessionId).sort(),
     );

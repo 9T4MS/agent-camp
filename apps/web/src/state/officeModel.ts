@@ -34,7 +34,19 @@ export type SessionState = {
   desk: number;
   /** when the activity last changed (client clock) */
   activitySince: number;
+  /** machine label from the connector, if it sent one */
+  machine: string | undefined;
+  /** most subagents seen at once for this session (since this viewer saw it) */
+  peakSubagents: number;
+  /** activity changes seen by this viewer (client clock), oldest first, pruned to ~1 h */
+  activityLog: { activity: Activity; at: number }[];
 };
+
+/** One colored piece of the agent card's activity strip. */
+export type TimelineSegment = { activity: Activity; from: number; to: number };
+
+/** How much activity history the model keeps per session. */
+const ACTIVITY_LOG_MS = 60 * 60_000;
 
 export type ModelChange =
   | { kind: "officeRenamed"; name: string }
@@ -93,6 +105,41 @@ export class OfficeModel {
   constructor(private readonly now: () => number = Date.now) {}
 
   // ---- queries --------------------------------------------------------------------------
+  /**
+   * The session's activity over the last `windowMs` (client clock) as segments, clipped to the
+   * window. Time before this viewer first saw the session has no segment.
+   */
+  timeline(sessionId: string, windowMs = 30 * 60_000, now = this.now()): TimelineSegment[] {
+    const s = this.sessions.get(sessionId);
+    if (!s) return [];
+    const from = now - windowMs;
+    const out: TimelineSegment[] = [];
+    s.activityLog.forEach((e, i) => {
+      const end = s.activityLog[i + 1]?.at ?? now;
+      if (end <= from) return;
+      const seg = { activity: e.activity, from: Math.max(from, e.at), to: Math.min(now, end) };
+      if (seg.to <= seg.from) return;
+      const last = out.at(-1);
+      if (last && last.activity === seg.activity && last.to === seg.from) last.to = seg.to;
+      else out.push(seg);
+    });
+    return out;
+  }
+
+  /**
+   * Prepend the server's recent activity log (server clock) to a session's client-side log, so
+   * the agent card's timeline also covers the time before this page was opened.
+   */
+  mergeActivityHistory(sessionId: string, entries: readonly { activity: Activity; at: number }[]) {
+    const s = this.sessions.get(sessionId);
+    if (!s) return;
+    const first = s.activityLog[0]?.at ?? this.now();
+    const older = entries
+      .map((e) => ({ activity: e.activity, at: e.at - this.clockSkew }))
+      .filter((e) => e.at < first);
+    if (older.length > 0) s.activityLog = [...older, ...s.activityLog];
+  }
+
   sessionsOf(personId: string): SessionState[] {
     const out: SessionState[] = [];
     for (const s of this.sessions.values()) if (s.personId === personId) out.push(s);
@@ -177,6 +224,7 @@ export class OfficeModel {
           const previous = s.activity;
           s.activity = msg.data.activity;
           s.activitySince = this.now();
+          this.logActivity(s);
           out.push({
             kind: "activityChanged",
             personId: s.personId,
@@ -193,6 +241,7 @@ export class OfficeModel {
         if (s && s.subagents !== msg.data.count) {
           const previous = s.subagents;
           s.subagents = msg.data.count;
+          s.peakSubagents = Math.max(s.peakSubagents, s.subagents);
           out.push({
             kind: "subagentsChanged",
             personId: s.personId,
@@ -217,6 +266,14 @@ export class OfficeModel {
   }
 
   // ---- internals ------------------------------------------------------------------------
+  private logActivity(s: SessionState) {
+    const now = this.now();
+    s.activityLog.push({ activity: s.activity, at: now });
+    // keep the entry that was current at the window start
+    while (s.activityLog.length > 1 && s.activityLog[1]!.at < now - ACTIVITY_LOG_MS)
+      s.activityLog.shift();
+  }
+
   private rollDay() {
     const k = dayKey(this.now());
     if (k !== this.day) {
@@ -300,6 +357,9 @@ export class OfficeModel {
         startedAt: sv.startedAt,
         desk: this.freeDesk(personId),
         activitySince: this.now(),
+        machine: sv.machine,
+        peakSubagents: sv.subagents,
+        activityLog: [{ activity: sv.activity, at: this.now() }],
       };
       this.sessions.set(sv.sessionId, state);
       this.rollDay();
@@ -309,10 +369,12 @@ export class OfficeModel {
     }
     s.agent = sv.agent;
     s.project = sv.project;
+    s.machine = sv.machine;
     if (s.activity !== sv.activity) {
       const previous = s.activity;
       s.activity = sv.activity;
       s.activitySince = this.now();
+      this.logActivity(s);
       out.push({
         kind: "activityChanged",
         personId,
@@ -324,6 +386,7 @@ export class OfficeModel {
     if (s.subagents !== sv.subagents) {
       const previous = s.subagents;
       s.subagents = sv.subagents;
+      s.peakSubagents = Math.max(s.peakSubagents, s.subagents);
       out.push({
         kind: "subagentsChanged",
         personId,

@@ -2,10 +2,11 @@
  * HTTP API shapes served by the Worker (not WebSocket messages):
  *   GET  /api/stats            -> StatsResponse
  *   GET  /api/snapshots        -> SnapshotList
+ *   GET  /api/people/:personId -> PersonDayResponse
  *   POST /api/history/backfill <- HistoryRow[]   (Bearer CONNECTOR_PASSWORD)
  */
 import { z } from "zod";
-import { AgentKind } from "./messages.ts";
+import { Activity, AgentKind } from "./messages.ts";
 
 /** One stored history row (one per viewer event, except activity changes). No content. */
 export const HistoryRow = z.object({
@@ -57,3 +58,28 @@ export const SnapshotMeta = z.object({
 export type SnapshotMeta = z.infer<typeof SnapshotMeta>;
 export const SnapshotList = z.object({ snapshots: z.array(SnapshotMeta) });
 export type SnapshotList = z.infer<typeof SnapshotList>;
+
+/** One person's "today" numbers (office time zone), for the agent card. */
+export const PersonDayResponse = z.object({
+  personId: z.string(),
+  /** latest display name seen, null when unknown */
+  name: z.string().nullable(),
+  timezone: z.string(),
+  /** start of "today" in the office time zone (epoch ms) */
+  dayStart: z.number(),
+  generatedAt: z.number(),
+  /** in the office right now */
+  online: z.boolean(),
+  /** session.started rows today */
+  sessionsToday: z.number(),
+  /** most sessions running at once today (live sessions count too) */
+  peakParallelToday: z.number(),
+  /** subagent.spawned rows today + subagents of sessions started today */
+  subagentsToday: z.number(),
+  /**
+   * Recent activity changes of the person's live sessions (server clock, last ~30 min, kept in
+   * memory only), sessionId -> oldest first. The first entry is when the server saw it.
+   */
+  recentActivity: z.record(z.string(), z.array(z.object({ activity: Activity, at: z.number() }))),
+});
+export type PersonDayResponse = z.infer<typeof PersonDayResponse>;

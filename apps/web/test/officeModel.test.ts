@@ -29,6 +29,59 @@ const snap = (people: PersonView[]) =>
   envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
 
 describe("OfficeModel", () => {
+  test("agent card data: machine, subagent peak, activity timeline", () => {
+    let now = T0;
+    const m = new OfficeModel(() => now);
+    m.apply(snap([person("Martin", [sess("m1", { machine: "devbox", subagents: 2 })])]));
+    const id = "laptop:m1";
+    expect(m.sessions.get(id)).toMatchObject({ machine: "devbox", peakSubagents: 2 });
+    const ev = (type: "subagent.spawned" | "subagent.finished", count: number) =>
+      m.apply(envelope(type, { personId: "martin", sessionId: id, count }));
+    ev("subagent.spawned", 3);
+    ev("subagent.spawned", 5);
+    ev("subagent.finished", 1);
+    expect(m.sessions.get(id)).toMatchObject({ subagents: 1, peakSubagents: 5 });
+    const act = (activity: "reading" | "waiting", previous: "typing" | "reading") =>
+      m.apply(
+        envelope("session.activityChanged", {
+          personId: "martin",
+          sessionId: id,
+          activity,
+          previous,
+        }),
+      );
+    now += 10 * 60_000;
+    act("reading", "typing");
+    now += 5 * 60_000;
+    act("waiting", "reading");
+    now += 60_000;
+    expect(m.timeline(id, 30 * 60_000, now)).toEqual([
+      { activity: "typing", from: T0, to: T0 + 10 * 60_000 },
+      { activity: "reading", from: T0 + 10 * 60_000, to: T0 + 15 * 60_000 },
+      { activity: "waiting", from: T0 + 15 * 60_000, to: now },
+    ]);
+    // a 5 min window clips the first segment away and cuts the second
+    expect(m.timeline(id, 5 * 60_000, now)[0]).toEqual({
+      activity: "reading",
+      from: now - 5 * 60_000,
+      to: T0 + 15 * 60_000,
+    });
+    expect(m.timeline("nope")).toEqual([]);
+    // server history from before the page was opened is prepended (server clock == T0 here)
+    m.mergeActivityHistory(id, [
+      { activity: "thinking", at: T0 - 20 * 60_000 },
+      { activity: "typing", at: T0 - 5 * 60_000 },
+      { activity: "reading", at: T0 + 60_000 }, // newer than what we saw: ignored
+    ]);
+    expect(m.timeline(id, 30 * 60_000, now).map((g) => g.activity)).toEqual([
+      "thinking",
+      "typing",
+      "reading",
+      "waiting",
+    ]);
+    expect(m.timeline(id, 30 * 60_000, now)[0]!.from).toBe(now - 30 * 60_000);
+  });
+
   test("snapshot adds people and sessions instantly", () => {
     const m = new OfficeModel(() => T0);
     const ch = m.apply(snap([person("Anna", [sess("a1"), sess("a2", { agent: "codex" })])]));

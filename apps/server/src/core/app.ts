@@ -7,7 +7,7 @@ import { HistoryRow, type ServerToConnector, type ViewerEvent } from "@agent-off
 import { z } from "zod";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
-import { computeStats, historyToCsv } from "./stats.ts";
+import { computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
 
 export type AppEnv = GenuiEnv & {
@@ -137,7 +137,15 @@ export class OfficeApp {
       const p = this.genui
         .resolve(job)
         .then((res) =>
-          this.publish(this.hub.setAvatar(job.personId, res.avatar, res.key, this.now())),
+          this.publish(
+            this.hub.setAvatar(
+              job.personId,
+              res.avatar,
+              res.key,
+              this.now(),
+              job.selfDescription ?? "",
+            ),
+          ),
         )
         .catch((err) => console.error("avatar job failed", err));
       this.transport.waitUntil?.(p);
@@ -171,6 +179,33 @@ export class OfficeApp {
           timezone: this.timezone,
           now: this.now(),
           names: this.hub.knownNames(),
+        }),
+      );
+    }
+
+    const person = /^\/api\/people\/([^/]{1,64})$/.exec(path);
+    if (person && method === "GET") {
+      let personId: string;
+      try {
+        personId = decodeURIComponent(person[1]!);
+      } catch {
+        return json({ error: "bad person id" }, { status: 400 });
+      }
+      const now = this.now();
+      // two extra days so sessions that started before midnight still count as running
+      const rows = this.store.history(now - 3 * 86_400_000);
+      const live = this.hub.state().people.find((p) => p.personId === personId);
+      const name = live?.name ?? this.hub.knownNames()[personId] ?? null;
+      if (!live && !name && !rows.some((r) => r.person === personId))
+        return json({ error: "not found" }, { status: 404 });
+      return json(
+        computePersonDay(rows, personId, {
+          timezone: this.timezone,
+          now,
+          name,
+          online: !!live,
+          liveSessions: live?.sessions.length ?? 0,
+          recentActivity: this.hub.recentActivity(personId, now),
         }),
       );
     }

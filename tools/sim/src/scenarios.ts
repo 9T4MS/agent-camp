@@ -60,8 +60,16 @@ export function createScenario(name: ScenarioName, world: World, opts: ScenarioO
 
 const MIN = 60_000;
 
-function laptop(rand: () => number, p: PersonDef): LaptopDef {
-  return { clientId: `sim-${hex(rand, 12)}`, name: p.name, description: p.description };
+/** Machine labels: everyone's first machine is a laptop, a second one is the devbox. */
+const MACHINES = ["laptop", "devbox", "mac-mini"] as const;
+
+function laptop(rand: () => number, p: PersonDef, index = 0): LaptopDef {
+  return {
+    clientId: `sim-${hex(rand, 12)}`,
+    name: p.name,
+    description: p.description,
+    machine: MACHINES[index % MACHINES.length]!,
+  };
 }
 
 function session(
@@ -95,7 +103,7 @@ function* joinPerson(
 ): Generator<Step, LaptopDef[], void> {
   const defs: LaptopDef[] = [];
   for (let i = 0; i < laptops; i++) {
-    const def = laptop(rand, p);
+    const def = laptop(rand, p, i);
     defs.push(def);
     yield { op: "connect", laptop: def };
   }
@@ -271,7 +279,7 @@ function* busySetup(ctx: ScenarioContext): Script {
     const p = personAt(row.person);
     const defs: LaptopDef[] = [];
     for (let i = 0; i < row.laptops; i++) {
-      const def = laptop(rand, p);
+      const def = laptop(rand, p, i);
       defs.push(def);
       yield { op: "connect", laptop: def };
     }
@@ -321,7 +329,7 @@ function* stress(ctx: ScenarioContext): Script {
     const count = i < 6 ? 3 : 2; // 6*3 + 6*2 = 30
     const defs: LaptopDef[] = [];
     for (let j = 0; j < laptops; j++) {
-      const def = laptop(rand, p);
+      const def = laptop(rand, p, j);
       defs.push(def);
       yield { op: "connect", laptop: def };
     }

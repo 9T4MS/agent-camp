@@ -88,6 +88,8 @@ type SlotView = {
   /** textures made just for this slot (nameplates), destroyed with it */
   owned: Texture[];
   pois: Poi[];
+  /** the owner's nameplate in world px (click target for the person panel) */
+  plate?: { x: number; y: number; w: number; h: number; personId: string };
 };
 
 export class OfficeScene {
@@ -300,6 +302,16 @@ export class OfficeScene {
     return out;
   }
 
+  /** personId whose nameplate is under a world point (a little slack for fingers). */
+  pickNameplate(wx: number, wy: number): string | null {
+    for (const v of this.slots) {
+      const p = v?.plate;
+      if (p && wx >= p.x - 3 && wx <= p.x + p.w + 3 && wy >= p.y - 3 && wy <= p.y + p.h + 3)
+        return p.personId;
+    }
+    return null;
+  }
+
   slotDesks(pod: number): number {
     return this.slots[pod]?.desks ?? 0;
   }
@@ -378,6 +390,14 @@ export class OfficeScene {
     );
     plate.position.set(Math.round(span.x + span.w / 2 - plate.width / 2), (o.y + 3) * TILE + 2);
     if (!owner) plate.alpha = 0.75;
+    else
+      view.plate = {
+        x: plate.x,
+        y: plate.y,
+        w: plate.width,
+        h: plate.height,
+        personId: owner.personId,
+      };
     this.track(view, this.decals, plate);
     view.owned.push(plate.texture);
     if (!owner) {

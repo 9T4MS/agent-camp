@@ -45,6 +45,10 @@ for (const [name, make] of [
       expect(s.getAvatar("a")).toBeNull();
       s.putAvatar("a", avatarFromSeed("a"), "k");
       expect(s.getAvatar("a")).toEqual({ avatar: avatarFromSeed("a"), key: "k" });
+      s.putAvatar("b", avatarFromSeed("b"), "k2", "round glasses");
+      expect(s.getAvatar("b")?.selfDescription).toBe("round glasses");
+      s.putAvatar("b", avatarFromSeed("b"), "k3", "");
+      expect(s.getAvatar("b")?.selfDescription).toBe("");
       s.kvPut("x", "1");
       s.kvPut("x", "2");
       expect(s.kvGet("x")).toBe("2");
@@ -56,3 +60,24 @@ for (const [name, make] of [
     });
   });
 }
+
+test("sqlite: avatars table from before the descr column is migrated", () => {
+  const db = new Database(":memory:");
+  const run = (sql: string, ...params: unknown[]) =>
+    db.query(sql).all(...(params as never[])) as Record<string, unknown>[];
+  run(
+    "CREATE TABLE avatars (person TEXT PRIMARY KEY, spec TEXT NOT NULL, key TEXT NOT NULL, updated INTEGER NOT NULL)",
+  );
+  run(
+    "INSERT INTO avatars (person, spec, key, updated) VALUES (?, ?, ?, ?)",
+    "old",
+    JSON.stringify(avatarFromSeed("old")),
+    "k0",
+    1,
+  );
+  const s = new SqlStore(run);
+  expect(s.getAvatar("old")).toEqual({ avatar: avatarFromSeed("old"), key: "k0" });
+  s.putAvatar("old", avatarFromSeed("old"), "k1", "beard");
+  expect(s.getAvatar("old")?.selfDescription).toBe("beard");
+  new SqlStore(run); // idempotent
+});

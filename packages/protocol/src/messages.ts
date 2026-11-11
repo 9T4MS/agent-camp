@@ -38,6 +38,8 @@ export const PersonId = z.string().min(1).max(64);
 /** Stable viewer-side session id: `${clientId}:${sessionKey}`. */
 export const SessionId = z.string().min(1).max(130);
 export const ProjectName = z.string().max(80);
+/** User-chosen label of the machine a connector runs on ("laptop", "devbox"). Optional. */
+export const MachineName = z.string().trim().max(40);
 
 export function sessionIdOf(clientId: string, sessionKey: string): string {
   return `${clientId}:${sessionKey}`;
@@ -63,6 +65,8 @@ export const SessionView = z.object({
   activity: Activity,
   subagents: z.number().int().nonnegative(),
   startedAt: EpochMs,
+  /** label of the machine the session runs on (connector `machine_name`); optional */
+  machine: MachineName.optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -98,6 +102,8 @@ export const ConnectorHello = msg(
     selfDescription: z.string().max(200).optional(),
     /** e.g. "darwin-arm64" */
     platform: z.string().max(40).optional(),
+    /** user-chosen machine label shown on the agent card; older connectors omit it */
+    machine: MachineName.optional(),
   }),
 );
 export const PresenceSnapshot = msg(

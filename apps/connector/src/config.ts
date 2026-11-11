@@ -5,6 +5,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname } from "node:path";
 
 export type Config = {
@@ -12,6 +13,8 @@ export type Config = {
   password?: string;
   name?: string;
   self_description?: string;
+  /** label of this machine on the agent card; default: the short hostname */
+  machine_name?: string;
   share_project_names: boolean;
   client_id: string;
 };
@@ -21,6 +24,7 @@ export const CONFIG_KEYS = [
   "password",
   "name",
   "self_description",
+  "machine_name",
   "share_project_names",
   "client_id",
 ] as const;
@@ -100,6 +104,25 @@ export function stringifyToml(values: Record<string, TomlValue | undefined>): st
   return `${lines.join("\n")}\n`;
 }
 
+/** Short hostname ("martins-mbp.local" -> "martins-mbp"), at most 40 chars; "" if unknown. */
+export function defaultMachineName(host: string = safeHostname()): string {
+  return (host.split(".")[0] ?? "").trim().slice(0, 40);
+}
+
+function safeHostname(): string {
+  try {
+    return hostname();
+  } catch {
+    return "";
+  }
+}
+
+/** The machine label sent in hello: configured value, else the short hostname. */
+export function machineName(config: Pick<Config, "machine_name">, host?: string): string {
+  const v = (config.machine_name ?? "").trim().slice(0, 40);
+  return v || defaultMachineName(host);
+}
+
 export function newClientId(): string {
   return `c_${randomBytes(9).toString("hex")}`;
 }
@@ -114,6 +137,7 @@ export function toConfig(values: Record<string, TomlValue>): Config {
     password: s("password"),
     name: s("name"),
     self_description: s("self_description"),
+    machine_name: s("machine_name"),
     share_project_names: !(share === false || share === "false"),
     client_id: clientId && /^[A-Za-z0-9_-]{1,64}$/.test(clientId) ? clientId : newClientId(),
   };
@@ -139,6 +163,7 @@ export function saveConfig(path: string, config: Config): void {
       password: config.password,
       name: config.name,
       self_description: config.self_description,
+      machine_name: config.machine_name,
       share_project_names: config.share_project_names,
       client_id: config.client_id,
     }),

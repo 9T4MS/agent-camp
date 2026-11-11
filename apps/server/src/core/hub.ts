@@ -4,6 +4,7 @@
  * callers pass `now`, call `tick(now)` at `nextDeadline()`, and deliver replies/events.
  */
 import {
+  type Activity,
   type AvatarSpec,
   avatarFromSeed,
   CLOSE_BAD_MESSAGE,
@@ -37,7 +38,10 @@ export type HubConfig = {
   serverVersion: string;
   officeName: string;
   timezone: string;
-  /** cache key for a person's look; a change triggers an avatar job (GenUI) */
+  /**
+   * Cache key for a person's look; a change triggers an avatar job (GenUI). The Hub calls it
+   * with the personId (stable across spellings) and the person-level description.
+   */
   avatarKey?: (name: string, selfDescription: string | undefined) => string;
 };
 
@@ -48,6 +52,8 @@ export type Binding = {
   personId: string;
   selfDescription?: string;
   connectorVersion: string;
+  /** user-chosen machine label, copied into every SessionView of this connector */
+  machine?: string;
 };
 
 type ConnectorRec = Binding & {
@@ -63,6 +69,13 @@ type PersonRec = {
   /** when the person's last connector went away; null while one is live */
   goneSince: number | null;
   avatar: AvatarSpec;
+  /**
+   * Person-level look description ("" = none). Last non-empty one from any of the person's
+   * connectors wins; a hello without one never changes it. Missing in old persisted state.
+   */
+  selfDescription?: string;
+  /** avatar key of the look stored or already requested (not persisted) */
+  lookKey?: string;
 };
 
 export type AvatarJob = { personId: string; name: string; selfDescription?: string; key: string };
@@ -79,11 +92,17 @@ export type HubResult = {
 
 type Persisted = { v: 1; connectors: ConnectorRec[]; people: PersonRec[] };
 
+/** How long the in-memory activity log of a live session reaches back. */
+export const RECENT_ACTIVITY_MS = 30 * 60_000;
+
 const STATE_KEY = "hub.state";
 const NAMES_KEY = "hub.names";
 
 export const defaultAvatarKey = (name: string, desc: string | undefined) =>
   `seed:${hashString(`${name}\n${desc ?? ""}`).toString(36)}`;
+
+/** Trim and collapse whitespace ("  Martin  K " -> "Martin K"). */
+export const cleanName = (name: string) => name.trim().replace(/\s+/g, " ");
 
 function safeEqual(a: string, b: string): boolean {
   let diffBits = a.length ^ b.length;
@@ -101,6 +120,8 @@ export class Hub {
   private current: OfficeState = EMPTY_STATE;
   private persistedSig = "";
   private names: Record<string, string> = {};
+  /** sessionId -> recent activity changes (memory only; the agent card's timeline) */
+  private recent = new Map<string, { activity: Activity; at: number }[]>();
   /** sink for readable event lines */
   log: (line: string) => void = () => {};
 
@@ -134,6 +155,9 @@ export class Hub {
     }
     for (const s of sockets) if (s.binding) this.sockets.set(s.socketId, s.binding);
     this.current = this.derive();
+    // the activity log is memory only: after a restart it starts now
+    for (const p of this.current.people)
+      for (const x of p.sessions) this.recent.set(x.sessionId, [{ activity: x.activity, at: now }]);
     this.persistedSig = this.signature();
   }
 
@@ -182,10 +206,20 @@ export class Hub {
     return Number.isFinite(min) ? min : null;
   }
 
-  /** Store a (generated) avatar and emit avatar.updated if the person is present. */
-  setAvatar(personId: string, avatar: AvatarSpec, key: string, now: number): ViewerEvent[] {
-    this.store.putAvatar(personId, avatar, key);
+  /**
+   * Store a (generated) avatar and emit avatar.updated if the person is present. A result for
+   * an older job (the description changed again meanwhile) is dropped.
+   */
+  setAvatar(
+    personId: string,
+    avatar: AvatarSpec,
+    key: string,
+    now: number,
+    selfDescription?: string,
+  ): ViewerEvent[] {
     const p = this.people.get(personId);
+    if (p?.lookKey && key.replace(/:fallback$/, "") !== p.lookKey) return [];
+    this.store.putAvatar(personId, avatar, key, selfDescription ?? p?.selfDescription ?? "");
     if (p) p.avatar = avatar;
     return this.commit(now);
   }
@@ -205,6 +239,20 @@ export class Hub {
       },
       { ts: now },
     );
+  }
+
+  /** Recent activity of a person's live sessions (sessionId -> oldest first). */
+  recentActivity(
+    personId: string,
+    now: number,
+  ): Record<string, { activity: Activity; at: number }[]> {
+    const out: Record<string, { activity: Activity; at: number }[]> = {};
+    const p = this.current.people.find((x) => x.personId === personId);
+    for (const s of p?.sessions ?? []) {
+      const log = this.recent.get(s.sessionId) ?? [{ activity: s.activity, at: now }];
+      out[s.sessionId] = log.map((e) => ({ ...e }));
+    }
+    return out;
   }
 
   /** personId -> last display name seen. */
@@ -244,12 +292,16 @@ export class Hub {
       );
     }
 
+    const name = cleanName(d.name);
+    const desc = d.selfDescription?.trim();
+    const machine = d.machine?.trim();
     const binding: Binding = {
       clientId: d.clientId,
-      name: d.name,
-      personId: personIdFromName(d.name),
+      name,
+      personId: personIdFromName(name),
       connectorVersion: d.connectorVersion,
-      ...(d.selfDescription ? { selfDescription: d.selfDescription } : {}),
+      ...(desc ? { selfDescription: desc } : {}),
+      ...(machine ? { machine } : {}),
     };
     // a hello on a socket that was bound to another clientId: drop the old binding
     this.sockets.set(socketId, binding);
@@ -296,7 +348,12 @@ export class Hub {
     return { events: this.commit(now) };
   }
 
-  /** Create or revive the person record; returns an avatar job when the look needs (re)generation. */
+  /**
+   * Create or revive the person record; returns an avatar job when the look needs
+   * (re)generation. The look belongs to the person, not to a laptop: it is keyed on the
+   * personId + the person-level description, so two machines with different (or missing)
+   * descriptions never make it flip-flop.
+   */
   private ensurePerson(b: Binding, now: number): AvatarJob | undefined {
     let p = this.people.get(b.personId);
     const stored = this.store.getAvatar(b.personId);
@@ -311,19 +368,57 @@ export class Hub {
       this.people.set(b.personId, p);
     }
     p.goneSince = null;
-    p.name = b.name;
-    if (this.names[b.personId] !== b.name) {
-      this.names[b.personId] = b.name;
+    p.name = this.displayName(b.personId, b.name, p.name);
+    if (this.names[b.personId] !== p.name) {
+      this.names[b.personId] = p.name;
       this.store.kvPut(NAMES_KEY, JSON.stringify(this.names));
     }
-    const key = (this.cfg.avatarKey ?? defaultAvatarKey)(b.name, b.selfDescription);
-    if (stored?.key === key) return undefined;
+
+    // person-level description: last non-empty wins, empty never changes it
+    if (p.selfDescription === undefined) p.selfDescription = stored?.selfDescription ?? "";
+    const desc = b.selfDescription ?? "";
+    if (desc && desc !== p.selfDescription) p.selfDescription = desc;
+
+    const keyFn = this.cfg.avatarKey ?? defaultAvatarKey;
+    const want = keyFn(b.personId, p.selfDescription || undefined);
+    if (p.lookKey === want) return undefined;
+    if (stored?.key === want) {
+      p.lookKey = want;
+      return undefined;
+    }
+    if (stored && stored.selfDescription === undefined) {
+      // row from before descriptions were stored, keyed on (name, description) of a hello
+      if (stored.key === keyFn(b.name, desc || undefined)) {
+        this.store.putAvatar(b.personId, stored.avatar, want, p.selfDescription);
+        p.lookKey = want;
+        return undefined;
+      }
+      if (!desc) {
+        // no description to go on: keep the look (a later described hello may still match)
+        p.lookKey = want;
+        return undefined;
+      }
+    }
+    p.lookKey = want;
     return {
       personId: b.personId,
-      name: b.name,
-      key,
-      ...(b.selfDescription ? { selfDescription: b.selfDescription } : {}),
+      name: p.name,
+      key: want,
+      ...(p.selfDescription ? { selfDescription: p.selfDescription } : {}),
     };
+  }
+
+  /**
+   * Most recent spelling wins, except that a difference in case only (" martin" vs
+   * "Martin") never flips the name: the spelling already shown (or last stored) stays.
+   */
+  private displayName(personId: string, incoming: string, current: string): string {
+    const same = (a: string | undefined) =>
+      a !== undefined && a.toLocaleLowerCase() === incoming.toLocaleLowerCase();
+    if (same(current) && current !== incoming) return current;
+    const known = this.names[personId];
+    if (current === incoming && same(known) && known !== incoming) return known!;
+    return incoming;
   }
 
   // ---- derivation -------------------------------------------------------------------------
@@ -347,6 +442,7 @@ export class Hub {
     const next = this.derive();
     const events = diff(prev, next, now);
     this.current = next;
+    this.trackActivity(events, now);
     if (events.length > 0) {
       const lookup = lookupIn(next, prev);
       const prevLookup = lookupIn(prev, next);
@@ -361,6 +457,22 @@ export class Hub {
     }
     this.persist();
     return events;
+  }
+
+  private trackActivity(events: ViewerEvent[], now: number) {
+    for (const e of events) {
+      if (e.type === "session.started") {
+        this.recent.set(e.data.session.sessionId, [{ activity: e.data.session.activity, at: now }]);
+      } else if (e.type === "session.ended") {
+        this.recent.delete(e.data.sessionId);
+      } else if (e.type === "session.activityChanged") {
+        const log = this.recent.get(e.data.sessionId) ?? [];
+        log.push({ activity: e.data.activity, at: now });
+        // keep the entry that was current at the window start
+        while (log.length > 1 && log[1]!.at < now - RECENT_ACTIVITY_MS) log.shift();
+        this.recent.set(e.data.sessionId, log);
+      }
+    }
   }
 
   private derive(): OfficeState {
@@ -380,6 +492,7 @@ export class Hub {
             activity: s.activity,
             subagents: s.subagents,
             startedAt: s.startedAt,
+            ...(c.machine ? { machine: c.machine } : {}),
           });
         }
       }
@@ -402,10 +515,17 @@ export class Hub {
       c.personId,
       c.name,
       c.selfDescription ?? "",
+      c.machine ?? "",
       c.socketId ?? "",
       c.sessions.map((s) => s.sessionKey).join(","),
     ]);
-    const ps = [...this.people.values()].map((p) => [p.personId, p.name, p.goneSince, p.joinedAt]);
+    const ps = [...this.people.values()].map((p) => [
+      p.personId,
+      p.name,
+      p.goneSince,
+      p.joinedAt,
+      p.selfDescription ?? "",
+    ]);
     return JSON.stringify([cs, ps]);
   }
 
@@ -416,7 +536,7 @@ export class Hub {
     const state: Persisted = {
       v: 1,
       connectors: [...this.connectors.values()],
-      people: [...this.people.values()],
+      people: [...this.people.values()].map(({ lookKey: _k, ...p }) => p),
     };
     this.store.kvPut(STATE_KEY, JSON.stringify(state));
   }

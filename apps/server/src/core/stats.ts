@@ -1,5 +1,10 @@
 /** History rows -> /api/stats JSON and CSV export. Pure. */
-import type { HistoryRow, LeaderboardEntry, StatsResponse } from "@agent-office/protocol";
+import type {
+  HistoryRow,
+  LeaderboardEntry,
+  PersonDayResponse,
+  StatsResponse,
+} from "@agent-office/protocol";
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const WEEKDAY_INDEX: Record<string, number> = {
@@ -119,6 +124,103 @@ export function computeStats(rows: readonly HistoryRow[], opts: StatsOptions): S
       busiestProjects: top(projects, limit),
     },
     names: opts.names ?? {},
+  };
+}
+
+/** Midnight of `now`'s calendar day in an IANA time zone (epoch ms). Bad zone -> UTC. */
+export function startOfDayIn(timeZone: string, now: number): number {
+  let fmt: Intl.DateTimeFormat;
+  const o: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hourCycle: "h23",
+  };
+  try {
+    fmt = new Intl.DateTimeFormat("en-US", { ...o, timeZone });
+  } catch {
+    fmt = new Intl.DateTimeFormat("en-US", { ...o, timeZone: "UTC" });
+  }
+  const parts = (ts: number) => {
+    const v: Record<string, number> = {};
+    for (const p of fmt.formatToParts(new Date(ts))) v[p.type] = Number(p.value);
+    return v as { year: number; month: number; day: number; hour: number; minute: number };
+  };
+  const p = parts(now);
+  // local wall clock as if it were UTC, minus the zone offset at that moment
+  const offsetAt = (ts: number) => {
+    const q = parts(ts) as ReturnType<typeof parts> & { second: number };
+    return (
+      Date.UTC(q.year, q.month - 1, q.day, q.hour, q.minute, q.second) -
+      Math.floor(ts / 1000) * 1000
+    );
+  };
+  const midnightWall = Date.UTC(p.year, p.month - 1, p.day);
+  let guess = midnightWall - offsetAt(now);
+  // DST change between midnight and now: correct with the offset at the guess
+  guess = midnightWall - offsetAt(guess);
+  return guess;
+}
+
+export type PersonDayOptions = {
+  timezone: string;
+  now: number;
+  name?: string | null;
+  online?: boolean;
+  /** sessions the person has running right now (floor for the parallel peak) */
+  liveSessions?: number;
+  recentActivity?: PersonDayResponse["recentActivity"];
+};
+
+/** One person's numbers for today. `rows` may span more than today; others are ignored. */
+export function computePersonDay(
+  rows: readonly HistoryRow[],
+  personId: string,
+  opts: PersonDayOptions,
+): PersonDayResponse {
+  const dayStart = startOfDayIn(opts.timezone, opts.now);
+  let sessionsToday = 0;
+  let subagentsToday = 0;
+  let running = 0;
+  let peak = opts.liveSessions ?? 0;
+  const mine = rows.filter((r) => r.person === personId).sort((a, b) => a.ts - b.ts);
+  for (const r of mine) {
+    const today = r.ts >= dayStart && r.ts <= opts.now;
+    switch (r.type) {
+      case "session.started":
+        running++;
+        if (today) {
+          sessionsToday++;
+          peak = Math.max(peak, running);
+          // helpers a session already had when it was first seen count too
+          subagentsToday += r.subagents ?? 0;
+        }
+        break;
+      case "session.ended":
+        running = Math.max(0, running - 1);
+        break;
+      case "person.left":
+        running = 0;
+        break;
+      case "subagent.spawned":
+        if (today) subagentsToday++;
+        break;
+    }
+  }
+  return {
+    personId,
+    name: opts.name ?? null,
+    timezone: opts.timezone,
+    dayStart,
+    generatedAt: opts.now,
+    online: opts.online ?? false,
+    sessionsToday,
+    peakParallelToday: peak,
+    subagentsToday,
+    recentActivity: opts.recentActivity ?? {},
   };
 }
 

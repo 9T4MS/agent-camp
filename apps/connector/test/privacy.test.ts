@@ -64,6 +64,7 @@ describe("privacy", () => {
         connectorVersion: "0.1.0",
         platform: "linux-x64",
         selfDescription: "round glasses",
+        machine: "devbox",
       }),
       detector,
       log: silent,
@@ -77,6 +78,20 @@ describe("privacy", () => {
     await d.stop(true);
     await waitFor(() => srv.of("connector.bye").length === 1, 2000, "bye");
 
+    // hello carries only what the user typed in (name, description, machine label) + versions
+    const helloMsg = srv.of("connector.hello")[0]!;
+    expect(Object.keys(helloMsg.data).sort()).toEqual(
+      [
+        "clientId",
+        "connectorVersion",
+        "machine",
+        "name",
+        "password",
+        "platform",
+        "selfDescription",
+      ].sort(),
+    );
+    expect(helloMsg.data.machine).toBe("devbox");
     const snap = srv.of("presence.snapshot")[0]!;
     expect((snap.data.sessions as unknown[]).length).toBe(4);
     for (const raw of srv.received) expect(parseConnectorMessage(raw).ok).toBe(true);

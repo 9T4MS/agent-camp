@@ -52,8 +52,11 @@ export class Camera {
     this.y = this.target.y = w.height / 2;
   }
 
+  /** while true the auto-pilot stays off (e.g. an agent card is open) */
+  holdWhile: () => boolean = () => false;
+
   get auto() {
-    if (this.hold) return false;
+    if (this.hold || (!this.opts.kiosk && this.holdWhile())) return false;
     return this.opts.kiosk || performance.now() - this.lastInput > IDLE_BEFORE_AUTO_MS;
   }
 

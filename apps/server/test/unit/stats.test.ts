@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { type HistoryRow, StatsResponse } from "@agent-office/protocol";
-import { computeStats, historyToCsv, makeLocalizer } from "../../src/core/stats.ts";
+import {
+  computePersonDay,
+  computeStats,
+  historyToCsv,
+  makeLocalizer,
+  startOfDayIn,
+} from "../../src/core/stats.ts";
 
 // 2026-11-09 is a Monday. 08:00 UTC = 09:00 in Vienna (CET).
 const MON_0800Z = Date.UTC(2026, 10, 9, 8, 0, 0);
@@ -103,5 +109,57 @@ describe("stats", () => {
       '0,1970-01-01T00:00:00.000Z,session.started,anna,claude,"we,ird ""p""",0',
     );
     expect(lines[2]).toBe("1000,1970-01-01T00:00:01.000Z,person.left,anna,,,");
+  });
+});
+
+describe("person day", () => {
+  test("startOfDayIn uses the office zone (incl. DST days)", () => {
+    // Monday 09:00 Vienna -> Monday 00:00 Vienna = Sunday 23:00 UTC
+    expect(startOfDayIn("Europe/Vienna", MON_0800Z)).toBe(Date.UTC(2026, 10, 8, 23, 0, 0));
+    expect(startOfDayIn("UTC", MON_0800Z)).toBe(Date.UTC(2026, 10, 9));
+    expect(startOfDayIn("Not/AZone", MON_0800Z)).toBe(Date.UTC(2026, 10, 9));
+    // 2026-03-29 is the spring-forward day in Vienna (CET -> CEST at 02:00)
+    expect(startOfDayIn("Europe/Vienna", Date.UTC(2026, 2, 29, 12))).toBe(
+      Date.UTC(2026, 2, 28, 23),
+    );
+    // 00:30 local on Monday is still Monday
+    expect(startOfDayIn("Europe/Vienna", MON_0800Z - 8.5 * H)).toBe(
+      Date.UTC(2026, 10, 8, 23, 0, 0),
+    );
+  });
+
+  test("sessions, parallel peak and subagents of today only", () => {
+    const today = startOfDayIn("Europe/Vienna", MON_0800Z);
+    const rows: HistoryRow[] = [
+      row(today - 2 * H, "session.started", "anna", { agent: "claude" }), // yesterday, still running
+      row(today - H, "subagent.spawned", "anna", { subagents: 1 }), // yesterday
+      row(today + H, "session.started", "anna", { agent: "codex" }),
+      row(today + H + 1, "session.started", "anna", { agent: "pi", subagents: 2 }),
+      row(today + H + 2, "subagent.spawned", "anna", { subagents: 1 }),
+      row(today + H + 3, "subagent.spawned", "anna", { subagents: 2 }),
+      row(today + H + 4, "session.ended", "anna"),
+      row(today + H + 5, "session.started", "bob", { agent: "pi" }),
+    ];
+    const d = computePersonDay(rows, "anna", {
+      timezone: "Europe/Vienna",
+      now: MON_0800Z,
+      name: "Anna",
+      online: true,
+      liveSessions: 2,
+    });
+    expect(d).toEqual({
+      personId: "anna",
+      name: "Anna",
+      timezone: "Europe/Vienna",
+      dayStart: today,
+      generatedAt: MON_0800Z,
+      online: true,
+      sessionsToday: 2,
+      peakParallelToday: 3,
+      subagentsToday: 4,
+      recentActivity: {},
+    });
+    const nobody = computePersonDay(rows, "carl", { timezone: "UTC", now: MON_0800Z });
+    expect(nobody).toMatchObject({ sessionsToday: 0, peakParallelToday: 0, online: false });
   });
 });
