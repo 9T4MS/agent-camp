@@ -145,14 +145,24 @@ defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like)
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).
 
-Received: when someone in the office waves at you or sends you a short message, the
-connector shows it as a macOS notification (at most one every 5 s; macOS may list it under
-"Script Editor"). Turn it off with `agent-office configure --notifications false`.
+Received: waves and office messages with **Also notify recipients’ Macs** enabled are
+queued to connected Macs (at most one notification every 5 s on the connector; macOS may
+list it under "Script Editor"). Turn desktop notifications off with
+`agent-office configure --notifications false`. Saving a message never depends on whether
+macOS displays an alert; offline alerts are not queued or replayed.
 
 Never sent: prompts, responses, code, file contents or paths, commands, tool output, or
 anything else from a transcript. A unit test feeds a transcript containing a fake secret and
-checks it never appears in any outgoing message. History keeps only events (who, which agent,
-project folder name, subagent counts), never content.
+checks it never appears in any outgoing message. **Activity/statistics history** keeps only
+events (who, which agent, project folder name, subagent counts), never transcript content.
+
+**Explicitly authored office messages are different:** their text, optional display-name
+signature, recipient names and best-effort delivery outcomes are stored in a separate shared
+office log for **7 days or the latest 1,000 messages, whichever is smaller**. Everyone with
+office access can read every message, including selected-recipient messages. Recipients
+control notifications, not read access; typed sender names are not verified identities.
+Message bodies are not stored in browser localStorage, the offline cache, activity CSV or
+new viewers’ timelapse images.
 
 ## Office games and extra look items
 
@@ -205,11 +215,41 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 
 | URL                  | What                                                                  |
 | -------------------- | --------------------------------------------------------------------- |
-| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer or send a short message (it pops up as a notification on their Mac), or throw a paper ball (office only). Click the cat to pet it. |
+| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer, open Office Messages with that person selected, or throw a paper ball (office only). Click the cat to pet it. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
+
+### Office Messages
+
+Use **Messages** beside Office Games (or in the logo menu) to open the shared history and
+composer. Choose **Everyone in the office** or **Selected people** (up to 50), write up to
+200 UTF-16 code units of plain text, and optionally sign it with a display name. New general
+messages start with Mac notifications off; the person/card Message button starts with its
+person selected and notifications on. The checkbox is always explicit. Everyone + Mac notify
+asks for confirmation; people are resolved when the server saves the message.
+
+- Enter adds a newline; Ctrl/Cmd+Enter sends. Selected recipients can be offline but must
+  still be present in the office roster. Everyone can post even to an empty office.
+- Collapse with **−** or Escape; hidden arrivals add a browser-local unread badge without
+  reopening the log. Read means visible, at the bottom, with no filter hiding messages —
+  not an account-level read receipt. Initial history is not an unread flood.
+- Load older history or filter broadcasts/by recipient. Reload/reconnect recovers retained
+  messages; expired periods are labelled. Drafts stay only in this tab’s memory.
+- An uncertain send offers **Retry same message**, reusing its request ID without duplicate
+  rows or desktop pings. Retry first checks current history; after either retention bound
+  (age or message count) is reached, only an explicit new send is possible.
+- “Queued” means at least one connected Mac socket accepted a send, **not** that the
+  notification was displayed/read. Opt-out, client throttling and macOS permissions still
+  apply. Everyone + Mac notify has a 30 s office-wide cooldown; each person shares the
+  existing 10 s notification cooldown with quick pokes. History-only sends ignore desktop
+  cooldowns; the existing 2 s viewer-IP guard still applies.
+
+On narrow screens, typing gives the composer the sheet; **History** returns to the log
+without losing the draft. The send action and shared-visibility notice stay visible.
+Kiosk and `nohud` hide the messaging UI and do not retain new message events. Demo mode
+supports local compose/history without any server or desktop-notification requests.
 
 ### On your phone or iPad
 

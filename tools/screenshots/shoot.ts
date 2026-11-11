@@ -9,6 +9,7 @@
  *
  * Each scene gets a fresh server so nobody lingers in the 60 s leave grace between scenes.
  */
+import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -663,6 +664,233 @@ async function busyGif() {
   }
 }
 
+/** Real HTTP + socket history and DOM interaction checks, no real desktop notifications. */
+async function sceneMessages() {
+  const name = "15-office-messages";
+  if (!want(name)) return;
+  log(name);
+  const o = await office("busy");
+  let serial = 0;
+  const post = async (text: string) => {
+    const response = await fetch(`${o.http}/api/messages`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${PASSWORD}`,
+        "content-type": "application/json",
+        "cf-connecting-ip": `shots-${++serial}`,
+      },
+      body: JSON.stringify({
+        requestId: crypto.randomUUID(),
+        audience: { kind: "everyone" },
+        text,
+        notifyDesktop: false,
+        from: "Demo",
+      }),
+    });
+    assert.equal(response.status, 201);
+  };
+  try {
+    await post("Lunch in five! Everyone can read this shared office log.");
+    for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
+      const page = await openOffice(vp, `${o.http}/?hour=15`, BUSY.people, BUSY.sessions, 500);
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      const launcher = page.locator(".messages-launch");
+      await page.waitForFunction(
+        () => document.querySelector(".messages-history-status")?.textContent === "",
+      );
+      assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await post(`New announcement for ${vp}`);
+      await page.waitForFunction(() =>
+        document.querySelector(".messages-launch")?.textContent?.includes("· 1"),
+      );
+      assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await launcher.click();
+      assert.equal(
+        await page.locator("select[aria-label='Notification recipients']").inputValue(),
+        "everyone",
+      );
+      assert.equal(await page.locator(".messages-notify input").isChecked(), false);
+      await page.locator(".messages-log article").last().waitFor();
+      await page.waitForFunction(
+        () => document.querySelector(".messages-launch")?.textContent === "Messages",
+      );
+      const sessionId = await page.evaluate(() => [...window.__office.model.sessions.keys()][0]!);
+      await page.evaluate((id) => window.__office.openSession(id), sessionId);
+      await page.locator(".poke-message").click();
+      assert.equal(
+        await page
+          .locator(".messages-panel select[aria-label='Notification recipients']")
+          .inputValue(),
+        "selected",
+      );
+      await page.getByRole("button", { name: "Add people", exact: true }).click();
+      await page.getByRole("searchbox", { name: "Find recipients" }).fill("Lena");
+      await page
+        .locator(".messages-picker label")
+        .filter({ hasText: "Lena" })
+        .getByRole("checkbox")
+        .check();
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator(".messages-panel").isVisible(), true);
+      assert.equal(await page.locator(".messages-picker").isVisible(), false);
+      // Use only history delivery: fake connectors are present but nobody's Mac is involved.
+      await page.locator(".messages-notify input").uncheck();
+      const text = page.getByRole("textbox", { name: "Office message", exact: true });
+      await text.fill(`<img src=x onerror=alert(1)> ${vp}`);
+      await text.press("Enter");
+      await text.press("End");
+      await text.press("x");
+      assert.ok((await text.inputValue()).includes("\n"));
+      await text.press("Control+Enter");
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".messages-send-status")?.textContent ===
+          "Saved to office history.",
+      );
+      assert.equal(await text.inputValue(), "");
+      await page.waitForFunction(
+        () => document.querySelector(".messages-launch")?.textContent === "Messages",
+      );
+      assert.equal(await page.locator(".messages-log img").count(), 0);
+      assert.ok((await page.locator(".messages-log").textContent())?.includes("<img src=x"));
+      // Keep the draft across card refreshes; wheel events stay inside the overlay.
+      await text.fill("Draft survives surface changes");
+      await page.evaluate((id) => window.__office.openSession(id), sessionId);
+      await page.locator(".poke-message").click();
+      assert.equal(await text.inputValue(), "Draft survives surface changes");
+      assert.equal(await page.locator(".messages-notify input").isChecked(), false);
+      if (vp === "laptop") {
+        await sleep(2100); // the existing shared viewer-IP send guard
+        // Save on the server, then lose the acknowledgement: retry must not create a second row.
+        let requestId = "";
+        await page.route("**/api/messages", async (route) => {
+          if (route.request().method() !== "POST") {
+            await route.continue();
+            return;
+          }
+          requestId = route.request().postDataJSON().requestId;
+          await route.fetch();
+          await route.abort();
+        });
+        await text.press("Control+Enter");
+        await page.getByRole("button", { name: "Retry same message", exact: true }).waitFor();
+        assert.equal(await text.isDisabled(), true);
+        await page.unroute("**/api/messages");
+        await page.getByRole("button", { name: "Retry same message", exact: true }).click();
+        await page.waitForFunction(
+          () =>
+            document.querySelector(".messages-send-status")?.textContent ===
+            "Saved to office history.",
+        );
+        const history = await (await page.request.get(`${o.http}/api/messages`)).json();
+        assert.equal(
+          history.messages.filter(
+            (m: { text: string }) => m.text === "Draft survives surface changes",
+          ).length,
+          1,
+        );
+        assert.ok(requestId);
+        await text.fill("Draft survives surface changes");
+        // Restore history after a network break, with no extra alerts or duplicated rows.
+        await page.context().setOffline(true);
+        await post("Sent while this viewer was offline");
+        await page.context().setOffline(false);
+        await page.waitForFunction(() =>
+          document
+            .querySelector(".messages-log")
+            ?.textContent?.includes("Sent while this viewer was offline"),
+        );
+      }
+      const isolated = await page.evaluate(() => {
+        let heard = 0;
+        const listener = () => heard++;
+        window.addEventListener("wheel", listener);
+        document
+          .querySelector(".messages-panel")!
+          .dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+        window.removeEventListener("wheel", listener);
+        return heard;
+      });
+      assert.equal(isolated, 0);
+      const box = await page.locator(".messages-panel").boundingBox();
+      assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= VIEWPORTS[vp].width);
+      await shoot(page, `${name}-${vp}`);
+      await text.press("Escape");
+      assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await page.reload();
+      await page.waitForFunction(() => window.__office?.ready);
+      assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    const mobile = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      serviceWorkers: "block",
+      extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
+    });
+    try {
+      const page = await mobile.newPage();
+      await page.goto(o.http);
+      await page.waitForFunction(() => window.__office?.ready);
+      await page.locator(".messages-launch").tap();
+      const id = await page.evaluate(() => [...window.__office.model.sessions.keys()][0]!);
+      await page.evaluate((session) => window.__office.openSession(session), id);
+      assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await page.locator(".poke-message").tap();
+      assert.equal(await page.locator(".hud-panel").isVisible(), false);
+      assert.equal(await page.locator(".messages-panel").isVisible(), true);
+      await page.getByRole("textbox", { name: "Office message", exact: true }).fill("Touch draft");
+      await shoot(page, `${name}-phone`);
+      await page.setViewportSize({ width: 390, height: 420 });
+      await page.locator(".messages-panel.messages-keyboard").waitFor();
+      const keyboardBox = await page.locator(".messages-panel").boundingBox();
+      assert.ok(keyboardBox && keyboardBox.y >= 0 && keyboardBox.y + keyboardBox.height <= 420);
+      assert.equal(await page.locator(".messages-privacy").isVisible(), true);
+      assert.equal(await page.locator(".messages-send-row").isVisible(), true);
+      await shoot(page, `${name}-phone-keyboard`);
+      await page.getByRole("textbox", { name: "Office message", exact: true }).press("Escape");
+      assert.equal(
+        await page.locator(".messages-launch").evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await page.setViewportSize({ width: 390, height: 844 });
+      const demoRequests: string[] = [];
+      page.on("request", (request) => {
+        if (/\/api\/messages|\/api\/interact/.test(request.url())) demoRequests.push(request.url());
+      });
+      page.on("websocket", (socket) => demoRequests.push(socket.url()));
+      await page.goto(`${o.http}/?demo=busy`);
+      await page.waitForFunction(() => window.__office?.ready);
+      await page.locator(".messages-launch").tap();
+      const demoText = page.getByRole("textbox", { name: "Office message", exact: true });
+      await demoText.fill("Local demo message");
+      await demoText.press("Control+Enter");
+      await page.waitForFunction(() =>
+        document
+          .querySelector(".messages-send-status")
+          ?.textContent?.includes("Saved in this demo"),
+      );
+      assert.deepEqual(demoRequests, []);
+      for (const query of ["?kiosk=1", "?nohud=1"]) {
+        await page.goto(`${o.http}/${query}`);
+        await page.waitForFunction(() => window.__office?.ready);
+        assert.equal(await page.locator(".messages-launch").count(), 0);
+        assert.equal(await page.locator(".messages-panel").count(), 0);
+      }
+    } finally {
+      await mobile.close();
+    }
+    log(
+      "  message checks: history/unread, selection, plain text, retry/recovery, keyboard, draft, reload, touch, demo and kiosk/nohud passed",
+    );
+  } finally {
+    o.stop();
+  }
+}
+
 // ---- main -------------------------------------------------------------------------------------
 
 function cleanup() {
@@ -703,6 +931,7 @@ async function main() {
     await sceneTimelapse();
     await sceneSidePanel();
     await sceneAgentCard();
+    await sceneMessages();
     await sceneOfficeLife();
     await sceneCleared();
     await sceneTerminal();
