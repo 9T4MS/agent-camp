@@ -147,40 +147,51 @@ anything else from a transcript. A unit test feeds a transcript containing a fak
 checks it never appears in any outgoing message. History keeps only events (who, which agent,
 project folder name, subagent counts), never content.
 
-## Dress up and play together
+## Office games and extra look items
 
-Open **✦ Dress up & play** in the office to choose your person, preview a look, and save it
-with the office connector password. There are six combinable slots: 10 headwear options,
-5 wrist styles, 7 character outfits, 6 accent colors, 12 hand-item choices and 5 rides
-(including “none” / classic). Cat ears, neon bracelets, a costume, a held item and a ride
-can all be worn together. Three presets and a randomizer make a quick starting point.
-The preview uses the person's actual base avatar; saved costumes appear on all their sessions
-and survive connector reconnects, description changes and server restarts.
+Use the existing **Customize look** editor (on a person's nameplate, or from **✦ Office games**)
+to choose ears, costumes, neon bracelets, both hand items, accent colors and a ride. There is
+one `AvatarSpec` and one editor: saved looks keep the existing custom/automatic behavior and
+appear on every sibling session. The front, side and seated previews include the new items;
+a separate ride preview appears when a vehicle is equipped. Existing automatic looks stay unchanged.
 
-- **Use item:** swing a lightsaber, fire confetti, toast a beer, puff cigarette smoke,
-  blow bubbles, flash a disco ball, cast stars, bounce a balloon, spray water,
-  shake maracas or shelter under umbrella rain.
+The games panel adds:
+
+- **Use left/right item:** swing a lightsaber, fire confetti, toast a beer, puff cigarette/joint
+  smoke, blow bubbles, flash a disco ball, cast stars, bounce a balloon, spray water,
+  shake maracas, shelter under umbrella rain, or use the existing phone/coffee props.
 - **Dance / Wave:** send a visible shared gesture.
 - **High-five:** choose an online buddy; both earn one party point.
 - **Play tag:** choose an online buddy; send a tag spark and earn one point.
 - **Roll & race:** equip a car, skateboard, hoverboard or spaceship; a server dice roll
-  moves the ride along the Office GP strip and awards 1–6 points. Compete on the shared board.
+  moves the ride along the Office GP strip and awards 1–6 points on the shared board.
 
-Actions have a short server cooldown. Costume changes and points persist; effects last only
-seconds. Other viewers (including kiosks) pick up changes about every 1.5 seconds. Reduced-motion
-preferences keep effects calmer. In `?demo=party`, the same controls work locally without a
-password, with no changes sent to the server.
+The panel uses the existing office login; there is no additional password field. Like the
+look editor and pokes, this is shared team access, not individual accounts. The initial
+player is the first online person, or your last locally selected player if still online.
 
-Access is **team-trusted**: the existing office password can edit any selected person's outfit;
-this is not individual account authentication. The party panel keeps the password in tab memory
-only. Reads respect the existing viewer login; mutations require the connector password.
-No connector update or AI key is required, but the server and web bundle must be deployed together.
+**No polling:** party state joins the existing viewer WebSocket snapshot, and successful moves
+broadcast `party.updated` on that socket (including to kiosks). Opening or leaving the games
+panel idle creates no extra HTTP requests or periodic server alarms. Only a deliberate move
+sends one POST. Every party POST is rate-limited per IP to one attempt per 1.2 seconds before
+body parsing, including malformed attempts; every actor also has a 1.2-second cooldown.
+Limits survive restarts and return `429` with `Retry-After`. Hand items, vehicles and race rolls
+are server-owned; requests cannot forge equipment or points. Total hosting usage still depends
+on visitors, existing office traffic and intentional actions; rate limits cannot guarantee
+an entire deployment remains within its provider's free allowance.
+
+Points persist; effects expire after 15 seconds and never replay on later presence events.
+Textures/particles are bounded and reduced-motion preferences are respected. `?demo=party`
+uses the same UI locally without sending moves to the server. Deploy web and server together;
+no connector update or AI key is required.
 
 Local checks: `bun run lint`, `bun run typecheck`, `bun test`, `bun run test:e2e`, then
 `bun run --filter @agent-office/web build && bun tools/screenshots/party-smoke.ts`.
-The last command starts an isolated real server with two simulated participants and two browser
-viewers, exercises all usable items and games, and saves desktop/mobile screenshots under
-`/private/tmp/agent-office-party-shots` (override with `PARTY_SHOTS`). Install Chromium once with
+The last command starts an isolated real server, two simulated participants and three browser
+viewers (including a kiosk). It verifies zero idle API requests, the shared editor and all
+usable items, WebSocket synchronization/reconnect, scores, login, rate limits and mobile fit.
+It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` (override with
+`PARTY_SHOTS`). Install Chromium once with
 `bun run --filter @agent-office/screenshots install-browsers`. It never connects to the live office.
 
 ## Watching

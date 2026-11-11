@@ -1,17 +1,16 @@
-/** Real local server + two browser viewers. Run after building web: bun tools/screenshots/party-smoke.ts */
+/** Isolated real server + viewers. Build web first: bun tools/screenshots/party-smoke.ts */
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { avatarFromSeed, envelope, PARTY_ITEMS, PartyState } from "@agent-office/protocol";
+import { envelope, type PartyState, parseViewerMessage } from "@agent-office/protocol";
 import type { Browser, Page } from "playwright";
 
 const { chromium } = createRequire(import.meta.url)("playwright") as typeof import("playwright");
-const root = resolve(import.meta.dir, "../..");
 const out = process.env.PARTY_SHOTS ?? "/private/tmp/agent-office-party-shots";
 mkdirSync(out, { recursive: true });
 const server = Bun.spawn([process.execPath, "apps/server/src/dev/bun-server.ts"], {
-  cwd: root,
+  cwd: resolve(import.meta.dir, "../.."),
   env: {
     ...process.env,
     PORT: "0",
@@ -26,6 +25,22 @@ let browser: Browser | undefined;
 const sockets: WebSocket[] = [];
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const usable = [
+  "lightsaber",
+  "confetti",
+  "beer",
+  "cigarette",
+  "bubble-wand",
+  "disco-ball",
+  "magic-wand",
+  "balloon",
+  "water-pistol",
+  "maracas",
+  "umbrella",
+  "joint",
+  "coffee",
+  "phone",
+];
 try {
   const reader = server.stdout.getReader();
   let log = "";
@@ -52,7 +67,7 @@ try {
         },
       ],
     });
-  for (const name of ["Schobes", "Disco Cat"]) {
+  for (const name of ["Player One", "Player Two"]) {
     const ws = new WebSocket(`${base.replace("http", "ws")}/ws/connector`);
     sockets.push(ws);
     await new Promise<void>((resolve, reject) => {
@@ -67,8 +82,8 @@ try {
             }),
           ),
         );
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(String(event.data)) as { type: string };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(String(e.data)) as { type: string };
         if (msg.type === "connector.welcomed") {
           ws.send(JSON.stringify(presence()));
           resolve();
@@ -90,180 +105,162 @@ try {
       "--enable-unsafe-swiftshader",
     ],
   });
-  const errors: string[] = [];
   const contexts = await Promise.all([
-    browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }),
-    browser.newContext({ viewport: { width: 1180, height: 820 } }),
+    browser.newContext({
+      viewport: { width: 1440, height: 1000 },
+      reducedMotion: "reduce",
+      serviceWorkers: "block",
+    }),
+    browser.newContext({ viewport: { width: 1180, height: 820 }, serviceWorkers: "block" }),
+    browser.newContext({ viewport: { width: 1180, height: 820 }, serviceWorkers: "block" }),
   ]);
+  const errors: string[] = [];
+  const requests: string[] = [];
+  const received: PartyState[][] = [[], [], []];
   const pages: Page[] = [];
-  for (const ctx of contexts) {
+  for (const [i, ctx] of contexts.entries()) {
     await ctx.request.post(`${base}/api/login`, { form: { password: "local-party-test" } });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (e) => {
       if (e.type() === "error") errors.push(e.text());
     });
-    await page.goto(`${base}/?zoom=fit`);
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.startsWith("/api/"))
+        requests.push(`${r.method()} ${new URL(r.url()).pathname}`);
+    });
+    page.on("websocket", (ws) =>
+      ws.on("framereceived", ({ payload }) => {
+        const r = parseViewerMessage(typeof payload === "string" ? payload : payload.toString());
+        if (r.ok && r.msg.type === "party.updated") received[i]!.push(r.msg.data.party);
+      }),
+    );
+    await page.goto(`${base}/?zoom=fit${i === 2 ? "&kiosk=1" : ""}`);
     await page.waitForFunction(
       () => window.__office?.ready && window.__office.model.people.size === 2,
     );
-    await page.getByRole("button", { name: "Dress up & play", exact: false }).click();
-    await page.locator("#party-person").selectOption("schobes");
+    if (i < 2) await page.getByRole("button", { name: "Office games", exact: false }).click();
     pages.push(page);
   }
-  const [page, other] = pages as [Page, Page];
-  await page.getByRole("button", { name: "Neon cat", exact: true }).click();
-  await page.getByRole("button", { name: "Save outfit", exact: true }).click();
-  assert.match((await page.locator(".party-notice").textContent()) ?? "", /password/);
-  await page.locator("#party-password").fill("local-party-test");
-  await page.getByRole("button", { name: "Save outfit", exact: true }).click();
-  await page.waitForFunction(() =>
-    document.querySelector(".party-notice")?.textContent?.includes("Outfit saved"),
-  );
-  await other.waitForFunction(
-    () => (document.querySelector("#party-headwear") as HTMLSelectElement)?.value === "cat-ears",
+  const [page, other, kiosk] = pages as [Page, Page, Page];
+  assert.equal(
+    await page.locator("#party-person").inputValue(),
+    "player-one",
+    "defaults to first person",
   );
   assert.equal(
-    await other.locator("#party-wrist").inputValue(),
-    "neon-cyan",
-    "other viewer receives look",
+    await page.locator('input[type="password"]').count(),
+    0,
+    "uses login cookie, no extra password",
   );
-  // An unrelated roster change must preserve an unsaved wardrobe draft.
-  await page.locator("#party-color").selectOption("lime");
-  await page.evaluate((avatar) => {
-    window.__office.injectEvent({
-      v: 1,
-      type: "person.joined",
-      id: "roster-test",
-      ts: Date.now(),
-      data: {
-        person: {
-          personId: "new-buddy",
-          name: "New Buddy",
-          avatar,
-          sessions: [],
-          joinedAt: Date.now(),
-        },
-      },
-    });
-  }, avatarFromSeed("new-buddy"));
-  await page.waitForTimeout(1700);
-  assert.equal(
-    await page.locator("#party-color").inputValue(),
-    "lime",
-    "joining teammate preserves draft",
-  );
-  await page.evaluate(() =>
-    window.__office.injectEvent({
-      v: 1,
-      type: "person.left",
-      id: "roster-left",
-      ts: Date.now(),
-      data: { personId: "new-buddy" },
-    }),
-  );
-  // Freeze editing during an in-flight save, then reject a stale poll begun before it.
-  let releaseRead: (() => void) | undefined;
-  let readCaptured: (() => void) | undefined;
-  const captured = new Promise<void>((resolve) => {
-    readCaptured = resolve;
+  assert(await kiosk.locator(".party-launch").isHidden());
+  const idleStart = requests.length;
+  await pause(6500);
+  assert.equal(requests.length, idleStart, "open pages/kiosk generate zero idle HTTP API requests");
+  console.log("PASS: 3 idle viewers, zero periodic HTTP requests; cookie-only UI");
+
+  const saveLook = async () => {
+    const response = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().includes("/avatar"),
+    );
+    await page.getByRole("button", { name: "Save look", exact: true }).click();
+    assert.equal((await response).status(), 200);
+  };
+  await page.getByRole("button", { name: "Customize look", exact: true }).click();
+  await page.locator('select[name="accessory"]').selectOption("cat-ears");
+  await page.locator('select[name="wrist"]').selectOption("neon-cyan");
+  await page.locator('select[name="outfit"]').selectOption("cat");
+  await page.locator('select[name="accentColor"]').selectOption("pink");
+  await page.locator('select[name="vehicle"]').selectOption("hoverboard");
+  await page.locator('select[name="leftHand"]').selectOption("confetti");
+  await page.locator('select[name="rightHand"]').selectOption("lightsaber");
+  await saveLook();
+  await page.screenshot({ path: `${out}/shared-look-editor-desktop.png` });
+  await other.waitForFunction(() => {
+    const p = window.__office.model.people.get("player-one") as {
+      avatar: { wrist: string; rightHand: string };
+    };
+    return p?.avatar.wrist === "neon-cyan" && p.avatar.rightHand === "lightsaber";
   });
-  const release = new Promise<void>((resolve) => {
-    releaseRead = resolve;
-  });
-  let held = false;
-  await page.route("**/api/party", async (route) => {
-    if (route.request().method() === "GET" && !held) {
-      held = true;
-      const response = await route.fetch();
-      readCaptured!();
-      await release;
-      await route.fulfill({ response });
-    } else if (route.request().method() === "POST") {
-      await pause(300);
-      await route.continue();
-    } else await route.continue();
-  });
-  await captured;
-  await page.getByRole("button", { name: "Save outfit", exact: true }).click();
-  assert(await page.locator("#party-person").isDisabled(), "selection frozen during save");
-  assert(await page.locator("#party-item").isDisabled(), "draft frozen during save");
-  await page.waitForFunction(() =>
-    document.querySelector(".party-notice")?.textContent?.includes("Outfit saved"),
-  );
-  releaseRead!();
-  await page.waitForTimeout(200);
-  assert.equal(
-    await page.locator("#party-color").inputValue(),
-    "lime",
-    "stale read cannot overwrite saved look",
-  );
-  await page.unroute("**/api/party");
-  await page.screenshot({ path: `${out}/wardrobe-desktop.png` });
-  const previews = new Set<string>();
-  // Every usable hand item must save, render differently and produce its matching shared event.
-  for (const item of PARTY_ITEMS.filter((i) => i.id !== "none")) {
-    await page.locator("#party-item").selectOption(item.id);
-    previews.add(
-      await page
-        .locator(".party-portrait canvas")
-        .evaluate((el) => (el as HTMLCanvasElement).toDataURL()),
+  console.log("PASS: canonical look editor saves and synchronizes avatar equipment");
+
+  // Every hand item can be saved in the shared editor and used through cookie auth.
+  for (const item of usable) {
+    await pause(1300);
+    await page.locator('select[name="rightHand"]').selectOption(item);
+    await saveLook();
+    await page.locator(".look-editor .close").click();
+    await page.getByRole("button", { name: "Office games", exact: false }).click();
+    const response = page.waitForResponse(
+      (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/party",
     );
-    await page.getByRole("button", { name: "Save outfit", exact: true }).click();
-    await page.waitForFunction(() =>
-      document.querySelector(".party-notice")?.textContent?.includes("Outfit saved"),
-    );
-    await pause(1550);
-    await page.getByRole("button", { name: "Use item", exact: true }).click();
-    await page.waitForFunction(() =>
-      document.querySelector(".party-notice")?.textContent?.includes("Party move sent"),
-    );
-    const state = PartyState.parse(
-      await (await contexts[0]!.request.get(`${base}/api/party`)).json(),
-    );
-    assert.equal(state.events.at(-1)?.item, item.id);
-    await page.waitForTimeout(100);
+    await page.getByRole("button", { name: "Use right item", exact: true }).click();
+    assert.equal((await response).status(), 200);
+    await other.waitForFunction((id) => {
+      const state = (window.__office.model as typeof window.__office.model & { party: PartyState })
+        .party;
+      return state.events.at(-1)?.item === id;
+    }, item);
+    await page.getByRole("button", { name: "Customize look", exact: true }).click();
   }
-  assert.equal(previews.size, 11, "each item has distinct rendered art");
-  await page.locator("#party-target").selectOption("disco-cat");
-  for (const action of ["High-five", "Play tag", "Roll & race", "Dance", "Wave"]) {
-    await pause(1550);
+  await page.locator(".look-editor .close").click();
+  await page.getByRole("button", { name: "Office games", exact: false }).click();
+  await pause(1600);
+  await page.locator("#party-target").selectOption("player-two");
+  for (const action of ["Use left item", "High-five", "Play tag", "Roll & race", "Dance", "Wave"]) {
+    const response = page.waitForResponse(
+      (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/party",
+    );
     await page.getByRole("button", { name: action, exact: true }).click();
-    await page.waitForFunction(() =>
-      document.querySelector(".party-notice")?.textContent?.includes("Party move sent"),
-    );
+    assert.equal((await response).status(), 200);
+    await pause(1600);
   }
-  const state = PartyState.parse(
-    await (await contexts[0]!.request.get(`${base}/api/party`)).json(),
-  );
-  assert.equal(state.scores["disco-cat"], 1);
-  assert(state.scores.schobes! >= 3 && state.scores.schobes! <= 8);
+  const snapshot = await contexts[0]!.request.get(`${base}/api/state`);
+  const parsed = parseViewerMessage(await snapshot.json());
+  assert(parsed.ok && parsed.msg.type === "office.snapshot");
+  const state = parsed.msg.data.party!;
+  assert.equal(state.scores["player-two"], 1);
+  assert(state.scores["player-one"]! >= 3 && state.scores["player-one"]! <= 8);
+  for (const events of received)
+    assert(
+      events.length >= usable.length + 6,
+      "normal and kiosk viewers receive all moves over websocket",
+    );
   await other.waitForFunction(() =>
-    document.querySelector(".party-board")?.textContent?.includes("Schobes"),
+    document.querySelector(".party-board")?.textContent?.includes("Player One"),
   );
-  // Reload must retain server profile; then verify the phone layout doesn't overflow.
+  await page.screenshot({ path: `${out}/office-games-desktop.png` });
+
+  // New/reconnected viewer restores scores and gear from the socket snapshot without GET party.
   await page.reload();
   await page.waitForFunction(() => window.__office?.ready);
-  await page.getByRole("button", { name: "Dress up & play", exact: false }).click();
-  await page.waitForFunction(
-    () => (document.querySelector("#party-headwear") as HTMLSelectElement)?.value === "cat-ears",
+  await page.getByRole("button", { name: "Office games", exact: false }).click();
+  await page.waitForFunction(() =>
+    document.querySelector(".party-board")?.textContent?.includes("Player One"),
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: `${out}/wardrobe-mobile.png` });
+  await page.screenshot({ path: `${out}/office-games-mobile.png` });
   const rect = await page.locator(".party-panel").boundingBox();
-  assert(rect && rect.x >= 0 && rect.x + rect.width <= 390, "mobile panel fits");
+  assert(rect && rect.x >= 0 && rect.x + rect.width <= 390, "mobile game panel fits");
   await page.keyboard.press("Escape");
   assert(await page.locator(".party-panel").isHidden());
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.screenshot({ path: `${out}/office-party.png` });
-  const unauthorized = await fetch(`${base}/api/party`, {
-    method: "POST",
-    body: JSON.stringify({ personId: "schobes", action: "dance" }),
+
+  // The same IP cannot bypass limits by changing actor or using malformed payloads.
+  const malformed = await contexts[0]!.request.post(`${base}/api/party`, {
+    data: { personId: "player-one", action: "dance", item: "forged" },
   });
-  assert.equal(unauthorized.status, 401);
-  assert.deepEqual(errors, [], "no browser runtime or console errors");
+  assert.equal(malformed.status(), 400);
+  const burst = await contexts[0]!.request.post(`${base}/api/party`, {
+    data: { personId: "player-two", action: "wave" },
+  });
+  assert.equal(burst.status(), 429);
+  assert(Number(burst.headers()["retry-after"]) >= 1);
+  const denied = await fetch(`${base}/api/party`, { method: "POST", body: "{}" });
+  assert.equal(denied.status, 401);
+  assert.equal(requests.filter((r) => r === "GET /api/party").length, 0);
+  assert.deepEqual(errors, [], "zero browser errors");
   console.log(
-    `PASS: two viewers, profile sync/reload, 11 distinct usable items, 5 social/game actions, scores, auth, mobile, Escape; 0 browser errors. Screenshots: ${out}`,
+    `PASS: shared editor, 14 hand items + left hand, games/scores, 3 WS viewers incl kiosk, reconnect, mobile, auth, per-IP limits; 0 polling requests, 0 browser errors. Screenshots: ${out}`,
   );
 } finally {
   if (heartbeat) clearInterval(heartbeat);

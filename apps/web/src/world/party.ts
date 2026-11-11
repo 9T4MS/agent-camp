@@ -1,15 +1,17 @@
-/** Party cosmetics and short-lived shared effects, independent of agent activity. */
+/** Shared game effects and rides; appearance comes from the canonical avatar only. */
 import {
-  DEFAULT_PARTY_LOOK,
+  type AvatarSpec,
+  avatarFromSeed,
   type PartyEvent,
-  type PartyLook,
   type PartyState,
 } from "@agent-office/protocol";
 import { Graphics, Sprite, Texture } from "pixi.js";
+import { accentHex } from "../art/costumes.ts";
 import { drawText } from "../art/font.ts";
 import { C, hexNum } from "../art/palette.ts";
-import { PARTY_COLORS, partyCanvas, partyPortrait } from "../art/party.ts";
+import { avatarPortrait, vehicleCanvas } from "../art/party.ts";
 import { PixelCanvas } from "../art/pixel.ts";
+import type { OfficeModel } from "../state/officeModel.ts";
 import type { CharacterManager, SessionCharacter } from "./characters.ts";
 import { TILE } from "./map.ts";
 import type { OfficeScene } from "./office.ts";
@@ -28,6 +30,23 @@ type Particle = {
 type Moment = { event: PartyEvent; age: number; started: boolean; vehicle?: Sprite };
 const MAX_PARTICLES = 360;
 const MAX_MOMENTS = 32;
+
+/** Timestamp expiry prevents old moves replaying when ordinary office events arrive later. */
+export class PartyInbox {
+  private seen = new Map<string, number>();
+
+  take(events: readonly PartyEvent[], now: number): PartyEvent[] {
+    for (const [id, at] of this.seen) if (now - at >= 15_000) this.seen.delete(id);
+    const fresh: PartyEvent[] = [];
+    for (const event of events) {
+      if (now - event.at >= 15_000 || this.seen.has(event.id)) continue;
+      this.seen.set(event.id, event.at);
+      fresh.push(event);
+    }
+    while (this.seen.size > 256) this.seen.delete(this.seen.keys().next().value!);
+    return fresh;
+  }
+}
 
 function floorCanvas(): HTMLCanvasElement {
   const p = new PixelCanvas(80, 44);
@@ -54,11 +73,9 @@ function raceCanvas(): HTMLCanvasElement {
 }
 
 export class PartyWorld {
-  private state: PartyState = { profiles: {}, events: [], scores: {} };
-  private previews = new Map<string, PartyLook>();
   private overlays = new Map<string, Overlay>();
   private textures = new Map<string, Texture>();
-  private seen = new Map<string, number>();
+  private inbox = new PartyInbox();
   private moments: Moment[] = [];
   private particles: Particle[] = [];
   private readonly paint = new Graphics();
@@ -66,41 +83,37 @@ export class PartyWorld {
   private readonly raceTexture = Texture.from(raceCanvas());
   private danceFloor: Sprite | null = null;
   private raceStrip: Sprite | null = null;
-  private elapsed = 0;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   constructor(
     private scene: OfficeScene,
     private chars: CharacterManager,
+    private model: OfficeModel,
   ) {
     this.paint.eventMode = "none";
     scene.fx.addChild(this.paint);
   }
 
   setState(state: PartyState): void {
-    this.state = state;
-    for (const event of state.events) {
-      if (this.seen.has(event.id)) continue;
-      this.seen.set(event.id, this.elapsed);
+    for (const event of this.inbox.take(state.events, Date.now() + this.model.clockSkew)) {
       this.moments.push({ event, age: 0, started: false });
     }
     while (this.moments.length > MAX_MOMENTS) this.removeMoment(0);
-    for (const [id, at] of this.seen)
-      if (this.elapsed - at > 60 || this.seen.size > 256) this.seen.delete(id);
   }
 
-  preview(personId: string, look: PartyLook | null): void {
-    if (look) this.previews.set(personId, look);
-    else this.previews.delete(personId);
-  }
-
-  private look(personId: string): PartyLook {
-    return this.previews.get(personId) ?? this.state.profiles[personId] ?? DEFAULT_PARTY_LOOK;
+  private avatar(personId: string): AvatarSpec {
+    return this.model.people.get(personId)?.avatar ?? avatarFromSeed(personId);
   }
 
   private actor(personId: string): SessionCharacter | undefined {
     for (const c of this.chars.chars.values())
-      if (c.personId === personId && !c.removed && c.sprite.visible) return c;
+      if (
+        c.personId === personId &&
+        !c.removed &&
+        c.sprite.visible &&
+        !this.model.sessions.get(c.sessionId)?.offline
+      )
+        return c;
     return undefined;
   }
 
@@ -122,26 +135,25 @@ export class PartyWorld {
   }
 
   update(dt: number, time: number): void {
-    this.elapsed += dt;
     this.attachFloor();
     this.danceFloor!.alpha = this.reducedMotion ? 0.8 : 0.72 + Math.sin(time * 2) * 0.1;
     const liveTextures = new Set<string>();
     for (const [id, overlay] of this.overlays) {
       const c = this.chars.chars.get(id);
-      if (!c || c.removed) {
+      if (!c || c.removed || this.avatar(c.personId).vehicle === "none") {
         overlay.sprite.destroy();
         this.overlays.delete(id);
       }
     }
     for (const c of this.chars.chars.values()) {
-      if (c.removed) continue;
-      const look = this.look(c.personId);
-      const key = JSON.stringify(look);
+      if (c.removed || this.avatar(c.personId).vehicle === "none") continue;
+      const look = this.avatar(c.personId);
+      const key = `${look.vehicle}|${look.accentColor}`;
       liveTextures.add(key);
       let overlay = this.overlays.get(c.sessionId);
       let texture = this.textures.get(key);
       if (!texture) {
-        texture = Texture.from(partyCanvas(look));
+        texture = Texture.from(vehicleCanvas(look));
         this.textures.set(key, texture);
       }
       if (!overlay || overlay.sprite.destroyed) {
@@ -174,7 +186,7 @@ export class PartyWorld {
         }
       }
     }
-    // Destroy only textures no displayed sibling uses (preview changes cannot leak textures).
+    // Destroy only textures no displayed sibling uses (equipment changes cannot leak textures).
     for (const [key, texture] of this.textures)
       if (!liveTextures.has(key)) {
         texture.destroy(true);
@@ -217,10 +229,10 @@ export class PartyWorld {
 
   private start(m: Moment, c: SessionCharacter): void {
     const event = m.event;
-    const look = this.look(c.personId);
+    const look = this.avatar(c.personId);
     const colors = [C.cyan, C.pink, C.neon, C.lemon, C.berry];
     let shape: Particle["shape"] = "star";
-    let color: string = PARTY_COLORS[look.color];
+    let color: string = accentHex(look.accentColor);
     let amount = 20;
     let gravity = true;
     if (event.action === "use") {
@@ -234,12 +246,14 @@ export class PartyWorld {
           amount = 18;
           gravity = false;
           break;
+        case "joint":
         case "cigarette":
           shape = "smoke";
           color = C.silver;
           amount = 10;
           gravity = false;
           break;
+        case "coffee":
         case "beer":
           shape = "bubble";
           color = C.lemon;
@@ -284,7 +298,14 @@ export class PartyWorld {
       amount = 18;
       gravity = false;
     } else if (event.action === "race") {
-      m.vehicle = new Sprite(Texture.from(partyPortrait(look)));
+      m.vehicle = new Sprite(
+        Texture.from(
+          avatarPortrait(
+            { ...look, vehicle: event.vehicle },
+            this.model.sessions.get(c.sessionId)?.agent ?? "codex",
+          ),
+        ),
+      );
       m.vehicle.anchor.set(0.5, 0.75);
       m.vehicle.eventMode = "none";
       this.scene.fx.addChild(m.vehicle);
@@ -313,7 +334,7 @@ export class PartyWorld {
   private drawMoment(m: Moment, c: SessionCharacter): void {
     const e = m.event;
     const alpha = Math.max(0, 1 - m.age / 3.5);
-    const color = hexNum(PARTY_COLORS[this.look(c.personId).color]);
+    const color = hexNum(accentHex(this.avatar(c.personId).accentColor));
     if (e.action === "race" && m.vehicle) {
       const progress = this.reducedMotion ? 1 : Math.min(1, m.age / 2.7);
       const roll = e.roll ?? 1;
@@ -404,8 +425,6 @@ export class PartyWorld {
     this.textures.clear();
     while (this.moments.length) this.removeMoment(0);
     this.particles = [];
-    this.seen.clear();
-    this.previews.clear();
     this.paint.destroy();
     this.danceFloor?.destroy();
     this.raceStrip?.destroy();

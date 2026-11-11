@@ -17,6 +17,7 @@ import "./ui/office.css";
 import {
   type AvatarEditResponse,
   type AvatarSpec,
+  type PartyEvent,
   type PersonDayResponse,
   parseViewerMessage,
   type ServerToViewer,
@@ -26,6 +27,7 @@ import { lookFor, lookPreview } from "./art/characters.ts";
 import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
+import { avatarPortrait } from "./art/party.ts";
 import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
@@ -129,7 +131,7 @@ async function boot() {
   app.stage.addChild(scene.root);
   const effects = new Effects(scene.fx);
   const chars = new CharacterManager(scene, model, effects);
-  const partyWorld = new PartyWorld(scene, chars);
+  const partyWorld = new PartyWorld(scene, chars, model);
   const party = demo === "party" || flag("lively");
   // the party demo runs the waiting thresholds 10x faster and starts at lunch time
   if (party) {
@@ -230,10 +232,13 @@ async function boot() {
   };
 
   let snapshotSeen = false;
+  let games: PartyPanel | null = null;
   /** runs after every message (e.g. a ?focus= waiting for its person to show up) */
   let afterIngest = () => {};
   const ingest = (msg: ServerToViewer) => {
     const changes = model.apply(msg);
+    partyWorld.setState(model.party);
+    games?.refresh();
     ensureCapacity();
     for (const ch of changes) {
       chars.handle(ch);
@@ -246,7 +251,7 @@ async function boot() {
       chars.syncSlots();
     }
     hud.setStats(model.stats());
-    if (hud.panelOpen && changes.length > 0) hud.refresh();
+    if (hud.panelOpen && changes.some((change) => change.kind !== "partyChanged")) hud.refresh();
     living.poke();
     afterIngest();
   };
@@ -404,11 +409,18 @@ async function boot() {
   hud.previewLook = (avatar, agent) => {
     const look = lookFor(avatar, agent, null);
     // front, side, at the desk (back to the camera: the agent patch)
-    return [0, 31, 22].map((f) => {
+    const previews = [0, 31, 22].map((f) => {
       const c = lookPreview(look, f, 4);
       c.className = "look-canvas";
       return c;
     });
+    if (avatar.vehicle !== "none") {
+      const ride = avatarPortrait(avatar, agent);
+      ride.className = "look-canvas look-ride";
+      ride.setAttribute("aria-label", "Vehicle preview");
+      previews.push(ride);
+    }
+    return previews;
   };
   hud.fetchLookCustom = async (personId) => {
     if (demo) return null;
@@ -536,10 +548,52 @@ async function boot() {
     return { x: span.x + span.w / 2, y: podOrigin(p.pod).y * 16 + 30 };
   };
   const focusParam = params.get("focus");
-  new PartyPanel(host, model, partyWorld, {
+  games = new PartyPanel(host, model, {
     demo: !!demo,
     key,
     focus: (id) => void focusPerson(id, 4),
+    customize: (id) => hud.openLookEditor(id),
+    onDemo: (mutation) => {
+      const avatar = model.people.get(mutation.personId)?.avatar;
+      if (!avatar) return;
+      const item =
+        mutation.hand === "left"
+          ? avatar.leftHand
+          : mutation.hand === "right"
+            ? avatar.rightHand
+            : avatar.rightHand !== "none"
+              ? avatar.rightHand
+              : avatar.leftHand;
+      const event: PartyEvent = {
+        id: crypto.randomUUID(),
+        personId: mutation.personId,
+        action: mutation.action,
+        item,
+        vehicle: avatar.vehicle,
+        at: Date.now(),
+        ...(mutation.targetId ? { targetId: mutation.targetId } : {}),
+        ...(mutation.action === "race" ? { roll: 1 + Math.floor(Math.random() * 6) } : {}),
+      };
+      const scores = { ...model.party.scores };
+      if (["race", "tag", "high-five"].includes(event.action))
+        scores[event.personId] = (scores[event.personId] ?? 0) + (event.roll ?? 1);
+      if (event.action === "high-five" && event.targetId)
+        scores[event.targetId] = (scores[event.targetId] ?? 0) + 1;
+      ingest({
+        v: 1,
+        type: "party.updated",
+        id: event.id,
+        ts: event.at,
+        data: {
+          party: {
+            scores,
+            events: [...model.party.events.filter((e) => event.at - e.at < 15000), event].slice(
+              -32,
+            ),
+          },
+        },
+      });
+    },
   });
   if (focusParam) {
     // with a live server the snapshot arrives later: focus as soon as the person exists

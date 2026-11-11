@@ -14,7 +14,7 @@ import { lookFor, lookKey, paintSheet } from "../src/art/characters.ts";
 import { vehiclePixels } from "../src/art/party.ts";
 
 const base = {
-  ...avatarFromSeed("schobes"),
+  ...avatarFromSeed("anna"),
   accessory: "none" as const,
   leftHand: "none" as const,
   rightHand: "none" as const,
@@ -89,7 +89,6 @@ describe("integrated avatar costumes", () => {
   test("all 35 frames of existing seeded avatars retain their pixel checksums", () => {
     for (const [seed, expected] of [
       ["anna", 1623323173],
-      ["schobes", 4133589489],
       ["martin", 1253257105],
     ] as const) {
       const p = paintSheet(lookFor(avatarFromSeed(seed), "codex", null));
