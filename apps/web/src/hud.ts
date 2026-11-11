@@ -193,6 +193,9 @@ const CAT_ACTIONS: { kind: CatAction; label: string; title: string }[] = [
 ];
 const NAME_KEY = "agent-office.viewerName";
 
+/** The digits of a typed or pasted claim code ("123 456" -> "123456"). */
+export const claimDigits = (raw: string) => raw.replace(/\D/g, "").slice(0, 6);
+
 function storedName(): string {
   try {
     return localStorage.getItem(NAME_KEY) ?? "";
@@ -326,8 +329,18 @@ export class Hud {
   fetchLookInfo: (personId: string) => Promise<LookInfo | null> = async () => null;
   /** look studio: a new look from a description (server GenUI); null hides the box */
   onDescribeLook: ((personId: string, description: string) => Promise<LookResult>) | null = null;
-  /** person this browser confirmed to be ("It's me" code); only their look is editable */
-  me: string | null = null;
+  private meId: string | null = null;
+  /** `me` changed (confirmed, forgotten, restored from the cookie) */
+  onMeChange: (me: string | null) => void = () => {};
+  private meChip: HTMLButtonElement | null = null;
+  private meChipKey = "";
+  private meMenu: HTMLElement;
+  /** Me menu: the person whose code is being entered (null = the list / my own menu) */
+  private claiming: string | null = null;
+  /** Me menu: why it opened ("Confirm it's you to play") and what to do once confirmed */
+  private claimWhy = "";
+  private claimThen: (() => void) | null = null;
+  private meNote = "";
   /** demo feed: no server, every look is editable */
   editAnyLook = false;
   /** "This is me": send a code to the person's Macs / confirm it; null hides the flow */
@@ -336,7 +349,7 @@ export class Hud {
     verify: (personId: string, code: string) => Promise<PokeResult>;
     forget: () => Promise<void>;
   } | null = null;
-  /** the claim box survives panel re-renders (half-typed code) */
+  /** the claim box survives Me menu re-renders (half-typed code) */
   private claimBox: HTMLElement | null = null;
   private claimFor: string | null = null;
   /** open look editor (survives model re-renders) */
@@ -345,6 +358,8 @@ export class Hud {
     box: HTMLElement;
     onKey: (e: KeyboardEvent) => void;
   } | null = null;
+  /** "My desk" in the Me menu */
+  onOpenMe: (personId: string) => void = (id) => this.openPanel(id);
   /** a session row in the person panel was clicked */
   onOpenSession: (sessionId: string) => void = (id) => this.openSession(id);
 
@@ -379,6 +394,17 @@ export class Hud {
       top.append(this.refreshBtn);
     }
     top.append(this.clock);
+    this.meMenu = el("div", "me-menu pixel-box");
+    if (!opts.kiosk) {
+      this.meChip = el("button", "me-chip");
+      this.meChip.type = "button";
+      this.meChip.setAttribute("aria-haspopup", "dialog");
+      this.meChip.setAttribute("aria-expanded", "false");
+      top.append(this.meChip);
+      top.classList.add("with-me");
+      this.setupMeMenu();
+      this.renderMeChip();
+    }
     this.banner = el("div", "hud-banner pixel-box");
     this.panel = el("div", "hud-panel pixel-box");
     this.reconnect = el(
@@ -387,7 +413,15 @@ export class Hud {
       `<span class="blink">&#9632;</span> reconnecting&hellip;`,
     );
     this.minimapHost = el("div", "hud-minimap pixel-box");
-    host.append(top, this.menu, this.banner, this.panel, this.reconnect, this.minimapHost);
+    host.append(
+      top,
+      this.menu,
+      this.meMenu,
+      this.banner,
+      this.panel,
+      this.reconnect,
+      this.minimapHost,
+    );
     if (!opts.kiosk) this.setupMenu();
     this.panel.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.panel.addEventListener("wheel", (e) => e.stopPropagation());
@@ -691,8 +725,7 @@ export class Hud {
       <div class="poke-status" aria-live="polite"></div>`;
     const status = box.querySelector<HTMLElement>(".poke-status")!;
     const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
-    fromInput.value = storedName();
-    fromInput.addEventListener("change", () => storeName(fromInput.value));
+    this.fillFrom(fromInput);
     for (const b of box.querySelectorAll<HTMLButtonElement>(".poke-btns button")) {
       b.addEventListener("click", async () => {
         if (!this.onCatAction) return;
@@ -721,6 +754,14 @@ export class Hud {
   /** Re-render the open panel (call after model changes). */
   refresh() {
     if (this.panelPerson) this.renderPanel();
+    this.refreshMe();
+  }
+
+  /** The Me chip and menu follow the office (my name and look, who is here). */
+  refreshMe() {
+    this.renderMeChip();
+    // a half-typed code and my own menu are left alone
+    if (this.meMenuOpen && !this.me && !this.claiming) this.renderMeMenu();
   }
 
   private loadDay(personId: string) {
@@ -738,9 +779,8 @@ export class Hud {
   }
 
   private renderPanel() {
-    // don't yank the poke / claim box away while someone is typing in it
+    // don't yank the poke box away while someone is typing in it
     if (this.pokeBox?.isConnected && this.pokeBox.contains(document.activeElement)) return;
-    if (this.claimBox?.isConnected && this.claimBox.contains(document.activeElement)) return;
     if (this.customize?.root.isConnected && this.customize.root.contains(document.activeElement)) {
       // ... but the GIF section still shows a new GIF as soon as `gif.updated` arrives
       this.customize.update(this.model.people.get(this.customize.personId)?.gif);
@@ -789,30 +829,17 @@ export class Hud {
         !this.onEditLook
           ? ""
           : this.canEditLook(p.personId)
-            ? `<button type="button" class="pixel-btn edit-look" title="Pick hair, outfit, things in hand...">&#9998; Customize look</button>${
-                this.me === p.personId
-                  ? '<button type="button" class="link-btn forget-me" title="This browser stops being you (e.g. a shared iPad)">not you? forget this device</button>'
-                  : ""
-              }`
-            : '<div class="claim-slot"></div>'
+            ? `<button type="button" class="pixel-btn edit-look" title="Pick hair, outfit, things in hand...">&#9998; Customize look</button>`
+            : this.onClaim && !this.me
+              ? '<button type="button" class="link-btn this-is-me" title="Confirm with a code from your Mac">This is me</button>'
+              : ""
       }`;
     this.panel
       .querySelector(".edit-look")
       ?.addEventListener("click", () => this.openLookEditor(p.personId));
-    this.panel.querySelector(".forget-me")?.addEventListener("click", () => {
-      void this.onClaim?.forget().then(() => {
-        this.me = null;
-        this.renderPanel();
-      });
-    });
-    const slot = this.panel.querySelector(".claim-slot");
-    if (slot && this.onClaim) {
-      if (!this.claimBox || this.claimFor !== p.personId) {
-        this.claimBox = this.buildClaim(p);
-        this.claimFor = p.personId;
-      }
-      slot.replaceWith(this.claimBox);
-    } else slot?.remove();
+    this.panel
+      .querySelector(".this-is-me")
+      ?.addEventListener("click", () => this.openMeMenu({ personId: p.personId }));
     this.mountCustomize(p);
     this.mountPoke(p);
     const portrait = this.portrait(p.personId);
@@ -862,9 +889,15 @@ export class Hud {
     const p = this.model.people.get(personId);
     if (!p || !this.onEditLook || this.opts.kiosk) return;
     if (!this.canEditLook(personId)) {
-      // someone else's (or not yet proven) look: show the "This is me" box instead
-      this.openPanel(personId);
-      this.claimBox?.querySelector<HTMLElement>(".claim-send")?.focus();
+      // not yet proven to be anyone: confirm first, then open the studio. Somebody else's
+      // look stays theirs.
+      if (!this.me && this.onClaim)
+        this.openMeMenu({
+          personId,
+          why: "Confirm it's you to change this look.",
+          after: () => this.openLookEditor(personId),
+        });
+      else this.openPanel(personId);
       return;
     }
     this.closeLookEditor();
@@ -1155,53 +1188,313 @@ export class Hud {
     return { box, onKey };
   }
 
+  /** Person this browser confirmed to be ("It's me" code); null = a spectator. */
+  get me(): string | null {
+    return this.meId;
+  }
+
+  set me(id: string | null) {
+    if (id === this.meId) return;
+    this.meId = id;
+    // the "from" line of the poke box and the claim step depend on who I am
+    this.pokeBox = null;
+    this.pokeFor = null;
+    this.claimBox = null;
+    this.claimFor = null;
+    this.claiming = null;
+    this.renderMeChip();
+    if (this.meMenuOpen) this.renderMeMenu();
+    if (this.panelPerson) this.renderPanel();
+    this.onMeChange(id);
+  }
+
+  /** My name for "from" lines once this browser is confirmed (nothing to type then). */
+  private myName(): string | undefined {
+    return this.me ? this.model.people.get(this.me)?.name : undefined;
+  }
+
+  private setupMeMenu() {
+    const chip = this.meChip!;
+    this.meMenu.setAttribute("role", "dialog");
+    chip.addEventListener("click", () =>
+      this.meMenuOpen ? this.closeMeMenu() : this.openMeMenu(),
+    );
+    for (const ev of ["pointerdown", "wheel"] as const)
+      this.meMenu.addEventListener(ev, (e) => e.stopPropagation());
+    document.addEventListener("pointerdown", (e) => {
+      const t = e.target as Node;
+      if (this.meMenuOpen && !this.meMenu.contains(t) && !chip.contains(t)) this.closeMeMenu();
+    });
+    // typing a code must not trigger office shortcuts
+    this.meMenu.addEventListener("keydown", (e) => e.stopPropagation());
+    // Esc closes this layer only (capture: before the panel underneath sees it), wherever
+    // the focus is
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Escape" || !this.meMenuOpen) return;
+        e.stopImmediatePropagation();
+        this.closeMeMenu();
+        chip.focus();
+      },
+      true,
+    );
+  }
+
+  get meMenuOpen() {
+    return this.meMenu.classList.contains("show");
+  }
+
+  /**
+   * The Me menu (top right): who this browser is, or "Which one is you?" for a spectator.
+   * `personId` goes straight to that person's code step; `why` says what needs confirming and
+   * `after` runs once this browser is confirmed.
+   */
+  openMeMenu(opts: { personId?: string; why?: string; after?: () => void } = {}) {
+    if (!this.meChip) return;
+    this.closeMenu();
+    this.meNote = "";
+    this.claimWhy = opts.why ?? "";
+    this.claimThen = opts.after ?? null;
+    this.claiming = null;
+    if (!this.me && opts.personId) this.pickMe(opts.personId);
+    this.renderMeMenu();
+    this.meMenu.classList.add("show");
+    this.meChip.setAttribute("aria-expanded", "true");
+    (
+      this.meMenu.querySelector<HTMLElement>(".claim-send") ??
+      this.meMenu.querySelector<HTMLElement>("button")
+    )?.focus();
+  }
+
+  closeMeMenu() {
+    this.meMenu.classList.remove("show");
+    this.meChip?.setAttribute("aria-expanded", "false");
+    this.claimThen = null;
+  }
+
+  /** A spectator picked a person: the demo has no server to ask, everyone else gets a code. */
+  private pickMe(personId: string) {
+    if (!this.model.people.has(personId)) return;
+    if (this.onClaim) this.claiming = personId;
+    else if (this.editAnyLook) this.confirmed(personId);
+  }
+
+  private confirmed(personId: string) {
+    const then = this.claimThen;
+    this.claimThen = null;
+    this.me = personId;
+    this.meNote = `That's you! This device is ${this.myName() ?? "you"} for a year.`;
+    if (this.meMenuOpen) this.renderMeMenu();
+    if (then) {
+      this.closeMeMenu();
+      then();
+    }
+  }
+
+  private miniPortrait(personId: string): HTMLCanvasElement | null {
+    const c = this.portrait(personId);
+    if (c) c.className = "portrait-mini";
+    return c;
+  }
+
+  /** The chip in the top bar: my portrait and name, or "Who are you?". */
+  private renderMeChip() {
+    const chip = this.meChip;
+    if (!chip) return;
+    const p = this.me ? this.model.people.get(this.me) : undefined;
+    // the portrait is redrawn only when the look changes
+    const key = this.me
+      ? `${this.me}|${p?.name ?? ""}|${JSON.stringify(p?.avatar ?? null)}`
+      : "spectator";
+    if (key === this.meChipKey && chip.childElementCount > 0) return;
+    this.meChipKey = key;
+    if (!this.me) {
+      chip.innerHTML = `<span class="me-q" aria-hidden="true">?</span><span class="me-name">Who are you?</span>`;
+      chip.title = "Tell the office which character is you";
+      chip.setAttribute("aria-label", "Me: who are you?");
+      chip.classList.remove("confirmed");
+      return;
+    }
+    const name = p?.name ?? "You";
+    chip.innerHTML = `<span class="me-name">${esc(name)}</span>`;
+    const portrait = this.miniPortrait(this.me);
+    // my character may not be drawn yet (right after a reload): try again on the next update
+    if (!portrait) this.meChipKey = "";
+    chip.prepend(portrait ?? el("span", "me-q", "&#9786;"));
+    chip.title = `You are ${name} on this device`;
+    chip.setAttribute("aria-label", `Me: ${name}`);
+    chip.classList.add("confirmed");
+  }
+
+  private renderMeMenu() {
+    const menu = this.meMenu;
+    const me = this.me;
+    if (me) {
+      const name = this.myName();
+      menu.setAttribute("aria-label", "Me");
+      menu.innerHTML = `
+        <div class="me-head"><span class="portrait-slot"></span><b>${esc(name ?? "You")}</b><span class="dim">this device</span></div>
+        ${this.meNote ? `<div class="me-note ok" role="status">${esc(this.meNote)}</div>` : ""}
+        ${
+          name
+            ? `${this.onEditLook ? '<button type="button" class="pixel-btn me-look">&#9998; Customize look</button>' : ""}
+               <button type="button" class="pixel-btn me-card">My desk</button>`
+            : '<div class="me-note dim">You are not in the office right now.</div>'
+        }
+        <button type="button" class="link-btn me-forget" title="This browser stops being you (e.g. a shared iPad)">Not ${esc(name ?? "you")}? Forget this device</button>`;
+      const portrait = this.miniPortrait(me);
+      if (portrait) menu.querySelector(".portrait-slot")!.replaceWith(portrait);
+      menu.querySelector(".me-look")?.addEventListener("click", () => {
+        this.closeMeMenu();
+        this.openLookEditor(me);
+      });
+      menu.querySelector(".me-card")?.addEventListener("click", () => {
+        this.closeMeMenu();
+        this.onOpenMe(me);
+      });
+      menu.querySelector(".me-forget")!.addEventListener("click", () => {
+        void (this.onClaim?.forget() ?? Promise.resolve()).then(() => {
+          this.me = null;
+          this.meChip?.focus();
+        });
+      });
+      return;
+    }
+    menu.setAttribute("aria-label", "Which one is you?");
+    const why = this.claimWhy ? `<div class="me-note">${esc(this.claimWhy)}</div>` : "";
+    const p = this.claiming ? this.model.people.get(this.claiming) : undefined;
+    if (p) {
+      menu.innerHTML = `${why}<div class="claim-slot"></div>
+        <button type="button" class="link-btn me-back">Not ${esc(p.name)}? Pick someone else</button>`;
+      if (!this.claimBox || this.claimFor !== p.personId) {
+        this.claimBox = this.buildClaim(p);
+        this.claimFor = p.personId;
+      }
+      menu.querySelector(".claim-slot")!.replaceWith(this.claimBox);
+      menu.querySelector(".me-back")!.addEventListener("click", () => {
+        this.claiming = null;
+        this.renderMeMenu();
+        this.meMenu.querySelector<HTMLElement>("button")?.focus();
+      });
+      return;
+    }
+    this.claiming = null;
+    const people = [...this.model.people.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // keep the keyboard position when the office changes while the list is open
+    const focused = (document.activeElement as HTMLElement | null)?.dataset.person;
+    menu.innerHTML = `
+      <div class="me-title">Which one is you?</div>${why}
+      <ul class="me-people">${people
+        .map(
+          (x) =>
+            `<li><button type="button" class="pixel-btn" data-person="${esc(x.personId)}"><span class="portrait-slot"></span>${esc(x.name)}</button></li>`,
+        )
+        .join("")}</ul>
+      <div class="me-note dim">${
+        people.length ? "Not here?" : "Nobody is in the office yet."
+      } You get a desk once the connector runs on your Mac. Until then you can watch and say hi.</div>`;
+    for (const b of menu.querySelectorAll<HTMLButtonElement>(".me-people button")) {
+      const id = b.dataset.person!;
+      const portrait = this.miniPortrait(id);
+      if (portrait) b.querySelector(".portrait-slot")!.replaceWith(portrait);
+      b.addEventListener("click", () => {
+        this.pickMe(id);
+        this.renderMeMenu();
+        this.meMenu.querySelector<HTMLElement>(".claim-send")?.focus();
+      });
+      if (id === focused) b.focus();
+    }
+  }
+
   /**
    * "This is me": a code goes to the person's Macs as a notification; typing it here marks
-   * this browser as them, and from then on it may change that look (and only that one). A
-   * courtesy lock against restyling colleagues, not real identity (see DECISIONS L9).
+   * this browser as them. From then on it may change that look (and only that one) and plays
+   * the office games as them. A courtesy lock, not real identity (see DECISIONS L9).
    */
   private buildClaim(p: PersonState): HTMLElement {
     const box = el("div", "claim");
     box.innerHTML = `
-      <div class="claim-title">Is this you? Confirm with a code from your Mac to change this look and your head GIF.</div>
-      <button type="button" class="pixel-btn claim-send" title="A 6-digit code pops up on this person's Mac">&#128274; It's me: send a code</button>
-      <form class="claim-form" hidden>
-        <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" aria-label="code from the Mac notification">
-        <button class="pixel-btn" type="submit">Confirm</button>
+      <div class="claim-title">A 6-digit code pops up as a notification on ${esc(p.name)}'s Mac.</div>
+      <button type="button" class="pixel-btn claim-send">&#128274; Send a code to my Mac</button>
+      <form class="claim-form" hidden novalidate>
+        <label for="claim-code">Code from the notification</label>
+        <div class="claim-row">
+          <input id="claim-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" placeholder="123456" aria-describedby="claim-status">
+          <button class="pixel-btn" type="submit">Confirm</button>
+        </div>
       </form>
-      <div class="poke-status claim-status" aria-live="polite"></div>`;
+      <div class="poke-status claim-status" id="claim-status" aria-live="polite"></div>
+      <details class="claim-help"><summary>No code?</summary>Notifications must be on for the Agent Office connector on that Mac. A code works for 5 minutes; you can send a new one after 30 seconds, up to 10 a day.</details>`;
     const status = box.querySelector<HTMLElement>(".claim-status")!;
     const form = box.querySelector<HTMLFormElement>(".claim-form")!;
     const input = form.querySelector<HTMLInputElement>("input")!;
+    const sendBtn = box.querySelector<HTMLButtonElement>(".claim-send")!;
     const say = (r: PokeResult) => {
       status.textContent = r.message;
       status.className = `poke-status claim-status ${r.ok ? "ok" : "err"}`;
     };
-    box.querySelector(".claim-send")!.addEventListener("click", async () => {
+    // the server sends one code per person per 30 s: count down instead of failing
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const countdown = (until: number) => {
+      clearInterval(timer);
+      const tick = () => {
+        const left = Math.ceil((until - Date.now()) / 1000);
+        if (left <= 0 || !box.isConnected) {
+          clearInterval(timer);
+          sendBtn.disabled = false;
+          sendBtn.textContent = "Send again";
+          return;
+        }
+        sendBtn.disabled = true;
+        sendBtn.textContent = `Send again (0:${String(left).padStart(2, "0")})`;
+      };
+      tick();
+      timer = setInterval(tick, 1000);
+    };
+    sendBtn.addEventListener("click", async () => {
       if (!this.onClaim) return;
       status.textContent = "...";
       const r = await this.onClaim.send(p.personId);
-      say(r);
+      say(r.ok ? { ok: true, message: `Code sent to ${p.name}'s Mac.` } : r);
       if (r.ok) {
         form.hidden = false;
+        countdown(Date.now() + 30_000);
         input.focus();
       }
+    });
+    // a pasted "123 456" is still six digits
+    input.addEventListener("input", () => {
+      input.value = claimDigits(input.value);
+      input.removeAttribute("aria-invalid");
     });
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!this.onClaim) return;
-      const r = await this.onClaim.verify(p.personId, input.value.trim());
-      say(r);
-      if (!r.ok) return;
-      this.me = p.personId;
-      this.claimBox = null;
-      this.claimFor = null;
-      input.blur();
-      this.renderPanel();
-      this.openLookEditor(p.personId);
+      const r = await this.onClaim.verify(p.personId, claimDigits(input.value));
+      if (!r.ok) {
+        say(r);
+        input.setAttribute("aria-invalid", "true");
+        input.focus();
+        input.select();
+        return;
+      }
+      clearInterval(timer);
+      this.confirmed(p.personId);
     });
-    box.addEventListener("keydown", (e) => e.stopPropagation());
     return box;
+  }
+
+  /** The "from" line: my name once this browser is confirmed, otherwise a typed one. */
+  private fillFrom(input: HTMLInputElement) {
+    const mine = this.myName();
+    if (mine) {
+      input.value = mine;
+      input.closest<HTMLElement>(".poke-from")!.hidden = true;
+      return;
+    }
+    input.value = storedName();
+    input.addEventListener("change", () => storeName(input.value));
   }
 
   /** The poke box at the bottom of the person panel and the agent card. */
@@ -1227,8 +1520,7 @@ export class Hud {
       <div class="poke-status" aria-live="polite"></div>`;
     const status = box.querySelector<HTMLElement>(".poke-status")!;
     const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
-    fromInput.value = storedName();
-    fromInput.addEventListener("change", () => storeName(fromInput.value));
+    this.fillFrom(fromInput);
     const send = async (kind: InteractionKind, text?: string) => {
       if (!this.onPoke) return;
       const from = fromInput.value.trim();

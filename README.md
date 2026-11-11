@@ -192,16 +192,22 @@ in the agent's colour instead. Every extra
 session is a sibling of you with tiny variations, and your pod has one desk per running
 session (at least 2, up to 6).
 
-Want a say? Click your name plate. The first time, tap **It's me: send a code**: a 6-digit
-code pops up as a notification on your Mac (via the connector, so its notifications must be
-allowed in macOS; if nothing shows up, send again after 30 s), and typing it in marks this
-browser as you. From then on **Customize look** opens a fullscreen studio: flip through hair,
+Want a say? Tell the office who you are: tap **Who are you?** in the top bar, pick your
+character and **Send a code to my Mac**. A 6-digit code pops up as a notification on your Mac
+(via the connector, so its notifications must be allowed in macOS; if nothing shows up, send
+again after 30 s), and typing it in marks this browser as you. The top bar then shows your
+portrait; its menu has **Customize look**, **My desk** and "Forget this device". A browser
+that is nobody (a guest, the kiosk) only watches and can say hi with a typed name.
+
+![Who are you?](screenshots/16-its-me-laptop.png)
+
+**Customize look** opens a fullscreen studio: flip through hair,
 face, glasses, cap, outfit (jacket, hoodie, flannel, tee), something for each hand (beer,
 coffee, phone, ...), your ride and desk items with the ◀ ▶ buttons (or the arrow keys), with a
 big live preview. You can only change your own look. This is a courtesy lock for a team
 office, not real identity: anyone with the office password could start a connector under your
-name. Saving pins it; **Automatic** goes back to the one from your description. On a shared device, "not you? forget this device" (or
-logging out) drops the claim. Outfits that are not in the agent colour carry a small agent
+name. Saving pins it; **Automatic** goes back to the one from your description. On a shared
+device, "Forget this device" in that menu (or logging out) drops the claim. Outfits that are not in the agent colour carry a small agent
 badge on the tee and a band across the back, so you can still tell Claude from Codex at the
 desk.
 
@@ -242,8 +248,9 @@ Giphy's CDN (no referrer, no cookies), so every screen showing the office contac
 are not rating-filtered: a screen that should never show them (the wall, a meeting room) adds
 `?gifs=0` to its URL, which hides every head GIF there and loads nothing from Giphy.
 
-You can also do it from the office page: click your nameplate, confirm **It's me** once (a
-code pops up on your Mac, the same step as for the look editor), then paste a Giphy link under
+You can also do it from the office page: confirm who you are once (**Who are you?** in the
+top bar; a code pops up on your Mac, the same step as for the look editor), open **My desk**
+from that menu or click your nameplate, then paste a Giphy link under
 **GIF over your head** and press **Save** (you see a preview first). **Remove** clears the GIF.
 Only your own GIF can be changed this way. A GIF set on the page sticks across connector restarts and reconnects, until
 you run `agent-office gif ...` again with a different value (or `off`). The wall/iPad
@@ -317,7 +324,7 @@ rights; clearing them loses those rights. Already queued Mac notifications canno
 
 ## Office games and extra look items
 
-Use the existing **Customize look** editor (on a person's nameplate, or from **✦ Office games**)
+Use the existing **Customize look** editor (your portrait in the top bar)
 to choose ears, costumes, neon bracelets, both hand items, accent colors and a ride. There is
 one `AvatarSpec` and one editor: saved looks keep the existing custom/automatic behavior and
 appear on every sibling session. The front, side and seated previews include the new items;
@@ -334,9 +341,10 @@ The games panel adds:
 - **Roll & race:** equip a car, skateboard, hoverboard or spaceship; a server dice roll
   moves the ride along the Office GP strip and awards 1–6 points on the shared board.
 
-The panel uses the existing office login; there is no additional password field. Like the
-look editor and pokes, this is shared team access, not individual accounts. The initial
-player is the first online person, or your last locally selected player if still online.
+The panel uses the existing office login; there is no additional password field. You play as
+the person this browser is confirmed to be (the portrait in the top bar); a browser that is
+nobody is asked "Who are you?" first. The page enforces this, the server does not check moves
+yet.
 
 **No polling:** party state joins the existing viewer WebSocket snapshot, and successful moves
 broadcast `party.updated` on that socket (including to kiosks). Opening or leaving the games

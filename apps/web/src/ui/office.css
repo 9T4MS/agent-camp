@@ -116,6 +116,19 @@
   flex: 1;
   padding: 9px 12px;
 }
+/* buttons of the Me menu (top right, see the end of this file) */
+.me-menu .pixel-btn {
+  width: 100%;
+  min-height: 36px;
+  font-size: 12px;
+  text-align: center;
+}
+.me-menu .link-btn:focus-visible,
+.me-menu .pixel-btn:focus-visible,
+.me-menu .claim-help summary:focus-visible {
+  outline: 2px solid var(--lemon);
+  outline-offset: 2px;
+}
 .hud-menu .install,
 .hud-menu .ios {
   background: var(--rust);
@@ -963,7 +976,8 @@ body.kiosk .hud-reconnect {
   width: 100%;
   font-size: 12px;
 }
-.hud-panel .link-btn {
+.hud-panel .link-btn,
+.me-menu .link-btn {
   display: block;
   margin: 6px auto 0;
   padding: 0;
@@ -975,30 +989,37 @@ body.kiosk .hud-reconnect {
   text-decoration: underline;
   cursor: pointer;
 }
-.hud-panel .claim {
-  margin-top: 10px;
+.me-menu .claim {
   display: grid;
   gap: 6px;
 }
-.hud-panel .claim-title {
+.me-menu .claim-title {
   font-size: 12px;
-  color: var(--grey);
+  color: var(--silver);
 }
-.hud-panel .claim-send,
-.hud-panel .claim-form .pixel-btn {
+.me-menu .claim-send,
+.me-menu .claim-form .pixel-btn {
   font-size: 12px;
 }
-.hud-panel .claim-form .pixel-btn {
+.me-menu .claim-form .pixel-btn {
   flex: none;
 }
-.hud-panel .claim-form {
+.me-menu .claim-form {
+  display: grid;
+  gap: 4px;
+}
+.me-menu .claim-form label {
+  font-size: 12px;
+  color: var(--silver);
+}
+.me-menu .claim-row {
   display: flex;
   gap: 6px;
 }
-.hud-panel .claim-form[hidden] {
+.me-menu .claim-form[hidden] {
   display: none;
 }
-.hud-panel .claim-form input {
+.me-menu .claim-row input {
   width: 0;
   min-width: 0;
   flex: 1;
@@ -1440,5 +1461,178 @@ body.kiosk .celebration .version {
 @media (max-width: 760px) {
   .look-studio .look-describe textarea {
     min-height: 56px;
+  }
+}
+
+/* ---- Me chip + Me menu (top right): who this browser is ---------------------------------- */
+.hud-top .me-chip {
+  flex: none;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-width: 36px;
+  margin-right: -6px;
+  padding: 2px 6px;
+  background: none;
+  border: 0;
+  color: var(--cream);
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hud-top .me-chip:hover,
+.hud-top .me-chip[aria-expanded="true"] {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--dusk);
+}
+.hud-top .me-chip:focus-visible {
+  outline: 2px solid var(--lemon);
+}
+.hud-top .me-chip:not(.confirmed) {
+  color: var(--amber);
+}
+.hud-top .me-chip .me-name {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hud-top .me-chip .me-q {
+  width: 16px;
+  text-align: center;
+  font-size: 14px;
+}
+.hud-top .portrait-mini,
+.me-menu .portrait-mini {
+  flex: none;
+  width: 16px;
+  height: 24px;
+  image-rendering: pixelated;
+  background: var(--ink);
+}
+.me-menu {
+  position: absolute;
+  top: calc(40px + var(--safe-t));
+  right: max(8px, var(--safe-r));
+  z-index: 8;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  width: 250px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 56px - var(--safe-t) - var(--safe-b));
+  overflow-y: auto;
+  color: var(--cream);
+  font-size: 13px;
+}
+.me-menu.show {
+  display: flex;
+}
+.me-menu .me-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--amber);
+}
+.me-menu .me-head .dim {
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+.me-menu .me-title {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--amber);
+}
+.me-menu .me-note {
+  font-size: 12px;
+  color: var(--silver);
+}
+.me-menu .me-note.ok {
+  color: var(--leaf);
+}
+.me-menu .me-people {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.me-menu .me-people .pixel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.me-menu .claim-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.me-menu .claim-row .pixel-btn {
+  width: auto;
+}
+.me-menu .claim-row input[aria-invalid="true"] {
+  outline: 2px solid var(--red);
+}
+.me-menu .claim-help {
+  font-size: 12px;
+  color: var(--silver);
+}
+.me-menu .claim-help summary {
+  cursor: pointer;
+  color: var(--grey);
+  text-decoration: underline;
+}
+.hud-panel .poke-from[hidden] {
+  display: none;
+}
+.me-menu .poke-status {
+  min-height: 0;
+  font-size: 12px;
+  color: var(--silver);
+}
+.me-menu .poke-status:empty {
+  display: none;
+}
+.me-menu .poke-status.ok {
+  color: var(--leaf);
+}
+.me-menu .poke-status.err {
+  color: var(--pink);
+}
+body.nohud .me-menu {
+  display: none;
+}
+@media (max-width: 560px) {
+  /* the chip takes the clock's place (the phone shows the time itself) and loses its label */
+  .hud-top.with-me .clock,
+  .hud-top .me-chip .me-name {
+    display: none;
+  }
+  .hud-top .me-chip {
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-right: -4px;
+    padding: 0;
+  }
+  /* a sheet at the bottom, in reach of the thumb */
+  .me-menu {
+    top: auto;
+    left: max(10px, var(--safe-l));
+    right: max(10px, var(--safe-r));
+    bottom: max(10px, var(--safe-b));
+    width: auto;
+    max-height: 70%;
+    /* above the "Office games" button in the same corner */
+    z-index: 35;
+  }
+  .me-menu .pixel-btn {
+    min-height: 44px;
   }
 }

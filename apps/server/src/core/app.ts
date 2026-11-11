@@ -839,7 +839,7 @@ export class OfficeApp {
         envelope("connector.poked", {
           kind: "message",
           from: "Agent Office",
-          text: `Your code to edit your look: ${code} (5 min). Not you? Just ignore this.`,
+          text: `Your Agent Office code: ${code} (5 min). Not you? Just ignore this.`,
         }),
       );
       if (this.transport.sendToConnector?.(mac, poke)) delivered++;
@@ -877,7 +877,16 @@ export class OfficeApp {
     if (!match) {
       pending.tries++;
       this.store.kvPut(key, JSON.stringify(pending));
-      return json({ error: "wrong code" }, { status: 403 });
+      const left = CLAIM_MAX_TRIES - pending.tries;
+      return json(
+        {
+          error:
+            left > 0
+              ? `wrong code, ${left} ${left === 1 ? "try" : "tries"} left`
+              : "wrong code, that one is used up: send a new one",
+        },
+        { status: 403 },
+      );
     }
     this.store.kvPut(key, "null");
     const pw = connectorPassword(this.env);

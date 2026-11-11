@@ -123,7 +123,18 @@ try {
   const received: PartyState[][] = [[], [], []];
   const pages: Page[] = [];
   for (const [i, ctx] of contexts.entries()) {
-    await ctx.request.post(`${base}/api/login`, { form: { password: "local-party-test" } });
+    // Playwright's request client hangs on the login's empty 303 under Bun: fetch the session
+    // cookie directly and hand it to the browser
+    const login = await fetch(`${base}/api/login`, {
+      method: "POST",
+      body: new URLSearchParams({ password: "local-party-test" }),
+      redirect: "manual",
+    });
+    const [name, value] = login.headers.getSetCookie()[0]!.split(";")[0]!.split("=") as [
+      string,
+      string,
+    ];
+    await ctx.addCookies([{ name, value, url: base }]);
     const page = await ctx.newPage();
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (e) => {
@@ -147,11 +158,11 @@ try {
     pages.push(page);
   }
   const [page, other, kiosk] = pages as [Page, Page, Page];
-  assert.equal(
-    await page.locator("#party-person").inputValue(),
-    "player-one",
-    "defaults to first person",
-  );
+  // one "me": nobody is anyone until they confirm it, so a fresh browser only watches
+  assert.equal(await page.locator("#party-person").textContent(), "You are watching.");
+  assert(await page.getByRole("button", { name: "Dance", exact: true }).isDisabled());
+  assert.equal(await page.locator(".me-chip").getAttribute("aria-label"), "Me: who are you?");
+  assert.equal(await kiosk.locator(".me-chip").count(), 0, "the kiosk is nobody");
   assert.equal(
     await page.locator('input[type="password"]').count(),
     0,
@@ -177,10 +188,12 @@ try {
       await row.locator(".next").click();
     assert.equal(await row.getAttribute("data-value"), value, `${field} reaches ${value}`);
   };
-  // Only your own look: without proving it, Customize opens the "This is me" box, not the
-  // studio, and the API refuses a direct PUT.
-  await page.getByRole("button", { name: "Customize look", exact: true }).click();
-  assert.equal(await page.locator(".look-studio").count(), 0, "no studio before the code");
+  // Only your own look and moves: a spectator who wants to play gets "Which one is you?",
+  // and the API refuses a direct PUT.
+  await page.getByRole("button", { name: "Who are you? Confirm to play", exact: true }).click();
+  await page.locator(".me-menu.show").waitFor();
+  assert.equal(await page.locator(".me-menu .me-people button").count(), 2);
+  await page.locator('.me-menu [data-person="player-one"]').click();
   const forged = await other.evaluate(async () => {
     const r = await fetch("/api/people/player-one/avatar", {
       method: "PUT",
@@ -196,11 +209,50 @@ try {
   if (refused >= 0) errors.splice(refused, 1);
   await page.locator(".claim-send").click();
   for (let i = 0; i < 50 && !macCodes.has("Player One"); i++) await pause(100);
+  await page.locator(".claim-form input").waitFor();
+  await page.screenshot({ path: `${out}/me-claim-desktop.png` });
   assert(!macCodes.has("Player Two"), "the code only goes to that person's Mac");
-  await page.locator(".claim-form input").fill(macCodes.get("Player One")!);
+  const code = macCodes.get("Player One")!;
+  assert(await page.locator(".claim-send").isDisabled(), "resend counts down");
+  assert.match((await page.locator(".claim-send").textContent())!, /^Send again \(0:\d\d\)$/);
+  await page.locator(".claim-form input").fill(code === "000000" ? "111111" : "000000");
   await page.locator(".claim-form button").click();
-  await page.locator(".look-studio").waitFor();
-  console.log("PASS: looks are owner-only (courtesy lock: a code on that person's Mac)");
+  await page.locator('.claim-form input[aria-invalid="true"]').waitFor();
+  assert.equal(await page.locator(".claim-status").textContent(), "wrong code, 4 tries left");
+  // a code pasted with a space is still the code
+  await page.locator(".claim-form input").fill(`${code.slice(0, 3)} ${code.slice(3)}`);
+  assert.equal(await page.locator(".claim-form input").inputValue(), code);
+  await page.locator(".claim-form button").click();
+  // confirmed: back in the drawer, now playing as that person
+  await page.locator(".party-panel").waitFor();
+  assert.equal(await page.locator("#party-person").textContent(), "Playing as Player One");
+  assert.equal(await page.locator(".me-chip").getAttribute("aria-label"), "Me: Player One");
+  assert.equal(await page.locator(".me-menu.show").count(), 0);
+  // the wrong code above is an expected 403 too
+  await pause(200);
+  const wrongCode = errors.findIndex((e) => e.includes("status of 403"));
+  if (wrongCode >= 0) errors.splice(wrongCode, 1);
+  await page.screenshot({ path: `${out}/office-games-playing-as-me.png` });
+  // somebody else's nameplate offers no way to become them once you are confirmed
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.__office.openPerson("player-two"));
+  assert.equal(await page.locator(".hud-panel .this-is-me").count(), 0);
+  assert.equal(await page.locator(".hud-panel .edit-look").count(), 0);
+  assert(await page.locator(".hud-panel .poke-from").isHidden(), "pokes come from me");
+  await other.evaluate(() => window.__office.openPerson("player-two"));
+  assert.equal(await other.locator(".hud-panel .this-is-me").count(), 1, "spectators can claim");
+  await other.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  const openStudio = async () => {
+    await page.locator(".me-chip").click();
+    await page.getByRole("button", { name: "Customize look", exact: false }).click();
+    await page.locator(".look-studio").waitFor();
+  };
+  await page.locator(".me-chip").click();
+  await page.screenshot({ path: `${out}/me-menu-desktop.png` });
+  await page.locator(".me-chip").click();
+  await openStudio();
+  console.log("PASS: one me (courtesy lock: a code on that person's Mac) for looks and moves");
   await pick("accessory", "cat-ears");
   await pick("wrist", "neon-cyan");
   await pick("outfit", "cat");
@@ -240,7 +292,7 @@ try {
         .party;
       return state.events.at(-1)?.item === id;
     }, item);
-    await page.getByRole("button", { name: "Customize look", exact: true }).click();
+    await openStudio();
   }
   await page.locator(".look-editor .close").click();
   await page.getByRole("button", { name: "Office games", exact: false }).click();
@@ -277,12 +329,31 @@ try {
   await page.waitForFunction(() =>
     document.querySelector(".party-board")?.textContent?.includes("Player One"),
   );
+  // the cookie remembers who this browser is
+  assert.equal(await page.locator("#party-person").textContent(), "Playing as Player One");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${out}/office-games-mobile.png` });
   const rect = await page.locator(".party-panel").boundingBox();
   assert(rect && rect.x >= 0 && rect.x + rect.width <= 390, "mobile game panel fits");
   await page.keyboard.press("Escape");
   assert(await page.locator(".party-panel").isHidden());
+  // phone: the chip takes the clock's place and its menu is a sheet at the bottom
+  assert(await page.locator(".hud-top .clock").isHidden());
+  const chip = await page.locator(".me-chip").boundingBox();
+  assert(chip && chip.width >= 36 && chip.height >= 36 && chip.x + chip.width <= 390);
+  await page.locator(".me-chip").click();
+  const sheet = await page.locator(".me-menu").boundingBox();
+  assert(sheet && sheet.x >= 0 && sheet.x + sheet.width <= 390 && sheet.y > 422, "bottom sheet");
+  await page.screenshot({ path: `${out}/me-menu-mobile.png` });
+  // forgetting the device makes it a spectator again (and Esc closes only the menu)
+  assert.equal(await page.locator(".me-chip").getAttribute("aria-label"), "Me: Player One");
+  await page.getByRole("button", { name: "Forget this device", exact: false }).click();
+  await page.locator('.me-chip[aria-label="Me: who are you?"]').waitFor();
+  await page.screenshot({ path: `${out}/me-menu-who-mobile.png` });
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".me-menu.show").count(), 0);
+  const me = await page.evaluate(async () => (await (await fetch("/api/me")).json()).personId);
+  assert.equal(me, null, "the cookie is gone");
 
   // The same IP cannot bypass limits by changing actor or using malformed payloads.
   const malformed = await contexts[0]!.request.post(`${base}/api/party`, {
