@@ -123,7 +123,7 @@ export function chairTile(pod: number, desk: number): Point {
 /** Pixel position of a seated character's feet (between the desk's two tiles). */
 export function seatPoint(pod: number, desk: number): Point {
   const d = deskTile(pod, desk);
-  return { x: (d.x + 1) * TILE, y: d.y * TILE + 40 };
+  return { x: (d.x + 1) * TILE, y: d.y * TILE + 34 };
 }
 /** Pixel rect of the floor strip in front of a pod (nameplate + aisle), for helper bots. */
 export function podAisle(pod: number): { x: number; y: number; w: number; h: number } {

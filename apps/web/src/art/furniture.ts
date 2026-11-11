@@ -61,8 +61,8 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
   coffee: {
     w: 12,
     h: 16,
-    dy: -12,
-    z: 2,
+    dy: -17,
+    z: 20,
     draw(pc) {
       pc.rect(1, 0, 10, 4, C.ink);
       pc.rect(1, 4, 3, 11, C.ink);
@@ -79,8 +79,8 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
   sink: {
     w: 14,
     h: 10,
-    dy: -16,
-    z: 2,
+    dy: -17,
+    z: 20,
     outline: false,
     draw(pc) {
       pc.rect(1, 4, 12, 5, C.grey);
@@ -265,7 +265,7 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
   whiteboard: {
     w: 48,
     h: 26,
-    dy: -16,
+    dy: -1,
     z: -1000,
     draw(pc) {
       pc.rect(0, 0, 48, 22, C.silver);
@@ -351,7 +351,7 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
   neon: {
     w: 48,
     h: 14,
-    dy: -18,
+    dy: -3,
     z: -1000,
     frames: 2,
     outline: false,
