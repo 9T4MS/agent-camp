@@ -16,6 +16,8 @@ export type Config = {
   /** label of this machine on the agent card; default: the short hostname */
   machine_name?: string;
   share_project_names: boolean;
+  /** show pokes from the office as macOS notifications */
+  notifications: boolean;
   client_id: string;
 };
 
@@ -26,6 +28,7 @@ export const CONFIG_KEYS = [
   "self_description",
   "machine_name",
   "share_project_names",
+  "notifications",
   "client_id",
 ] as const;
 
@@ -131,6 +134,7 @@ export function newClientId(): string {
 export function toConfig(values: Record<string, TomlValue>): Config {
   const s = (k: string) => (typeof values[k] === "string" ? (values[k] as string) : undefined);
   const share = values.share_project_names;
+  const notify = values.notifications;
   const clientId = s("client_id");
   return {
     server: s("server"),
@@ -139,6 +143,7 @@ export function toConfig(values: Record<string, TomlValue>): Config {
     self_description: s("self_description"),
     machine_name: s("machine_name"),
     share_project_names: !(share === false || share === "false"),
+    notifications: !(notify === false || notify === "false"),
     client_id: clientId && /^[A-Za-z0-9_-]{1,64}$/.test(clientId) ? clientId : newClientId(),
   };
 }
@@ -165,6 +170,7 @@ export function saveConfig(path: string, config: Config): void {
       self_description: config.self_description,
       machine_name: config.machine_name,
       share_project_names: config.share_project_names,
+      notifications: config.notifications,
       client_id: config.client_id,
     }),
     { mode: 0o600 },

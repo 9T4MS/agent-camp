@@ -20,7 +20,8 @@ directory = "../web/dist"
 binding = "ASSETS"
 html_handling = "auto-trailing-slash" # /stats -> stats.html, /timelapse -> timelapse.html
 not_found_handling = "none"
-run_worker_first = ["/ws/*", "/api/*", "/healthz", "/install.sh"]
+# every request passes the viewer password gate in the Worker first
+run_worker_first = true
 
 [[durable_objects.bindings]]
 name = "OFFICE"
@@ -43,7 +44,8 @@ MIN_CONNECTOR_VERSION = "0.0.0"
 
 # Secrets (wrangler secret put ...; locally in .dev.vars):
 #   CONNECTOR_PASSWORD   shared connector password (required)
-#   VIEWER_KEY           optional ?key= for /ws/viewer
+#   VIEWER_KEY           optional ?key= that also lets viewers in (kiosk links); the
+#                        login page uses CONNECTOR_PASSWORD
 #   ANTHROPIC_API_KEY    for GENUI_PROVIDER=anthropic
 #   AI_GATEWAY_API_KEY   for GENUI_PROVIDER=jev
 # Optional vars: GENUI_MODEL, SERVER_VERSION, DEV_MODE ("1" = password defaults to "devpass")

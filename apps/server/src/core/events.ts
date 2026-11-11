@@ -44,11 +44,18 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
       const s = lookup(person, e.data.sessionId);
       return `${e.type} ${person} ${s?.agent ?? "?"} ${s?.project ?? "-"} count=${e.data.count}`;
     }
+    case "session.connectionChanged": {
+      const s = lookup(person, e.data.sessionId);
+      return `${e.type} ${person} ${s?.agent ?? "?"} ${s?.project ?? "-"} ${e.data.offline ? "offline" : "online"}`;
+    }
   }
 }
 
 /** Event types not written to history (high volume, useless for stats). */
-export const HISTORY_SKIP = new Set<ViewerEvent["type"]>(["session.activityChanged"]);
+export const HISTORY_SKIP = new Set<ViewerEvent["type"]>([
+  "session.activityChanged",
+  "session.connectionChanged",
+]);
 
 export function historyRow(e: ViewerEvent, lookup: SessionLookup): HistoryRow | null {
   if (HISTORY_SKIP.has(e.type)) return null;

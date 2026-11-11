@@ -9,6 +9,7 @@ import {
   AGENT_COLORS,
   AGENT_PALETTES,
   type AgentKind,
+  type InteractionKind,
   type PersonDayResponse,
 } from "@agent-office/protocol";
 import { iconUrl } from "./art/icons.ts";
@@ -58,6 +59,39 @@ const AGENT_TITLE: Record<AgentKind, string> = {
   pi: "Pi",
   unknown: "Agent",
 };
+export type PokeRequest = {
+  kind: InteractionKind;
+  personId: string;
+  from?: string;
+  text?: string;
+};
+/** What the HUD shows after a poke: a short status line. */
+export type PokeResult = { ok: boolean; message: string };
+
+const POKES: { kind: InteractionKind; label: string; title: string }[] = [
+  { kind: "wave", label: "&#128075; Wave", title: "Wave (pops up on their Mac)" },
+  {
+    kind: "coffee",
+    label: "&#9749; Coffee?",
+    title: "Ask them for a coffee (pops up on their Mac)",
+  },
+  { kind: "cheer", label: "&#127881; Cheer", title: "Cheer them on (pops up on their Mac)" },
+  {
+    kind: "paper",
+    label: "&#128196; Paper ball",
+    title: "Throw a paper ball (only in the office)",
+  },
+];
+const NAME_KEY = "agent-office.viewerName";
+
+function storedName(): string {
+  try {
+    return localStorage.getItem(NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 /** Card timeline window. */
 export const TIMELINE_MS = 30 * 60_000;
 
@@ -127,6 +161,11 @@ export class Hud {
   fetchDay: (personId: string) => Promise<PersonDayResponse | null> = async () => null;
   /** the panel opened, closed or switched between person and agent card */
   onPanelChange: () => void = () => {};
+  /** send a poke / paper ball; null hides the poke buttons (kiosk, no server) */
+  onPoke: ((req: PokeRequest) => Promise<PokeResult>) | null = null;
+  /** survives panel re-renders, so a half-typed message is not lost */
+  private pokeBox: HTMLElement | null = null;
+  private pokeFor: string | null = null;
   /** a session row in the person panel was clicked */
   onOpenSession: (sessionId: string) => void = (id) => this.openSession(id);
 
@@ -310,6 +349,8 @@ export class Hud {
   }
 
   private renderPanel() {
+    // don't yank the poke box away while someone is typing in it
+    if (this.pokeBox?.isConnected && this.pokeBox.contains(document.activeElement)) return;
     const p = this.panelPerson ? this.model.people.get(this.panelPerson) : undefined;
     if (!p) {
       this.closePanel();
@@ -330,7 +371,7 @@ export class Hud {
         ) => `<li class="session-row" data-session="${esc(s.sessionId)}" tabindex="0" role="button">
           <span class="dot" style="background:${AGENT_COLORS[s.agent]}"></span>
           <span class="proj">${esc(s.project ?? "(private)")}</span>
-          <span class="act">${ACTIVITY_LABEL[s.activity]}</span>
+          <span class="act">${s.offline ? "offline" : ACTIVITY_LABEL[s.activity]}</span>
           <span class="meta">${AGENT_LABEL[s.agent]} &middot; ${duration(now - s.startedAt)}${
             s.subagents ? ` &middot; ${s.subagents} helper${s.subagents > 1 ? "s" : ""}` : ""
           }${s.machine ? ` &middot; ${esc(s.machine)}` : ""}</span>
@@ -349,6 +390,7 @@ export class Hud {
       </div></header>
       <ul>${items || "<li>No agents running</li>"}</ul>
       <div class="badges">${badges}</div>`;
+    this.mountPoke(p);
     const portrait = this.portrait(p.personId);
     if (portrait) {
       portrait.className = "portrait";
@@ -365,6 +407,69 @@ export class Hud {
     this.panel.classList.remove("card");
     this.panel.classList.add("show");
     this.onPanelChange();
+  }
+
+  /** The poke box at the bottom of the person panel and the agent card. */
+  private mountPoke(p: PersonState) {
+    if (!this.onPoke) return;
+    if (!this.pokeBox || this.pokeFor !== p.personId) {
+      this.pokeBox = this.buildPoke(p);
+      this.pokeFor = p.personId;
+    }
+    this.panel.append(this.pokeBox);
+  }
+
+  private buildPoke(p: PersonState): HTMLElement {
+    const box = el("div", "poke");
+    box.innerHTML = `
+      <div class="poke-title">Say hi to ${esc(p.name)}</div>
+      <div class="poke-btns">${POKES.map(
+        (k) =>
+          `<button type="button" class="pixel-btn" data-kind="${k.kind}" title="${k.title}">${k.label}</button>`,
+      ).join("")}</div>
+      <form class="poke-msg">
+        <input name="text" maxlength="80" placeholder="Short message to their Mac" autocomplete="off">
+        <button class="pixel-btn" type="submit">Send</button>
+      </form>
+      <label class="poke-from">from <input name="from" maxlength="40" placeholder="your name"></label>
+      <div class="poke-status" aria-live="polite"></div>`;
+    const status = box.querySelector<HTMLElement>(".poke-status")!;
+    const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
+    const textInput = box.querySelector<HTMLInputElement>("input[name=text]")!;
+    fromInput.value = storedName();
+    fromInput.addEventListener("change", () => {
+      try {
+        localStorage.setItem(NAME_KEY, fromInput.value.trim());
+      } catch {
+        // private mode: the name just isn't remembered
+      }
+    });
+    const send = async (kind: InteractionKind, text?: string) => {
+      if (!this.onPoke) return;
+      const from = fromInput.value.trim();
+      status.textContent = "...";
+      status.className = "poke-status";
+      const r = await this.onPoke({
+        kind,
+        personId: p.personId,
+        ...(from ? { from } : {}),
+        ...(text ? { text } : {}),
+      });
+      status.textContent = r.message;
+      status.className = `poke-status ${r.ok ? "ok" : "err"}`;
+      if (r.ok && kind === "message") textInput.value = "";
+    };
+    for (const b of box.querySelectorAll<HTMLButtonElement>(".poke-btns button")) {
+      b.addEventListener("click", () => void send(b.dataset.kind as InteractionKind));
+    }
+    box.querySelector("form")!.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = textInput.value.trim();
+      if (text) void send("message", text);
+    });
+    // typing in the box must not trigger office keyboard shortcuts
+    box.addEventListener("keydown", (e) => e.stopPropagation());
+    return box;
   }
 
   /** The agent card: one session in detail. */
@@ -424,11 +529,19 @@ export class Hud {
           <button class="who" type="button"><span class="portrait-mini"></span><span>${esc(p.name)}</span><span class="chev">&rsaquo;</span></button>
         </div>
       </div>
-      <div class="now">
+      ${
+        s.offline
+          ? `<div class="now offline">
+        <span class="act-dot" style="background:${ACTIVITY_COLORS.idle}"></span>
+        <span class="act-name">offline</span>
+        <span class="act-since">connector stopped answering (asleep or no network?)</span>
+      </div>`
+          : `<div class="now">
         <span class="act-dot${act === "waiting" ? " blink" : ""}" style="background:${ACTIVITY_COLORS[act]}"></span>
         <span class="act-name" style="color:${ACTIVITY_COLORS[act]}">${ACTIVITY_LABEL[act]}</span>
         <span class="act-since">since ${shortDuration(now - s.activitySince)}</span>
-      </div>
+      </div>`
+      }
       <div class="strip" role="img" aria-label="activity, last 30 minutes">${strip}</div>
       <div class="strip-axis"><span>30 min ago</span><span>now</span></div>
       <div class="legend">${legend}</div>
@@ -443,6 +556,7 @@ export class Hud {
         ${tile(today.peak, "at once")}
         ${tile(today.helpers, today.helpers === 1 ? "helper" : "helpers")}
       </div>`;
+    this.mountPoke(p);
     const portrait = this.portrait(p.personId);
     if (portrait) {
       portrait.className = "portrait-mini";

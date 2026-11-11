@@ -3,7 +3,15 @@
  * the store, GenUI and the /api/* routes. Uses only web-standard Request/Response;
  * sockets are abstracted behind `Transport` and identified by string ids.
  */
-import { HistoryRow, type ServerToConnector, type ViewerEvent } from "@agent-office/protocol";
+import {
+  envelope,
+  HistoryRow,
+  InteractRequest,
+  type InteractResponse,
+  type MessageOf,
+  type ServerToConnector,
+  type ViewerEvent,
+} from "@agent-office/protocol";
 import { z } from "zod";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
@@ -28,6 +36,8 @@ export type AppEnv = GenuiEnv & {
 export interface Transport {
   /** send to every connected viewer */
   broadcast(json: string): void;
+  /** send to one connector socket (pokes); false if it is gone */
+  sendToConnector?(socketId: string, json: string): boolean;
   /** ask to be called back (`app.alarm()`) at `at`; null = nothing pending */
   scheduleAlarm(at: number | null): void;
   /** keep the runtime alive for background work (GenUI) */
@@ -44,6 +54,15 @@ export type SocketAction = {
 export const SNAPSHOT_MAX_BYTES = 300 * 1024;
 export const SNAPSHOT_MIN_INTERVAL_MS = 10 * 60 * 1000;
 export const BACKFILL_MAX_ROWS = 50_000;
+/** One interaction per viewer (IP) this often, and one notification per person this often. */
+export const INTERACT_MIN_INTERVAL_MS = 2_000;
+export const POKE_PER_PERSON_MS = 10_000;
+
+const POKE_TEXT = {
+  wave: "waved at you 👋",
+  coffee: "wants to grab a coffee ☕",
+  cheer: "cheers you on 🎉",
+} as const;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
 /** SERVER_VERSION, else a fixed LATEST_CONNECTOR_VERSION, else "dev". */
@@ -55,11 +74,6 @@ export function serverVersion(env: AppEnv): string {
 
 export function connectorPassword(env: AppEnv): string | undefined {
   return env.CONNECTOR_PASSWORD || (env.DEV_MODE === "1" ? "devpass" : undefined);
-}
-
-/** Optional VIEWER_KEY gate for /ws/viewer (query param `key`). */
-export function viewerAllowed(url: URL, env: AppEnv): boolean {
-  return !env.VIEWER_KEY || url.searchParams.get("key") === env.VIEWER_KEY;
 }
 
 export function bearerOk(req: Request, env: AppEnv): boolean {
@@ -82,6 +96,8 @@ export class OfficeApp {
   readonly genui: AvatarService;
   readonly latest: LatestVersion;
   readonly timezone: string;
+  private lastInteract = new Map<string, number>();
+  private lastPoke = new Map<string, number>();
 
   constructor(
     private env: AppEnv,
@@ -199,6 +215,10 @@ export class OfficeApp {
 
     if (path === "/api/state" && method === "GET") return json(this.hub.snapshot(this.now()));
 
+    if (path === "/api/me" && method === "GET") return json({ ok: true });
+
+    if (path === "/api/interact" && method === "POST") return this.interact(req);
+
     if (path === "/api/stats" && method === "GET") {
       const days = Number(url.searchParams.get("days") ?? 0);
       const since = days > 0 ? this.now() - days * 86_400_000 : 0;
@@ -288,6 +308,55 @@ export class OfficeApp {
 
     if (path.startsWith("/api/")) return json({ error: "not found" }, { status: 404 });
     return null;
+  }
+
+  private async interact(req: Request): Promise<Response> {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const parsed = InteractRequest.safeParse(body);
+    if (!parsed.success)
+      return json({ error: z.prettifyError(parsed.error).slice(0, 500) }, { status: 400 });
+    const r = parsed.data;
+    const now = this.now();
+
+    const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+    if (now - (this.lastInteract.get(who) ?? 0) < INTERACT_MIN_INTERVAL_MS)
+      return json({ error: "slow down" }, { status: 429 });
+    this.lastInteract.set(who, now);
+    if (this.lastInteract.size > 500) this.lastInteract.clear();
+
+    if (r.personId && !this.hub.state().people.some((p) => p.personId === r.personId))
+      return json({ error: "not in the office" }, { status: 404 });
+
+    let delivered = 0;
+    if (r.personId && r.kind !== "paper" && r.kind !== "pet") {
+      if (now - (this.lastPoke.get(r.personId) ?? 0) < POKE_PER_PERSON_MS)
+        return json({ error: "they were just poked, give them a moment" }, { status: 429 });
+      this.lastPoke.set(r.personId, now);
+      const from = r.from || undefined;
+      const text = r.kind === "message" ? r.text! : `${from ?? "Someone"} ${POKE_TEXT[r.kind]}`;
+      const poke = JSON.stringify(
+        envelope("connector.poked", { kind: r.kind, text, ...(from ? { from } : {}) }),
+      );
+      for (const socketId of this.hub.liveSocketsOf(r.personId, now)) {
+        if (this.transport.sendToConnector?.(socketId, poke)) delivered++;
+      }
+    }
+
+    const event: MessageOf<"interaction.happened"> = envelope("interaction.happened", {
+      kind: r.kind,
+      ...(r.personId ? { personId: r.personId } : {}),
+      ...(r.from ? { from: r.from } : {}),
+      ...(r.text && r.kind === "message" ? { text: r.text } : {}),
+      ...(r.personId && r.kind !== "paper" ? { delivered } : {}),
+    });
+    this.transport.broadcast(JSON.stringify(event));
+    this.hub.log(`interaction ${r.kind} ${r.personId ?? "-"} delivered=${delivered}`);
+    return json({ ok: true, delivered } satisfies InteractResponse);
   }
 
   private async uploadSnapshot(req: Request): Promise<Response> {

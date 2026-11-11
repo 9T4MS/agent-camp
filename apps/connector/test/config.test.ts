@@ -66,7 +66,12 @@ describe("config.toml", () => {
     const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
     try {
       const path = join(dir, "config.toml");
-      saveConfig(path, { share_project_names: true, client_id: "c_abc", name: "Zoe" });
+      saveConfig(path, {
+        share_project_names: true,
+        notifications: true,
+        client_id: "c_abc",
+        name: "Zoe",
+      });
       const text = readFileSync(path, "utf8");
       expect(text).toContain('name = "Zoe"');
       expect(text).toContain("share_project_names = true");

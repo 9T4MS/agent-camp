@@ -4,9 +4,32 @@
  *   GET  /api/snapshots        -> SnapshotList
  *   GET  /api/people/:personId -> PersonDayResponse
  *   POST /api/history/backfill <- HistoryRow[]   (Bearer CONNECTOR_PASSWORD)
+ *   POST /api/interact         <- InteractRequest -> InteractResponse
  */
 import { z } from "zod";
-import { Activity, AgentKind } from "./messages.ts";
+import {
+  Activity,
+  AgentKind,
+  InteractionKind,
+  InteractionText,
+  PersonId,
+  ViewerName,
+} from "./messages.ts";
+
+/** A viewer pokes a person, throws a paper ball or pets the cat. */
+export const InteractRequest = z
+  .object({
+    kind: InteractionKind,
+    personId: PersonId.optional(),
+    from: ViewerName.optional(),
+    text: InteractionText.optional(),
+  })
+  .refine((r) => r.kind === "pet" || !!r.personId, { message: "personId required" })
+  .refine((r) => r.kind !== "message" || !!r.text, { message: "text required" });
+export type InteractRequest = z.infer<typeof InteractRequest>;
+
+export const InteractResponse = z.object({ ok: z.boolean(), delivered: z.number() });
+export type InteractResponse = z.infer<typeof InteractResponse>;
 
 /** One stored history row (one per viewer event, except activity changes). No content. */
 export const HistoryRow = z.object({

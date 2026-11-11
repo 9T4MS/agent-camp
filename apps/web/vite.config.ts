@@ -13,6 +13,7 @@ export default defineConfig({
       "/api": { target: SERVER, changeOrigin: true },
       "/healthz": { target: SERVER, changeOrigin: true },
       "/install.sh": { target: SERVER, changeOrigin: true },
+      "/login": { target: SERVER, changeOrigin: true },
     },
   },
   preview: { port: 4173 },

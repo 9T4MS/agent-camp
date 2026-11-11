@@ -188,3 +188,88 @@ describe("OfficeApp", () => {
     expect(await app.handleHttp(req("/stats"))).toBeNull();
   });
 });
+
+describe("OfficeApp interactions", () => {
+  function withPerson() {
+    let now = 1_000_000;
+    const sent: string[] = [];
+    const toConnector: [string, string][] = [];
+    const app = new OfficeApp(
+      { CONNECTOR_PASSWORD: "pw" },
+      new MemoryStore(),
+      {
+        broadcast: (d) => sent.push(d),
+        scheduleAlarm: () => {},
+        sendToConnector: (id, d) => {
+          toConnector.push([id, d]);
+          return true;
+        },
+      },
+      { now: () => now, log: () => {} },
+    );
+    app.connectorMessage(
+      "s1",
+      JSON.stringify(
+        envelope("connector.hello", {
+          name: "Anna",
+          password: "pw",
+          clientId: "c",
+          connectorVersion: "1.0.0",
+        }),
+      ),
+    );
+    sent.length = 0;
+    const post = (body: unknown, ip = "1.1.1.1") =>
+      app.handleHttp(
+        req("/api/interact", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "cf-connecting-ip": ip },
+        }),
+      );
+    return { app, sent, toConnector, post, advance: (ms: number) => (now += ms) };
+  }
+
+  test("a wave notifies the person's connector and is broadcast to viewers", async () => {
+    const { sent, toConnector, post } = withPerson();
+    const res = await post({ kind: "wave", personId: "anna", from: "Martin" });
+    expect(await res!.json()).toEqual({ ok: true, delivered: 1 });
+    expect(toConnector).toHaveLength(1);
+    const poke = JSON.parse(toConnector[0]![1]);
+    expect(poke.type).toBe("connector.poked");
+    expect(poke.data).toEqual({ kind: "wave", from: "Martin", text: "Martin waved at you 👋" });
+    const ev = JSON.parse(sent.at(-1)!);
+    expect(ev.type).toBe("interaction.happened");
+    expect(ev.data).toEqual({ kind: "wave", personId: "anna", from: "Martin", delivered: 1 });
+  });
+
+  test("paper balls and the cat never reach a Mac", async () => {
+    const { sent, toConnector, post, advance } = withPerson();
+    expect((await post({ kind: "paper", personId: "anna" }))!.status).toBe(200);
+    advance(5_000);
+    expect((await post({ kind: "pet" }))!.status).toBe(200);
+    expect(toConnector).toHaveLength(0);
+    expect(sent.map((s) => JSON.parse(s).data.kind)).toEqual(["paper", "pet"]);
+  });
+
+  test("rate limits per viewer and per poked person", async () => {
+    const { post, advance, toConnector } = withPerson();
+    expect((await post({ kind: "cheer", personId: "anna" }))!.status).toBe(200);
+    expect((await post({ kind: "pet" }))!.status).toBe(429);
+    expect((await post({ kind: "wave", personId: "anna" }, "2.2.2.2"))!.status).toBe(429);
+    advance(10_000);
+    expect((await post({ kind: "wave", personId: "anna" }, "2.2.2.2"))!.status).toBe(200);
+    expect(toConnector).toHaveLength(2);
+  });
+
+  test("bad requests", async () => {
+    const { post, advance } = withPerson();
+    expect((await post({ kind: "wave" }))!.status).toBe(400);
+    expect((await post({ kind: "message", personId: "anna" }))!.status).toBe(400);
+    expect((await post({ kind: "wave", personId: "anna", text: "x".repeat(81) }))!.status).toBe(
+      400,
+    );
+    advance(5_000);
+    expect((await post({ kind: "wave", personId: "bob" }))!.status).toBe(404);
+  });
+});

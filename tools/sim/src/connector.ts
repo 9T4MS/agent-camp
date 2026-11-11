@@ -77,7 +77,7 @@ export class FakeConnector {
           this.sendSnapshot();
           this.startHeartbeat();
           done();
-        } else {
+        } else if (msg.type === "connector.rejected") {
           done(new Error(`${this.tag} rejected: ${msg.data.reason} ${msg.data.message ?? ""}`));
         }
       };

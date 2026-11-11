@@ -19,6 +19,18 @@ export type ViewerConnection = {
 
 const PING_MS = 25_000;
 
+/** If the session cookie is gone (expired, password changed), go to the login page. */
+export async function loginIfLoggedOut(): Promise<void> {
+  try {
+    const r = await fetch("/api/me", { headers: { accept: "application/json" } });
+    if (r.status === 401) {
+      location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+    }
+  } catch {
+    // offline: keep reconnecting
+  }
+}
+
 export function connectViewer(opts: {
   key?: string | null;
   onMessage: (msg: ServerToViewer) => void;
@@ -79,6 +91,8 @@ export function connectViewer(opts: {
 
   const scheduleRetry = () => {
     if (closed) return;
+    // browsers hide the 401 of a refused upgrade; ask over HTTP after a couple of failures
+    if (attempt === 2 && !opts.url) void loginIfLoggedOut();
     setStatus("reconnecting");
     clearTimeout(retryTimer);
     retryTimer = setTimeout(open, backoffDelay(attempt++));

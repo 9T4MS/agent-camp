@@ -4,7 +4,7 @@
  * Channels (one discriminated union each, so `switch (msg.type)` is exhaustive):
  *   ConnectorToServer  connector -> server on /ws/connector
  *   ServerToConnector  server -> connector on /ws/connector
- *   ServerToViewer     server -> viewer    on /ws/viewer (viewers never send anything)
+ *   ServerToViewer     server -> viewer    on /ws/viewer (viewers act via POST /api/interact)
  *
  * Parsers never throw; they return { ok: true, msg } | { ok: false, error }.
  */
@@ -67,6 +67,8 @@ export const SessionView = z.object({
   startedAt: EpochMs,
   /** label of the machine the session runs on (connector `machine_name`); optional */
   machine: MachineName.optional(),
+  /** the session's connector missed its heartbeat (laptop asleep, offline, crashed) */
+  offline: z.boolean().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -138,9 +140,20 @@ export const ConnectorRejected = msg(
   z.object({ reason: RejectReason, message: z.string().max(500).optional() }),
 );
 
+/** A viewer waved at / messaged this connector's person; show it as a desktop notification. */
+export const ConnectorPoked = msg(
+  "connector.poked",
+  z.object({
+    kind: z.enum(["wave", "coffee", "cheer", "message"]),
+    from: z.string().max(40).optional(),
+    text: z.string().max(200),
+  }),
+);
+
 export const ServerToConnector = z.discriminatedUnion("type", [
   ConnectorWelcomed,
   ConnectorRejected,
+  ConnectorPoked,
 ]);
 export type ServerToConnector = z.infer<typeof ServerToConnector>;
 
@@ -182,6 +195,35 @@ export const AvatarUpdated = msg(
   "avatar.updated",
   z.object({ personId: PersonId, avatar: AvatarSpec }),
 );
+export const SessionConnectionChanged = msg(
+  "session.connectionChanged",
+  z.object({ personId: PersonId, sessionId: SessionId, offline: z.boolean() }),
+);
+
+/**
+ * wave/coffee/cheer/message  poke a person (also a notification on their Macs)
+ * paper                      throw a paper ball at a person
+ * pet                        pet the office cat
+ */
+export const INTERACTIONS = ["wave", "coffee", "cheer", "message", "paper", "pet"] as const;
+export const InteractionKind = z.enum(INTERACTIONS);
+export type InteractionKind = z.infer<typeof InteractionKind>;
+/** Short name a viewer signs pokes with; viewers are otherwise anonymous. */
+export const ViewerName = z.string().trim().max(40);
+export const InteractionText = z.string().trim().max(80);
+
+/** Something a viewer did, replayed for every viewer. Not part of the office state. */
+export const InteractionHappened = msg(
+  "interaction.happened",
+  z.object({
+    kind: InteractionKind,
+    personId: PersonId.optional(),
+    from: ViewerName.optional(),
+    text: InteractionText.optional(),
+    /** how many of the person's Macs got a notification */
+    delivered: z.number().int().nonnegative().optional(),
+  }),
+);
 
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,
@@ -193,6 +235,8 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   SubagentSpawned,
   SubagentFinished,
   AvatarUpdated,
+  SessionConnectionChanged,
+  InteractionHappened,
 ]);
 export type ServerToViewer = z.infer<typeof ServerToViewer>;
 
@@ -201,8 +245,11 @@ export type AnyMessage = ConnectorToServer | ServerToConnector | ServerToViewer;
 export type MessageType = AnyMessage["type"];
 export type MessageOf<T extends MessageType> = Extract<AnyMessage, { type: T }>;
 export type MessageData<T extends MessageType> = MessageOf<T>["data"];
-/** Viewer events excluding the initial snapshot (what the server's diff() emits). */
-export type ViewerEvent = Exclude<ServerToViewer, { type: "office.snapshot" }>;
+/** What the server's diff() emits: everything but the initial snapshot and interactions. */
+export type ViewerEvent = Exclude<
+  ServerToViewer,
+  { type: "office.snapshot" | "interaction.happened" }
+>;
 
 export const CONNECTOR_TO_SERVER_TYPES = ConnectorToServer.options.map((o) => o.shape.type.value);
 export const SERVER_TO_CONNECTOR_TYPES = ServerToConnector.options.map((o) => o.shape.type.value);

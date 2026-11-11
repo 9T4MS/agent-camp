@@ -8,7 +8,7 @@
  *   3. person.joined        (person carries `sessions: []`; sessions follow as session.started)
  *   4. avatar.updated       (people present in both states whose look changed)
  *   5. session.started
- *   6. session.activityChanged
+ *   6. session.activityChanged, session.connectionChanged
  *   7. subagent.spawned / subagent.finished (one event per unit, with the running count)
  */
 import {
@@ -82,6 +82,15 @@ export function diff(prev: OfficeState, next: OfficeState, ts: number = Date.now
           ),
         );
       }
+      if (!!old.offline !== !!s.offline) {
+        activity.push(
+          envelope(
+            "session.connectionChanged",
+            { personId: n.personId, sessionId: s.sessionId, offline: !!s.offline },
+            { ts },
+          ),
+        );
+      }
       const base = { personId: n.personId, sessionId: s.sessionId };
       for (let c = old.subagents + 1; c <= s.subagents; c++) {
         subagents.push(envelope("subagent.spawned", { ...base, count: c }, { ts }));
@@ -143,6 +152,11 @@ export function applyEvents(state: OfficeState, events: readonly ViewerEvent[]):
       case "subagent.spawned":
       case "subagent.finished":
         withSession(e.data.personId, e.data.sessionId, (s) => ({ ...s, subagents: e.data.count }));
+        break;
+      case "session.connectionChanged":
+        withSession(e.data.personId, e.data.sessionId, ({ offline: _o, ...s }) =>
+          e.data.offline ? { ...s, offline: true } : s,
+        );
         break;
     }
   }

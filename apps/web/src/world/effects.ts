@@ -3,7 +3,7 @@
  * Pooled sprites for particles, no per-frame allocation.
  */
 import { type Container, Sprite, type Texture } from "pixi.js";
-import { sparkleTextures } from "../art/fun.ts";
+import { paperBallTexture, sparkleTextures } from "../art/fun.ts";
 import { CONFETTI_COLORS, pixelTexture, puffTextures } from "../art/fx.ts";
 import { C, hexNum } from "../art/palette.ts";
 
@@ -29,6 +29,14 @@ type Floater = {
   sway: number;
 };
 type Later = { t: number; fn: () => void };
+type Throw = {
+  sprite: Sprite;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  t: number;
+  dur: number;
+  onHit: () => void;
+};
 
 export class Effects {
   private puffs: Puff[] = [];
@@ -37,6 +45,7 @@ export class Effects {
   private flips: Flip[] = [];
   private floaters: Floater[] = [];
   private later: Later[] = [];
+  private throws: Throw[] = [];
 
   constructor(private readonly layer: Container) {}
 
@@ -160,11 +169,56 @@ export class Effects {
     this.floaters.push({ sprite: s, x, y, t: 0, life, rise, sway });
   }
 
+  /** A crumpled paper ball lobbed in an arc; it bounces off the target and lands nearby. */
+  throwBall(fx: number, fy: number, tx: number, ty: number, onHit: () => void = () => {}) {
+    const s = new Sprite(paperBallTexture());
+    s.anchor.set(0.5);
+    s.position.set(Math.round(fx), Math.round(fy));
+    this.layer.addChild(s);
+    const dur = Math.min(1.1, 0.45 + Math.hypot(tx - fx, ty - fy) / 260);
+    this.throws.push({ sprite: s, from: { x: fx, y: fy }, to: { x: tx, y: ty }, t: 0, dur, onHit });
+  }
+
   after(seconds: number, fn: () => void) {
     this.later.push({ t: seconds, fn });
   }
 
   update(dt: number) {
+    for (let i = this.throws.length - 1; i >= 0; i--) {
+      const b = this.throws[i]!;
+      b.t += dt;
+      const k = Math.min(1, b.t / b.dur);
+      const arc = Math.sin(k * Math.PI) * Math.min(60, 20 + Math.abs(b.to.x - b.from.x) * 0.25);
+      b.sprite.position.set(
+        Math.round(b.from.x + (b.to.x - b.from.x) * k),
+        Math.round(b.from.y + (b.to.y - b.from.y) * k - arc),
+      );
+      b.sprite.rotation = Math.round(b.t * 12) * (Math.PI / 2);
+      if (k < 1) continue;
+      this.throws.splice(i, 1);
+      b.onHit();
+      // bounce off the head and roll to a stop on the floor, then fade
+      const bounce: Throw = {
+        sprite: b.sprite,
+        from: { ...b.to },
+        to: { x: b.to.x + (b.to.x >= b.from.x ? 10 : -10), y: b.to.y + 18 },
+        t: 0,
+        dur: 0.35,
+        onHit: () =>
+          this.floater(
+            b.sprite.texture,
+            b.to.x + (b.to.x >= b.from.x ? 10 : -10),
+            b.to.y + 22,
+            3,
+            0,
+          ),
+      };
+      if (b.dur > 0.36) this.throws.push(bounce);
+      else {
+        this.layer.removeChild(b.sprite);
+        b.sprite.destroy();
+      }
+    }
     for (let i = this.later.length - 1; i >= 0; i--) {
       const l = this.later[i]!;
       l.t -= dt;

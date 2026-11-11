@@ -553,3 +553,64 @@ body.kiosk .hud-reconnect {
     display: none;
   }
 }
+
+/* poke box (person panel + agent card) */
+.hud-panel .poke {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px dashed var(--dusk);
+  display: grid;
+  gap: 8px;
+}
+.hud-panel .poke-title {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--grey);
+}
+.hud-panel .poke-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.hud-panel .poke-btns .pixel-btn {
+  font-size: 12px;
+  padding: 5px 6px;
+}
+.hud-panel .poke-msg {
+  display: flex;
+  gap: 6px;
+}
+.hud-panel .poke input {
+  min-width: 0;
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 7px;
+  background: var(--cream);
+  color: var(--night);
+  border: 2px solid var(--night);
+}
+.hud-panel .poke-from {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--grey);
+}
+.hud-panel .poke-status {
+  min-height: 1em;
+  font-size: 12px;
+  color: var(--grey);
+}
+.hud-panel .poke-status.ok {
+  color: var(--leaf);
+}
+.hud-panel .poke-status.err {
+  color: var(--pink);
+}
+.hud-panel .now.offline .act-name {
+  color: var(--grey);
+}
+.hud-panel .now.offline .act-since {
+  white-space: normal;
+}

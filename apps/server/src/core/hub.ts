@@ -10,6 +10,7 @@ import {
   CLOSE_BAD_MESSAGE,
   CLOSE_BAD_PASSWORD,
   CLOSE_TOO_OLD,
+  CONNECTOR_STALE_MS,
   CONNECTOR_TIMEOUT_MS,
   compareVersions,
   envelope,
@@ -118,6 +119,8 @@ export class Hub {
   /** socketId -> binding (only sockets that said hello) */
   private sockets = new Map<string, Binding>();
   private current: OfficeState = EMPTY_STATE;
+  /** `now` of the last derive(); offline flags in `current` are as of then */
+  private derivedAt = 0;
   private persistedSig = "";
   private names: Record<string, string> = {};
   /** sessionId -> recent activity changes (memory only; the agent card's timeline) */
@@ -159,7 +162,7 @@ export class Hub {
       }
     }
     for (const s of sockets) if (s.binding) this.sockets.set(s.socketId, s.binding);
-    this.current = this.derive();
+    this.current = this.derive(now);
     // the activity log is memory only: after a restart it starts now
     for (const p of this.current.people)
       for (const x of p.sessions) this.recent.set(x.sessionId, [{ activity: x.activity, at: now }]);
@@ -195,7 +198,7 @@ export class Hub {
     return { events: this.commit(now) };
   }
 
-  /** Expire silent connectors and people past their grace period. */
+  /** Mark silent connectors offline, expire them and people past their grace period. */
   tick(now: number): ViewerEvent[] {
     return this.commit(now);
   }
@@ -203,8 +206,10 @@ export class Hub {
   /** Earliest time `tick` would change something, or null when nothing is pending. */
   nextDeadline(): number | null {
     let min = Number.POSITIVE_INFINITY;
-    for (const c of this.connectors.values())
-      min = Math.min(min, c.lastSeen + CONNECTOR_TIMEOUT_MS + 1);
+    for (const c of this.connectors.values()) {
+      const at = this.isStale(c, this.derivedAt) ? CONNECTOR_TIMEOUT_MS : CONNECTOR_STALE_MS;
+      min = Math.min(min, c.lastSeen + at + 1);
+    }
     for (const p of this.people.values()) {
       if (p.goneSince !== null) min = Math.min(min, p.goneSince + PERSON_GRACE_MS);
     }
@@ -267,6 +272,19 @@ export class Hub {
 
   bindingOf(socketId: string): Binding | undefined {
     return this.sockets.get(socketId);
+  }
+
+  /** Open sockets of a person's connectors that are still heartbeating. */
+  liveSocketsOf(personId: string, now: number): string[] {
+    const out: string[] = [];
+    for (const c of this.connectors.values()) {
+      if (c.personId === personId && c.socketId && !this.isStale(c, now)) out.push(c.socketId);
+    }
+    return out;
+  }
+
+  private isStale(c: ConnectorRec, now: number): boolean {
+    return now - c.lastSeen > CONNECTOR_STALE_MS;
   }
 
   // ---- message handlers -------------------------------------------------------------------
@@ -444,7 +462,7 @@ export class Hub {
     }
 
     const prev = this.current;
-    const next = this.derive();
+    const next = this.derive(now);
     const events = diff(prev, next, now);
     this.current = next;
     this.trackActivity(events, now);
@@ -480,7 +498,8 @@ export class Hub {
     }
   }
 
-  private derive(): OfficeState {
+  private derive(now: number): OfficeState {
+    this.derivedAt = now;
     const people: PersonView[] = [];
     const sorted = [...this.people.values()].sort(
       (a, b) => a.joinedAt - b.joinedAt || a.personId.localeCompare(b.personId),
@@ -489,6 +508,7 @@ export class Hub {
       const sessions: SessionView[] = [];
       for (const c of this.connectors.values()) {
         if (c.personId !== p.personId) continue;
+        const offline = this.isStale(c, now);
         for (const s of c.sessions) {
           sessions.push({
             sessionId: sessionIdOf(c.clientId, s.sessionKey),
@@ -498,6 +518,7 @@ export class Hub {
             subagents: s.subagents,
             startedAt: s.startedAt,
             ...(c.machine ? { machine: c.machine } : {}),
+            ...(offline ? { offline } : {}),
           });
         }
       }
