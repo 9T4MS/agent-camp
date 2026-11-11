@@ -17,6 +17,7 @@ import {
   skinToneHex,
 } from "@agent-office/protocol";
 import { Rectangle, Texture } from "pixi.js";
+import { accentHex, costumeAccessory, costumeHead, costumeTorso } from "./costumes.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
 
@@ -38,6 +39,8 @@ export type Look = {
   outfit: AvatarSpec["outfit"];
   leftHand: AvatarSpec["leftHand"];
   rightHand: AvatarSpec["rightHand"];
+  wrist: AvatarSpec["wrist"];
+  accentColor: AvatarSpec["accentColor"];
   hat: boolean;
   mug: boolean;
 };
@@ -47,6 +50,12 @@ const OUTFIT_RAMPS: Partial<Record<AvatarSpec["outfit"], Ramp>> = {
   flannel: { main: C.grey, shade: C.slate, light: C.silver },
   "flannel-red": { main: C.red, shade: C.wine, light: C.pink },
   tee: { main: C.dusk, shade: C.ink, light: C.slate },
+  cat: { main: C.slate, shade: C.ink, light: C.silver },
+  robot: { main: C.silver, shade: C.slate, light: C.white },
+  astronaut: { main: C.white, shade: C.silver, light: C.cyan },
+  pirate: { main: C.wine, shade: C.night, light: C.red },
+  vampire: { main: C.night, shade: C.wine, light: C.red },
+  disco: { main: C.berry, shade: C.plum, light: C.pink },
 };
 /** Plaid lines over a flannel: dark bands across, light threads down. */
 const PLAID: Partial<Record<AvatarSpec["outfit"], { dark: string; light: string }>> = {
@@ -87,7 +96,12 @@ export function lookFor(
     outfit,
     leftHand,
     rightHand,
-    hat: !!variation?.hat && !CAPS.includes(avatar.accessory),
+    wrist: avatar.wrist ?? "none",
+    accentColor: avatar.accentColor ?? "cyan",
+    hat:
+      !!variation?.hat &&
+      !CAPS.includes(avatar.accessory) &&
+      ["none", "headphones", "bow", "earring"].includes(avatar.accessory),
     // hands already full: no session mug
     mug: !!variation?.mug && leftHand === "none" && rightHand === "none",
   };
@@ -103,6 +117,8 @@ export function lookKey(l: Look): string {
     l.outfit,
     l.leftHand,
     l.rightHand,
+    l.wrist,
+    l.accentColor,
     l.hairStyle,
     l.glasses,
     l.facialHair,
@@ -511,7 +527,7 @@ const GLASSES_L: Record<Exclude<AvatarSpec["glasses"], "none">, Record<"down" | 
   },
 };
 
-const ACC: Record<Exclude<AvatarSpec["accessory"], "none">, Record<View, Layer>> = {
+const ACC: Partial<Record<AvatarSpec["accessory"], Record<View, Layer>>> = {
   headphones: {
     down: [
       "",
@@ -687,6 +703,7 @@ function drawHead(pc: PixelCanvas, look: Look, view: View, dy: number) {
     ...hairC,
     L: look.hairStyle === "bald" ? s.light : hairC.L,
   });
+  costumeHead(pc, look, view, dy);
   if (view !== "up") {
     const fv = view === "left" ? "left" : "down";
     if (look.facialHair !== "none") {
@@ -700,24 +717,27 @@ function drawHead(pc: PixelCanvas, look: Look, view: View, dy: number) {
     layer(pc, HAT[view], dy, { T: C.amber, t: C.red, Y: C.sand });
   }
   if (look.accessory !== "none" && !(look.hat && look.accessory === "headphones")) {
-    layer(pc, ACC[look.accessory][view], dy, {
-      K: C.ink,
-      P: C.berry,
-      Q: C.pink,
-      B: C.plum,
-      b: C.berry,
-      p: C.cream,
-      A: C.forest,
-      a: C.moss,
-      N: C.pine,
-      R: C.pink,
-      r: C.berry,
-      E: C.amber,
-      M: C.cyan,
-      m: C.white,
-      n: C.sky,
-      W: C.white,
-    });
+    const accessory = ACC[look.accessory];
+    if (accessory)
+      layer(pc, accessory[view], dy, {
+        K: C.ink,
+        P: C.berry,
+        Q: C.pink,
+        B: C.plum,
+        b: C.berry,
+        p: C.cream,
+        A: C.forest,
+        a: C.moss,
+        N: C.pine,
+        R: C.pink,
+        r: C.berry,
+        E: C.amber,
+        M: C.cyan,
+        m: C.white,
+        n: C.sky,
+        W: C.white,
+      });
+    costumeAccessory(pc, look, view, dy);
   }
 }
 
@@ -765,6 +785,8 @@ function drawTorso(pc: PixelCanvas, look: Look, view: View, top: number, rows: n
     if (o === "tee") pc.set(5, top + 1, look.badge.main);
     if (o === "hoodie") pc.rect(9, top, 2, 2, j.shade); // hood on the back
     pc.hline(5, top + rows - 1, 6, j.shade);
+    costumeTorso(pc, look, view, top, rows);
+    if (!AGENT_COLORED_OUTFITS.includes(o)) pc.set(5, top + 1, look.badge.main);
     return;
   }
   pc.rect(4, top, 8, rows, j.main);
@@ -773,7 +795,10 @@ function drawTorso(pc: PixelCanvas, look: Look, view: View, top: number, rows: n
   pc.set(4, top, j.light);
   pc.set(5, top, j.light);
   pc.hline(4, top + rows - 1, 8, j.shade);
+  costumeTorso(pc, look, view, top, rows);
   if (view === "down") {
+    if (!["jacket", "hoodie", "flannel", "flannel-red", "tee"].includes(o))
+      badge(pc, look, 9, top + 2);
     if (o === "jacket") {
       pc.rect(7, top, 2, Math.min(4, rows - 1), C.white);
       pc.set(6, top, j.light);
@@ -818,6 +843,20 @@ function sleeve(pc: PixelCanvas, look: Look, x: number, top: number, len: number
   sleevePlaid(pc, look, x, top, len);
 }
 
+function drawWrist(pc: PixelCanvas, look: Look, x: number, y: number) {
+  if (look.wrist === "none") return;
+  const color =
+    look.wrist === "neon-pink"
+      ? C.pink
+      : look.wrist === "neon-lime"
+        ? C.neon
+        : look.wrist === "rainbow"
+          ? C.lemon
+          : C.cyan;
+  pc.hline(x - 1, y, 3, color);
+  if (look.wrist === "rainbow") pc.set(x + 1, y, C.pink);
+}
+
 function drawArmsFront(pc: PixelCanvas, look: Look, arms: Arms, top: number, phase: number) {
   const j = look.jacket;
   const s = look.skin;
@@ -826,6 +865,7 @@ function drawArmsFront(pc: PixelCanvas, look: Look, arms: Arms, top: number, pha
   // left arm (viewer's left) always down
   sleeve(pc, look, 3, top, lenL, j.main);
   pc.set(3, top + lenL, s.main);
+  drawWrist(pc, look, 3, top + lenL - 1);
   if (arms === "raise0" || arms === "raise1" || arms === "wave0" || arms === "wave1") {
     const alt = arms === "raise1" || arms === "wave1";
     pc.vline(12, top, 2, j.shade);
@@ -837,10 +877,12 @@ function drawArmsFront(pc: PixelCanvas, look: Look, arms: Arms, top: number, pha
       pc.set(14, top - 6, j.shade);
       pc.rect(14, top - 8, 2, 2, s.main);
     }
+    drawWrist(pc, look, 13, top - (alt ? 5 : 7));
     return;
   }
   sleeve(pc, look, 12, top, lenR, j.shade);
   pc.set(12, top + lenR, s.main);
+  drawWrist(pc, look, 12, top + lenR - 1);
 }
 
 function drawArmsBack(pc: PixelCanvas, look: Look, arms: Arms, top: number, phase: number) {
@@ -857,6 +899,7 @@ function drawArmsBack(pc: PixelCanvas, look: Look, arms: Arms, top: number, phas
   }
   sleeve(pc, look, 3, top, lenL, j.shade);
   if (arms === "down") pc.set(3, top + lenL, s.main);
+  drawWrist(pc, look, 3, top + lenL - 1);
   if (arms === "book0" || arms === "book1") {
     pc.vline(12, top, 2, j.shade);
     pc.rect(11, top - 1, 2, 1, s.main);
@@ -869,10 +912,12 @@ function drawArmsBack(pc: PixelCanvas, look: Look, arms: Arms, top: number, phas
       pc.set(14, by - 2, C.white);
       pc.set(14, by - 3, C.white);
     }
+    drawWrist(pc, look, 12, top - 1);
     return;
   }
   sleeve(pc, look, 12, top, lenR, j.shade);
   if (arms === "down") pc.set(12, top + lenR, s.main);
+  drawWrist(pc, look, 12, top + lenR - 1);
 }
 
 function drawLegs(pc: PixelCanvas, view: View, phase: number) {
@@ -937,10 +982,58 @@ function drawHeld(
   dir: -1 | 1,
   tick: number,
   after: After,
+  color: string = C.cyan,
 ) {
   const x = dir < 0 ? hx - 2 : hx + 1; // left column of a 2-wide item
   switch (item) {
     case "none":
+      return;
+    case "lightsaber":
+      pc.rect(x, hy - 10, 2, 9, color);
+      pc.vline(x, hy - 9, 8, C.white);
+      pc.rect(x, hy - 1, 2, 3, C.silver);
+      return;
+    case "confetti":
+      pc.rect(x, hy - 3, 2, 4, C.berry);
+      pc.hline(x, hy - 3, 2, color);
+      pc.set(x, hy - 1, C.lemon);
+      return;
+    case "bubble-wand":
+      pc.vline(x, hy - 3, 5, C.pink);
+      pc.rect(x - 1, hy - 6, 3, 3, C.cyan);
+      pc.set(x, hy - 5, C.navy);
+      return;
+    case "disco-ball":
+      pc.ellipse(x - 1, hy - 6, 4, 5, C.silver);
+      pc.set(x, hy - 5, C.cyan);
+      pc.set(x + 1, hy - 3, C.white);
+      pc.vline(x, hy - 1, 2, C.slate);
+      return;
+    case "magic-wand":
+      pc.vline(x, hy - 4, 5, C.plum);
+      pc.hline(x - 1, hy - 5, 3, C.lemon);
+      pc.vline(x, hy - 6, 3, C.lemon);
+      return;
+    case "balloon":
+      pc.vline(x, hy - 8, 9, C.white);
+      pc.ellipse(x - 1, hy - 13, 4, 6, color);
+      pc.set(x, hy - 12, C.white);
+      return;
+    case "water-pistol":
+      pc.rect(x - 1, hy - 3, 4, 2, C.sky);
+      pc.vline(x, hy - 1, 3, C.orange);
+      pc.rect(x, hy - 5, 2, 2, color);
+      return;
+    case "maracas":
+      pc.vline(x, hy - 2, 4, C.wood);
+      pc.ellipse(x - 1, hy - 6, 3, 4, C.red);
+      pc.hline(x - 1, hy - 4, 3, C.lemon);
+      return;
+    case "umbrella":
+      pc.vline(x, hy - 8, 9, C.silver);
+      pc.hline(x - 1, hy, 2, C.silver);
+      pc.ellipse(Math.max(0, x - 2), hy - 12, 5, 5, color);
+      pc.hline(Math.max(0, x - 2), hy - 8, 5, C.white);
       return;
     case "beer":
       // glass of lager with a foam head
@@ -959,12 +1052,13 @@ function drawHeld(
       pc.set(x, hy - 2, C.sky);
       pc.set(x + 1, hy - 1, C.cyan);
       return;
+    case "cigarette":
     case "joint": {
       // white stick with a glowing tip and a curl of smoke, drawn over the outline
       after.push((p) => {
         const ex = hx + dir * 2;
         p.set(hx + dir, hy, C.white);
-        p.set(ex, hy, C.cream);
+        p.set(ex, hy, item === "cigarette" ? C.wood : C.cream);
         p.set(ex + dir, hy, tick ? C.amber : C.orange);
         const sx = ex + dir;
         p.set(sx, hy - 2 - tick, C.silver, 200);
@@ -988,9 +1082,36 @@ function drawHands(
 ) {
   const lenL = phase === 1 ? 4 : 5;
   const lenR = phase === 3 ? 4 : 5;
-  drawHeld(pc, look.leftHand, 3, top + lenL, -1, tick, after);
+  drawHeld(pc, look.leftHand, 3, top + lenL, -1, tick, after, accentHex(look.accentColor));
   const raised = arms === "raise0" || arms === "raise1" || arms === "wave0" || arms === "wave1";
-  if (!raised) drawHeld(pc, look.rightHand, 12, top + lenR, 1, tick, after);
+  if (!raised)
+    drawHeld(pc, look.rightHand, 12, top + lenR, 1, tick, after, accentHex(look.accentColor));
+}
+
+/** Back-facing hands swap screen sides and follow typing/book poses. */
+function drawBackHands(
+  pc: PixelCanvas,
+  look: Look,
+  arms: Arms,
+  top: number,
+  phase: number,
+  tick: number,
+  after: After,
+) {
+  const lenL = arms === "type0" ? 3 : arms === "type1" || phase === 3 ? 4 : 5;
+  const lenR = arms === "type1" ? 3 : arms === "type0" || phase === 1 ? 4 : 5;
+  const book = arms === "book0" || arms === "book1";
+  drawHeld(pc, look.rightHand, 3, top + lenL, -1, tick, after, accentHex(look.accentColor));
+  drawHeld(
+    pc,
+    look.leftHand,
+    12,
+    book ? top - 1 : top + lenR,
+    1,
+    tick,
+    after,
+    accentHex(look.accentColor),
+  );
 }
 
 function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec, after: After) {
@@ -1006,6 +1127,7 @@ function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec, after: After) {
       drawHands(pc, look, f.arms, 12 + bob, f.phase, tick, after);
     } else if (f.view === "up") {
       drawArmsBack(pc, look, f.arms, 12 + bob, f.phase);
+      drawBackHands(pc, look, f.arms, 12 + bob, f.phase, tick, after);
     } else {
       // side: one arm swinging
       const j = look.jacket;
@@ -1013,9 +1135,10 @@ function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec, after: After) {
       pc.rect(7, 12 + bob, 2, 2, j.shade);
       pc.rect(7 + ax, 14 + bob, 2, 2, look.outfit === "tee" ? look.skin.main : j.shade);
       pc.rect(7 + ax * 2, 16 + bob, 2, 1, look.skin.main);
+      drawWrist(pc, look, 7 + ax * 2, 15 + bob);
       if (look.mug && f.phase === 0) drawMug(pc, 5, 15 + bob);
       const item = look.rightHand !== "none" ? look.rightHand : look.leftHand;
-      drawHeld(pc, item, 7 + ax * 2, 16 + bob, -1, tick, after);
+      drawHeld(pc, item, 7 + ax * 2, 16 + bob, -1, tick, after, accentHex(look.accentColor));
     }
     drawHead(pc, look, f.view, bob);
     if (f.view === "down") drawRaisedHand(pc, look, f.arms, 12 + bob);
@@ -1025,6 +1148,7 @@ function paintFrame(pc: PixelCanvas, look: Look, f: FrameSpec, after: After) {
   if (f.seat === "back") {
     drawTorso(pc, look, "up", 12 + S + bob, 5);
     drawArmsBack(pc, look, f.arms, 12 + S + bob, 0);
+    drawBackHands(pc, look, f.arms, 12 + S + bob, 0, tick, after);
     drawHead(pc, look, "up", S + bob);
     return;
   }

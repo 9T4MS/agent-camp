@@ -10,6 +10,7 @@
  * counted in the store, token counts logged, any error -> seeded fallback.
  */
 import {
+  ACCENT_COLORS,
   ACCESSORIES,
   AVATAR_CATALOG,
   AvatarSpec,
@@ -25,6 +26,8 @@ import {
   MAX_DESK_PROPS,
   OUTFITS,
   SKIN_TONES,
+  VEHICLES,
+  WRISTWEAR,
 } from "@agent-office/protocol";
 import type { AvatarJob } from "./hub.ts";
 import type { Store } from "./store.ts";
@@ -65,6 +68,9 @@ export const AVATAR_JSON_SCHEMA = {
     "outfit",
     "leftHand",
     "rightHand",
+    "wrist",
+    "accentColor",
+    "vehicle",
     "deskProps",
     "deskMess",
   ],
@@ -78,6 +84,9 @@ export const AVATAR_JSON_SCHEMA = {
     outfit: { type: "string", ...enumOf(AVATAR_CATALOG.outfits) },
     leftHand: { type: "string", ...enumOf(AVATAR_CATALOG.heldItems) },
     rightHand: { type: "string", ...enumOf(AVATAR_CATALOG.heldItems) },
+    wrist: { type: "string", ...enumOf(AVATAR_CATALOG.wrists) },
+    accentColor: { type: "string", ...enumOf(AVATAR_CATALOG.accentColors) },
+    vehicle: { type: "string", ...enumOf(AVATAR_CATALOG.vehicles) },
     deskProps: {
       type: "array",
       items: { type: "string", ...enumOf(AVATAR_CATALOG.deskProps) },
@@ -103,6 +112,10 @@ export const SYSTEM_PROMPT = [
   `accessory: ${list(ACCESSORIES)}`,
   `outfit: ${list(OUTFITS)}`,
   `leftHand, rightHand: ${list(HELD_ITEMS)}`,
+  `wrist: ${list(WRISTWEAR)}`,
+  `accentColor: ${list(ACCENT_COLORS)}`,
+  `vehicle: ${list(VEHICLES)}`,
+  "Use no bracelets, cyan accent and no vehicle unless the description requests them.",
   "Use jacket and empty hands unless the description asks for another outfit or held items.",
   `deskProps (0-${MAX_DESK_PROPS}, distinct): ${list(DESK_PROPS)}`,
   "deskMess: 0 (spotless) .. 3 (chaos)",
