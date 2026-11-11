@@ -30,12 +30,12 @@ const MAX_PARTICLES = 360;
 const MAX_MOMENTS = 32;
 
 function floorCanvas(): HTMLCanvasElement {
-  const p = new PixelCanvas(88, 48);
-  p.round(0, 0, 88, 48, C.night);
-  drawText(p, 7, 4, "DANCE FLOOR", C.cyan);
+  const p = new PixelCanvas(80, 44);
+  p.round(0, 0, 80, 44, C.night);
+  drawText(p, 16, 4, "DANCE FLOOR", C.cyan);
   const colors = [C.berry, C.navy, C.plum, C.sky, C.pink];
   for (let y = 0; y < 3; y++)
-    for (let x = 0; x < 8; x++)
+    for (let x = 0; x < 7; x++)
       p.rect(5 + x * 10, 13 + y * 10, 8, 8, colors[(x + y * 2) % colors.length]!);
   return p.toCanvas();
 }
@@ -85,7 +85,8 @@ export class PartyWorld {
       this.moments.push({ event, age: 0, started: false });
     }
     while (this.moments.length > MAX_MOMENTS) this.removeMoment(0);
-    for (const [id, at] of this.seen) if (this.elapsed - at > 60) this.seen.delete(id);
+    for (const [id, at] of this.seen)
+      if (this.elapsed - at > 60 || this.seen.size > 256) this.seen.delete(id);
   }
 
   preview(personId: string, look: PartyLook | null): void {
@@ -155,7 +156,7 @@ export class PartyWorld {
         overlay.sprite.texture = texture;
         overlay.key = key;
       }
-      overlay.sprite.position.set(Math.round(c.x), Math.round(c.y));
+      overlay.sprite.position.copyFrom(c.sprite.position);
       overlay.sprite.zIndex = c.sprite.zIndex + 0.2;
       overlay.sprite.visible = c.sprite.visible && c.mode !== "zapped";
       overlay.sprite.alpha = c.sprite.alpha;
@@ -200,7 +201,7 @@ export class PartyWorld {
       }
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (p.shape === "pixel" || p.shape === "star") p.vy += dt * 30;
+      if (!this.reducedMotion && (p.shape === "pixel" || p.shape === "star")) p.vy += dt * 30;
       this.drawParticle(p);
     }
   }
@@ -296,8 +297,8 @@ export class PartyWorld {
       this.particles.push({
         x: c.x + (event.action === "use" ? 12 : 0),
         y: c.y - 20,
-        vx: Math.cos(angle) * speed,
-        vy: gravity ? Math.sin(angle) * speed - 18 : -12 - (i % 5) * 5,
+        vx: this.reducedMotion ? 0 : Math.cos(angle) * speed,
+        vy: this.reducedMotion ? 0 : gravity ? Math.sin(angle) * speed - 18 : -12 - (i % 5) * 5,
         age: 0,
         life: 1.3 + (i % 5) * 0.23,
         color:
@@ -314,7 +315,7 @@ export class PartyWorld {
     const alpha = Math.max(0, 1 - m.age / 3.5);
     const color = hexNum(PARTY_COLORS[this.look(c.personId).color]);
     if (e.action === "race" && m.vehicle) {
-      const progress = Math.min(1, m.age / 2.7);
+      const progress = this.reducedMotion ? 1 : Math.min(1, m.age / 2.7);
       const roll = e.roll ?? 1;
       m.vehicle.position.set(
         34 * TILE + 15 + progress * (155 + roll * 7),
@@ -329,13 +330,17 @@ export class PartyWorld {
           .moveTo(c.x, c.y - 15)
           .lineTo(target.x, target.y - 15)
           .stroke({ color, width: 1, alpha: alpha * 0.45 });
-        const k = Math.min(1, m.age / 0.8);
+        const k = this.reducedMotion ? 1 : Math.min(1, m.age / 0.8);
         const x = c.x + (target.x - c.x) * k;
         const y = c.y - 15 + (target.y - c.y) * k;
-        this.paint.star(x, y, 5, 6 + Math.sin(m.age * 8) * 2, 2).fill({ color, alpha });
+        this.paint
+          .star(x, y, 5, 6 + (this.reducedMotion ? 0 : Math.sin(m.age * 8) * 2), 2)
+          .fill({ color, alpha });
       }
     } else if (e.action === "use" && e.item === "lightsaber") {
-      const angle = -Math.PI + Math.min(1, m.age / 0.7) * Math.PI;
+      const angle = this.reducedMotion
+        ? -Math.PI / 4
+        : -Math.PI + Math.min(1, m.age / 0.7) * Math.PI;
       const x = c.x + 12;
       const y = c.y - 12;
       this.paint
@@ -382,12 +387,25 @@ export class PartyWorld {
     } else this.paint.rect(x, y, 2, p.life > 2 ? 3 : 1).fill(fill);
   }
 
+  /** Resource counts for local diagnostics (including expired-effect cleanup). */
+  counts(): { overlays: number; textures: number; moments: number; particles: number } {
+    return {
+      overlays: this.overlays.size,
+      textures: this.textures.size,
+      moments: this.moments.length,
+      particles: this.particles.length,
+    };
+  }
+
   destroy(): void {
     for (const overlay of this.overlays.values()) overlay.sprite.destroy();
     this.overlays.clear();
     for (const texture of this.textures.values()) texture.destroy(true);
     this.textures.clear();
     while (this.moments.length) this.removeMoment(0);
+    this.particles = [];
+    this.seen.clear();
+    this.previews.clear();
     this.paint.destroy();
     this.danceFloor?.destroy();
     this.raceStrip?.destroy();

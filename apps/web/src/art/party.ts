@@ -1,5 +1,10 @@
 /** Composable pixel costumes. Coordinates match the 16×24 office paper doll. */
-import { avatarFromSeed, type PartyLook } from "@agent-office/protocol";
+import {
+  type AgentKind,
+  type AvatarSpec,
+  avatarFromSeed,
+  type PartyLook,
+} from "@agent-office/protocol";
 import { characterSheet, lookFor } from "./characters.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
@@ -247,13 +252,17 @@ export function partyCanvas(look: PartyLook): HTMLCanvasElement {
 }
 
 /** Standalone dressing-room preview, using the same assets as the world overlay. */
-export function partyPortrait(look: PartyLook): HTMLCanvasElement {
+export function partyPortrait(
+  look: PartyLook,
+  avatar: AvatarSpec = avatarFromSeed("party-preview"),
+  agent: AgentKind = "codex",
+): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
   canvas.height = 64;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingEnabled = false;
-  const frame = characterSheet(lookFor(avatarFromSeed("party-preview"), "codex", null)).frames[0]!;
+  const frame = characterSheet(lookFor(avatar, agent, null)).frames[0]!;
   const source = frame.source.resource as HTMLCanvasElement;
   ctx.drawImage(source, frame.frame.x, frame.frame.y, 16, 24, 24, 24, 16, 24);
   ctx.drawImage(partyCanvas(look), 0, 0);
