@@ -111,3 +111,20 @@ export function findPath(grid: Grid, from: Point, to: Point): Point[] | null {
   }
   return path.reverse();
 }
+
+/** Pixel path (tile centers, feet height) from one pixel point to another, ending exactly there. */
+export function findPathPx(
+  grid: Grid,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): { x: number; y: number }[] | null {
+  const tiles = findPath(
+    grid,
+    { x: Math.floor(from.x / 16), y: Math.floor((from.y - 4) / 16) },
+    { x: Math.floor(to.x / 16), y: Math.floor((to.y - 4) / 16) },
+  );
+  if (!tiles) return null;
+  const out = tiles.slice(1).map((t) => ({ x: t.x * 16 + 8, y: t.y * 16 + 13 }));
+  out.push({ x: to.x, y: to.y });
+  return out;
+}

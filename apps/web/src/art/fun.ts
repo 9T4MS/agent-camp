@@ -447,8 +447,8 @@ export function tombstoneTexture(label: string): Texture {
   const hit = tombs.get(label);
   if (hit) return hit;
   const tw = Math.max(measureText("RIP"), measureText(label));
-  const w = tw + 6;
-  const h = 2 * FONT_HEIGHT + 8;
+  const w = tw + 4;
+  const h = 2 * FONT_HEIGHT + 6;
   const pc = new PixelCanvas(w + 2, h + 3);
   pc.at(1, 1);
   pc.rect(0, 3, w, h - 3, C.grey);
@@ -457,8 +457,8 @@ export function tombstoneTexture(label: string): Texture {
   pc.hline(2, 0, w - 4, C.silver);
   pc.vline(0, 3, h - 3, C.silver);
   pc.vline(w - 1, 3, h - 3, C.slate);
-  drawText(pc, Math.floor((w - measureText("RIP")) / 2), 3, "RIP", C.night);
-  drawText(pc, Math.floor((w - measureText(label)) / 2), 4 + FONT_HEIGHT + 1, label, C.ink);
+  drawText(pc, Math.floor((w - measureText("RIP")) / 2), 2, "RIP", C.night);
+  drawText(pc, Math.floor((w - measureText(label)) / 2), 3 + FONT_HEIGHT, label, C.ink);
   pc.hline(-1, h - 1, w + 2, C.moss);
   pc.at(0, 0);
   pc.outline();

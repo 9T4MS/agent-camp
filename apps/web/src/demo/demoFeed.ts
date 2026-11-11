@@ -1,5 +1,8 @@
 /**
- * `?demo=busy|one|empty|join` (or `?demo=1` = busy): a local fake event stream, no server.
+ * `?demo=busy|one|empty|join|party` (or `?demo=1` = busy): a local fake event stream, no server.
+ * `party` plays the office-life moments quickly: idle people (coffee, chats, arcade), a long
+ * waiter, a helper burst to 10 (party mode), `/clear` restarts, a long session that ships, new
+ * records of parallel agents.
  * Deterministic for a given `seed`: the same sequence of messages in the same order
  * (timing is wall clock, so only order and content are reproducible).
  * Every message is built with `envelope()` and is schema-valid.
@@ -17,7 +20,7 @@ import {
   sessionIdOf,
 } from "@agent-office/protocol";
 
-export type DemoMode = "busy" | "one" | "empty" | "join";
+export type DemoMode = "busy" | "one" | "empty" | "join" | "party";
 
 export const DEMO_NAMES = [
   "Anna",
@@ -104,6 +107,10 @@ export class DemoFeed {
       this.after(1200, () => this.joinSomeone());
       this.loop(11000, () => this.joinSomeone());
       this.loop(2200, () => this.tickBusy());
+      return;
+    }
+    if (mode === "party") {
+      this.startParty();
       return;
     }
     // busy
@@ -235,6 +242,112 @@ export class DemoFeed {
     this.after(meanMs * (0.5 + this.rand()), next);
   }
 
+  // ---- party ------------------------------------------------------------------------------
+  private startParty() {
+    const H = 3600_000;
+    const plan: [Activity, number, number][][] = [
+      [
+        ["typing", 0, 2.2 * H],
+        ["reading", 0, 0.3 * H],
+      ], // Anna: the long one ships
+      [
+        ["running", 4, 0.7 * H],
+        ["thinking", 0, 0.2 * H],
+        ["typing", 0, 0.1 * H],
+      ], // Martin: helpers -> party, new records
+      [["idle", 0, 1 * H]], // Lea
+      [
+        ["idle", 0, 0.5 * H],
+        ["typing", 1, 0.4 * H],
+      ], // Jonas
+      [["waiting", 0, 0.6 * H]], // Sofia: waits (ping, cat, chef)
+      [["idle", 0, 0.4 * H]], // Max
+      [["idle", 0, 0.9 * H]], // Mia
+      [["typing", 0, 0.8 * H]], // Felix: /clear
+    ];
+    const people = plan.map((sessions) => {
+      const p = this.makePerson(0);
+      for (const [activity, subagents, age] of sessions) {
+        const ses = this.makeSession(this.agent(), activity, subagents);
+        ses.startedAt = this.now() - age;
+        p.sessions.push(ses);
+      }
+      return p;
+    });
+    this.snapshot(people);
+    const [anna, martin, , , , , , felix] = people;
+    // Martin's helpers climb to 10: the game corner parties
+    const ms = martin!.sessions[0]!;
+    for (let i = 0; i < 6; i++) this.after(3000 + i * 1100, () => this.helpers(martin!, ms, +1));
+    // ... and then they finish one by one (hop into the monitor, or the cat gets one)
+    for (let i = 0; i < 5; i++) this.after(15000 + i * 2200, () => this.helpers(martin!, ms, -1));
+    this.after(8000, () => this.clearSession(felix!));
+    this.after(13000, () => this.startSession(martin!, "thinking"));
+    this.after(19000, () => this.endSession(anna!, anna!.sessions[0]));
+    this.after(24000, () => this.startSession(martin!, "reading"));
+    this.after(34000, () => this.clearSession(martin!));
+    // keep the busy ones busy, the idle ones idle (they wander, chat, play)
+    this.loop(2600, () => {
+      const busy = [...this.people.values()].flatMap((p) =>
+        p.sessions
+          .filter((x) => x.activity !== "idle" && x.activity !== "waiting")
+          .map((x) => [p, x] as const),
+      );
+      if (busy.length === 0) return;
+      const [p, x] = this.pick(busy);
+      const next = this.pick(["typing", "reading", "running", "thinking"] as const);
+      this.setActivity(p.personId, x, next);
+    });
+    // and every now and then another /clear or a session that ships
+    this.loop(16000, () => {
+      const p = this.pick([...this.people.values()].filter((q) => q.sessions.length > 0));
+      if (this.rand() < 0.6) this.clearSession(p);
+      else {
+        const x = p.sessions.find((y) => y.activity !== "waiting" && y.activity !== "idle");
+        if (x) {
+          x.startedAt = Math.min(x.startedAt, this.now() - 0.8 * 3600_000);
+          this.endSession(p, x);
+          this.after(5000, () => this.startSession(p, "typing"));
+        }
+      }
+    });
+  }
+
+  private helpers(p: PersonView, s: SessionView, d: number) {
+    if (!p.sessions.includes(s)) return;
+    s.subagents = Math.max(0, s.subagents + d);
+    this.emit(
+      envelope(d > 0 ? "subagent.spawned" : "subagent.finished", {
+        personId: p.personId,
+        sessionId: s.sessionId,
+        count: s.subagents,
+      }),
+    );
+  }
+
+  private startSession(p: PersonView, activity: Activity, like?: SessionView) {
+    if (p.sessions.length >= 6) return;
+    const ns = this.makeSession(like?.agent ?? this.agent(), activity, 0, like?.project);
+    if (like?.machine) ns.machine = like.machine;
+    ns.startedAt = this.now();
+    p.sessions.push(ns);
+    this.emit(envelope("session.started", { personId: p.personId, session: structuredClone(ns) }));
+  }
+
+  private endSession(p: PersonView, s: SessionView | undefined) {
+    if (!s || !p.sessions.includes(s)) return;
+    p.sessions.splice(p.sessions.indexOf(s), 1);
+    this.emit(envelope("session.ended", { personId: p.personId, sessionId: s.sessionId }));
+  }
+
+  /** `/clear`: the session ends and a fresh one starts a second later on the same machine. */
+  private clearSession(p: PersonView) {
+    const s = p.sessions.find((x) => x.activity !== "waiting") ?? p.sessions[0];
+    if (!s) return;
+    this.endSession(p, s);
+    this.after(1100, () => this.startSession(p, "thinking", s));
+  }
+
   // ---- scripted behavior ------------------------------------------------------------------
   private setActivity(personId: string, s: SessionView, activity: Activity) {
     if (s.activity === activity) return;
@@ -301,6 +414,13 @@ export class DemoFeed {
 
 export function parseDemoMode(value: string | null): DemoMode | null {
   if (value === null) return null;
-  if (value === "one" || value === "empty" || value === "join" || value === "busy") return value;
+  if (
+    value === "one" ||
+    value === "empty" ||
+    value === "join" ||
+    value === "busy" ||
+    value === "party"
+  )
+    return value;
   return "busy";
 }

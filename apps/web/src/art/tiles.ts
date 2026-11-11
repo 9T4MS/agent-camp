@@ -5,6 +5,7 @@
  */
 import { hashString } from "@agent-office/protocol";
 import { Texture } from "pixi.js";
+import type { Weather } from "../world/lifeRules.ts";
 import { type OfficeMap, type Terrain, TILE } from "../world/map.ts";
 import { drawText } from "./font.ts";
 import { C } from "./palette.ts";
@@ -335,7 +336,8 @@ export function renderTerrain(map: OfficeMap): TerrainArt {
 
 /** Sky panes for windows: day / dusk / night variants (cached by size). */
 const paneCache = new Map<string, Texture>();
-export type Weather = "sun" | "clouds" | "rain";
+
+export type { Weather };
 /** Frames a weather animates through in the window panes. */
 export const WEATHER_FRAMES: Record<Weather, number> = { sun: 1, clouds: 4, rain: 3 };
 

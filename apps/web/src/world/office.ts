@@ -18,8 +18,8 @@ import {
   nameplateTexture,
   propTexture,
 } from "../art/desk.ts";
-import { furnitureFrames, furnitureMeta } from "../art/furniture.ts";
 import { deskLampTextures, leafTexture } from "../art/fun.ts";
+import { furnitureFrames, furnitureMeta } from "../art/furniture.ts";
 import { glowTexture, pixelTexture, whiteboardTexture } from "../art/fx.ts";
 import { C, hexNum } from "../art/palette.ts";
 import {
@@ -558,7 +558,8 @@ export class OfficeScene {
     this.overlay.alpha = alpha;
     this.overlay.visible = alpha > 0.01;
     this.sky = sky;
-    for (const p of this.panes) p.sprite.texture = windowPane(sky, p.rect.w, p.rect.h, this.weather);
+    for (const p of this.panes)
+      p.sprite.texture = windowPane(sky, p.rect.w, p.rect.h, this.weather);
     for (const g of this.lampGlows) {
       g.sprite.alpha = g.kind === "lamp" ? g.base * night : sky === "day" ? 0.12 : 0;
       g.sprite.visible = g.sprite.alpha > 0.01;
@@ -630,7 +631,7 @@ export class OfficeScene {
       if (!this.party) continue;
       const cols = [C.neon, C.cyan, C.lemon, C.pink, C.leaf];
       g.texture = glowTexture(30, cols[(Math.floor(time * 3) + i) % cols.length]!);
-      g.alpha = 0.35 + 0.25 * Math.sin(time * 7 + i * 1.3);
+      g.alpha = 0.75 + 0.25 * Math.sin(time * 7 + i * 1.3);
       g.y = Math.round(y + Math.sin(time * 2 + i) * 6);
     }
     // coffee steam
