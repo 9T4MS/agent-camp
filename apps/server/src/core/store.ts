@@ -2,7 +2,17 @@
  * Storage interface the Hub depends on. Synchronous on purpose: Durable Object SQLite
  * (`ctx.storage.sql`) and bun:sqlite are both synchronous, and tests use memory.
  */
-import { AvatarSpec, type HistoryRow, type SnapshotMeta } from "@agent-office/protocol";
+import {
+  AvatarSpec,
+  type HistoryRow,
+  MESSAGE_MAX_ROWS,
+  MESSAGE_RETENTION_MS,
+  type MessageRecord,
+  type SnapshotMeta,
+} from "@agent-office/protocol";
+
+export type MessageSlice = { limit: number; before?: number; after?: number };
+export type StoredMessage = { payload: string; message: MessageRecord };
 
 /**
  * A person's look. `selfDescription` is the person-level description the look was made
@@ -11,6 +21,17 @@ import { AvatarSpec, type HistoryRow, type SnapshotMeta } from "@agent-office/pr
 export type StoredAvatar = { avatar: AvatarSpec; key: string; selfDescription?: string };
 
 export interface Store {
+  findMessage(requestId: string): StoredMessage | null;
+  insertMessage(
+    requestId: string,
+    payload: string,
+    message: Omit<MessageRecord, "seq">,
+  ): MessageRecord;
+  updateMessage(message: MessageRecord): void;
+  messages(query: MessageSlice): MessageRecord[];
+  messageHead(): number;
+  nextMessageExpiry(): number | null;
+  pruneMessages(now: number): void;
   appendHistory(rows: readonly HistoryRow[]): void;
   /** All rows with ts >= since, oldest first. */
   history(since?: number): HistoryRow[];
@@ -30,6 +51,52 @@ export interface Store {
 }
 
 export class MemoryStore implements Store {
+  private messageSeq = 0;
+  private messageLog = new Map<string, StoredMessage>();
+  findMessage(requestId: string): StoredMessage | null {
+    const row = this.messageLog.get(requestId);
+    return row ? structuredClone(row) : null;
+  }
+  insertMessage(
+    requestId: string,
+    payload: string,
+    message: Omit<MessageRecord, "seq">,
+  ): MessageRecord {
+    if (this.messageLog.has(requestId)) throw new Error("duplicate request");
+    const record = { ...structuredClone(message), seq: ++this.messageSeq };
+    this.messageLog.set(requestId, { payload, message: record });
+    return structuredClone(record);
+  }
+  updateMessage(message: MessageRecord): void {
+    for (const row of this.messageLog.values()) {
+      if (row.message.id === message.id) row.message = structuredClone(message);
+    }
+  }
+  messages(query: MessageSlice): MessageRecord[] {
+    const rows = [...this.messageLog.values()]
+      .map((r) => r.message)
+      .filter(
+        (m) =>
+          (query.before === undefined || m.seq < query.before) &&
+          (query.after === undefined || m.seq > query.after),
+      );
+    return structuredClone(
+      query.after === undefined ? rows.slice(-query.limit) : rows.slice(0, query.limit),
+    );
+  }
+  messageHead(): number {
+    return this.messageSeq;
+  }
+  nextMessageExpiry(): number | null {
+    const first = this.messageLog.values().next().value;
+    return first ? first.message.ts + MESSAGE_RETENTION_MS : null;
+  }
+  pruneMessages(now: number): void {
+    for (const [id, row] of this.messageLog) {
+      if (row.message.ts + MESSAGE_RETENTION_MS <= now || this.messageLog.size > MESSAGE_MAX_ROWS)
+        this.messageLog.delete(id);
+    }
+  }
   rows: HistoryRow[] = [];
   avatars = new Map<string, StoredAvatar>();
   customAvatars = new Map<string, AvatarSpec>();
@@ -87,6 +154,10 @@ export const SCHEMA = [
      ts INTEGER NOT NULL, type TEXT NOT NULL, person TEXT NOT NULL,
      agent TEXT, project TEXT, subagents INTEGER)`,
   "CREATE INDEX IF NOT EXISTS history_ts ON history(ts)",
+  `CREATE TABLE IF NOT EXISTS office_messages (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+    request_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, ts INTEGER NOT NULL, record TEXT NOT NULL)`,
+  "CREATE INDEX IF NOT EXISTS office_messages_ts ON office_messages(ts)",
   `CREATE TABLE IF NOT EXISTS avatars (
      person TEXT PRIMARY KEY, spec TEXT NOT NULL, key TEXT NOT NULL, updated INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS custom_avatars (
@@ -122,6 +193,64 @@ export class SqlStore implements Store {
         // already there
       }
     }
+  }
+  findMessage(requestId: string): StoredMessage | null {
+    const row = this.run(
+      "SELECT seq, payload, record FROM office_messages WHERE request_id = ?",
+      requestId,
+    )[0];
+    return row ? { payload: String(row.payload), message: this.readMessage(row) } : null;
+  }
+  private readMessage(row: Record<string, unknown>): MessageRecord {
+    return { ...JSON.parse(String(row.record)), seq: Number(row.seq) };
+  }
+  insertMessage(
+    requestId: string,
+    payload: string,
+    message: Omit<MessageRecord, "seq">,
+  ): MessageRecord {
+    const row = this.run(
+      "INSERT INTO office_messages (id, request_id, payload, ts, record) VALUES (?, ?, ?, ?, ?) RETURNING seq",
+      message.id,
+      requestId,
+      payload,
+      message.ts,
+      JSON.stringify(message),
+    )[0]!;
+    return { ...message, seq: Number(row.seq) };
+  }
+  updateMessage(message: MessageRecord): void {
+    this.run(
+      "UPDATE office_messages SET record = ? WHERE seq = ?",
+      JSON.stringify(message),
+      message.seq,
+    );
+  }
+  messages(query: MessageSlice): MessageRecord[] {
+    const after = query.after !== undefined;
+    const rows = this.run(
+      `SELECT seq, record FROM office_messages WHERE seq ${after ? ">" : "<"} ? ORDER BY seq ${after ? "ASC" : "DESC"} LIMIT ?`,
+      query.after ?? query.before ?? Number.MAX_SAFE_INTEGER,
+      query.limit,
+    ).map((row) => this.readMessage(row));
+    return after ? rows : rows.reverse();
+  }
+  messageHead(): number {
+    const row = this.run("SELECT MAX(seq) AS head FROM office_messages")[0];
+    return Math.max(Number(row?.head ?? 0), Number(this.kvGet("messages.head") ?? 0));
+  }
+  nextMessageExpiry(): number | null {
+    const row = this.run("SELECT MIN(ts) AS ts FROM office_messages")[0];
+    return row?.ts == null ? null : Number(row.ts) + MESSAGE_RETENTION_MS;
+  }
+  pruneMessages(now: number): void {
+    const head = this.messageHead();
+    if (head > Number(this.kvGet("messages.head") ?? 0)) this.kvPut("messages.head", String(head));
+    this.run(
+      "DELETE FROM office_messages WHERE ts <= ? OR seq IN (SELECT seq FROM office_messages ORDER BY seq DESC LIMIT -1 OFFSET ?)",
+      now - MESSAGE_RETENTION_MS,
+      MESSAGE_MAX_ROWS,
+    );
   }
   appendHistory(rows: readonly HistoryRow[]): void {
     for (const r of rows) {

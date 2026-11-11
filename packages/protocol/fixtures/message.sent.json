@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "type": "message.sent",
+  "id": "message-event",
+  "ts": 1700000000000,
+  "data": {
+    "message": {
+      "id": "message-1",
+      "seq": 1,
+      "ts": 1700000000000,
+      "from": "Demo",
+      "text": "Lunch in five!",
+      "audience": "everyone",
+      "recipients": [],
+      "notifyDesktop": false,
+      "delivery": { "people": [], "socketSends": 0 }
+    }
+  }
+}

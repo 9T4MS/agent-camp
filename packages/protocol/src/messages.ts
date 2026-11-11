@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { ViewerAvatar } from "./catalog.ts";
 import { PROTOCOL_VERSION } from "./constants.ts";
+import { MessageRecord } from "./officeMessages.ts";
 import { ViewerPartyState } from "./party.ts";
 
 // ---- building blocks ----------------------------------------------------------------------
@@ -261,15 +262,20 @@ export const InteractionHappened = msg(
     personId: PersonId.optional(),
     from: ViewerName.optional(),
     text: InteractionText.optional(),
-    /** how many of the person's Macs got a notification */
+    /** Canonical persisted message; new viewers suppress this legacy bubble. */
+    messageId: z.string().min(1).max(64).optional(),
+    /** how many connector sockets accepted the notification */
     delivered: z.number().int().nonnegative().optional(),
   }),
 );
+
+export const MessageSent = msg("message.sent", z.object({ message: MessageRecord }));
 
 export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
 
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,
+  MessageSent,
   PartyUpdated,
   PersonJoined,
   PersonLeft,
@@ -294,7 +300,7 @@ export type MessageData<T extends MessageType> = MessageOf<T>["data"];
 /** What the server's diff() emits: everything but snapshots and transient interaction/party updates. */
 export type ViewerEvent = Exclude<
   ServerToViewer,
-  { type: "office.snapshot" | "interaction.happened" | "party.updated" }
+  { type: "office.snapshot" | "interaction.happened" | "party.updated" | "message.sent" }
 >;
 
 export const CONNECTOR_TO_SERVER_TYPES = ConnectorToServer.options.map((o) => o.shape.type.value);

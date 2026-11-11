@@ -11,7 +11,9 @@ import {
   InteractRequest,
   type InteractResponse,
   type MessageOf,
+  MessageQuery,
   PartyState,
+  SendMessageRequest,
   type ServerToConnector,
   type ViewerEvent,
 } from "@agent-office/protocol";
@@ -20,6 +22,7 @@ import { isAuthorized } from "./auth.ts";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
+import { OfficeMessages } from "./messages.ts";
 import { Party, readPartyBody } from "./party.ts";
 import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
@@ -104,7 +107,7 @@ export class OfficeApp {
   readonly latest: LatestVersion;
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
-  private lastPoke = new Map<string, number>();
+  readonly messages: OfficeMessages;
   readonly party: Party;
   private lastLook = new Map<string, number>();
 
@@ -143,6 +146,13 @@ export class OfficeApp {
       store,
     );
     this.hub.log = log;
+    this.messages = new OfficeMessages(
+      store,
+      this.hub,
+      (socket, data) => transport.sendToConnector?.(socket, data) ?? false,
+      (data) => transport.broadcast(data),
+      (who, now) => this.interactionWait(who, now),
+    );
   }
 
   private now(): number {
@@ -152,7 +162,8 @@ export class OfficeApp {
   /** Rebuild state after a restart / hibernation wake. */
   restore(sockets: { socketId: string; binding: Binding | null }[]): void {
     this.hub.restore(this.now(), sockets);
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.messages.prune(this.now());
+    this.scheduleAlarm();
   }
 
   connectorMessage(socketId: string, raw: unknown): SocketAction {
@@ -198,12 +209,13 @@ export class OfficeApp {
 
   alarm(): void {
     this.publish(this.hub.tick(this.now()));
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.messages.prune(this.now());
+    this.scheduleAlarm();
   }
 
   private handle(r: HubResult): SocketAction {
     this.publish(r.events);
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.scheduleAlarm();
     if (r.avatarJob) {
       const job = r.avatarJob;
       const p = this.genui
@@ -229,6 +241,23 @@ export class OfficeApp {
     return action;
   }
 
+  private scheduleAlarm(): void {
+    const deadlines = [this.hub.nextDeadline(), this.messages.nextDeadline()].filter(
+      (n): n is number => n !== null,
+    );
+    this.transport.scheduleAlarm(deadlines.length ? Math.min(...deadlines) : null);
+  }
+
+  private interactionWait(who: string, now: number): number | null {
+    const previous = this.lastInteract.get(who);
+    if (previous !== undefined && now - previous < INTERACT_MIN_INTERVAL_MS)
+      return Math.ceil((previous + INTERACT_MIN_INTERVAL_MS - now) / 1000);
+    this.lastInteract.set(who, now);
+    if (this.lastInteract.size > 500)
+      this.lastInteract.delete(this.lastInteract.keys().next().value!);
+    return null;
+  }
+
   private publish(events: ViewerEvent[]): void {
     for (const e of events) this.transport.broadcast(JSON.stringify(e));
   }
@@ -245,6 +274,47 @@ export class OfficeApp {
 
     if (path === "/api/me" && method === "GET") return json({ ok: true });
 
+    if (path === "/api/messages") {
+      if (!(await isAuthorized(req, this.env, this.now())))
+        return json({ error: "unauthorized" }, { status: 401 });
+      if (method === "GET") {
+        const parsed = MessageQuery.safeParse(Object.fromEntries(url.searchParams));
+        if (!parsed.success)
+          return json({ error: "invalid message cursor or limit" }, { status: 400 });
+        const page = this.messages.page(parsed.data, this.now());
+        this.scheduleAlarm();
+        return json(page);
+      }
+      if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
+      if (
+        (req.headers.get("origin") && req.headers.get("origin") !== url.origin) ||
+        req.headers.get("sec-fetch-site") === "cross-site"
+      )
+        return json({ error: "same-origin requests only" }, { status: 403 });
+      if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json")
+        return json({ error: "expected application/json" }, { status: 415 });
+      const body = await readPartyBody(req, 16_384);
+      if (body.status)
+        return json(
+          { error: body.status === 413 ? "too large" : "invalid JSON" },
+          { status: body.status },
+        );
+      const parsed = SendMessageRequest.safeParse(body.value);
+      if (!parsed.success)
+        return json({ error: "invalid message, audience or request ID" }, { status: 400 });
+      const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+      const result = this.messages.send(parsed.data, who, this.now());
+      this.scheduleAlarm();
+      return "message" in result
+        ? json({ ok: true, message: result.message }, { status: result.status })
+        : json(
+            { error: result.error },
+            {
+              status: result.status,
+              headers: result.retryAfter ? { "retry-after": String(result.retryAfter) } : {},
+            },
+          );
+    }
     if (path === "/api/interact" && method === "POST") return this.interact(req);
     if (path === "/api/party") {
       if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
@@ -440,7 +510,7 @@ export class OfficeApp {
       );
       avatar = res.avatar;
     }
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.scheduleAlarm();
     return json({
       ok: true,
       avatar,
@@ -462,24 +532,69 @@ export class OfficeApp {
     const now = this.now();
 
     const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
-    if (now - (this.lastInteract.get(who) ?? 0) < INTERACT_MIN_INTERVAL_MS)
-      return json({ error: "slow down" }, { status: 429 });
-    this.lastInteract.set(who, now);
-    if (this.lastInteract.size > 500) this.lastInteract.clear();
+    if (r.kind === "message") {
+      const origin = req.headers.get("origin");
+      if (
+        (origin && origin !== new URL(req.url).origin) ||
+        req.headers.get("sec-fetch-site") === "cross-site"
+      )
+        return json({ error: "same-origin requests only" }, { status: 403 });
+      const result = this.messages.send(
+        {
+          requestId: crypto.randomUUID(),
+          audience: { kind: "selected", personIds: [r.personId!] },
+          text: r.text!,
+          ...(r.from ? { from: r.from } : {}),
+          notifyDesktop: true,
+        },
+        who,
+        now,
+      );
+      this.scheduleAlarm();
+      if (!("message" in result))
+        return json(
+          { error: result.error },
+          { status: result.status === 422 ? 404 : result.status },
+        );
+      const delivered = result.message.delivery.socketSends;
+      this.transport.broadcast(
+        JSON.stringify(
+          envelope(
+            "interaction.happened",
+            {
+              kind: "message",
+              personId: r.personId!,
+              text: r.text!,
+              messageId: result.message.id,
+              ...(r.from ? { from: r.from } : {}),
+              delivered,
+            },
+            { ts: now },
+          ),
+        ),
+      );
+      return json({ ok: true, delivered } satisfies InteractResponse);
+    }
+    const wait = this.interactionWait(who, now);
+    if (wait !== null)
+      return json(
+        { error: "slow down" },
+        { status: 429, headers: { "retry-after": String(wait) } },
+      );
 
     if (r.personId && !this.hub.state().people.some((p) => p.personId === r.personId))
       return json({ error: "not in the office" }, { status: 404 });
 
     let delivered = 0;
     const kind = r.kind;
-    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer" || kind === "message";
+    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer";
     const officeOnly = !pokes;
     if (r.personId && pokes) {
-      if (now - (this.lastPoke.get(r.personId) ?? 0) < POKE_PER_PERSON_MS)
+      if (this.messages.pokeWait(r.personId, now))
         return json({ error: "they were just poked, give them a moment" }, { status: 429 });
-      this.lastPoke.set(r.personId, now);
+      this.messages.markPoke(r.personId, now);
       const from = r.from || undefined;
-      const text = kind === "message" ? r.text! : `${from ?? "Someone"} ${POKE_TEXT[kind]}`;
+      const text = `${from ?? "Someone"} ${POKE_TEXT[kind]}`;
       const poke = JSON.stringify(
         envelope("connector.poked", { kind, text, ...(from ? { from } : {}) }),
       );
@@ -492,7 +607,7 @@ export class OfficeApp {
       kind: r.kind,
       ...(r.personId ? { personId: r.personId } : {}),
       ...(r.from ? { from: r.from } : {}),
-      ...(r.text && r.kind === "message" ? { text: r.text } : {}),
+
       ...(r.personId && !officeOnly ? { delivered } : {}),
     });
     this.transport.broadcast(JSON.stringify(event));

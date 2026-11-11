@@ -4,4 +4,5 @@ export * from "./constants.ts";
 export * from "./envelope.ts";
 export * from "./hash.ts";
 export * from "./messages.ts";
+export * from "./officeMessages.ts";
 export * from "./party.ts";

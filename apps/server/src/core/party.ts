@@ -140,8 +140,11 @@ export class Party {
 }
 
 /** Bound actual bytes, including chunked uploads with no Content-Length header. */
-export async function readPartyBody(req: Request): Promise<{ value?: unknown; status?: number }> {
-  if (Number(req.headers.get("content-length") ?? 0) > PARTY_BODY_MAX_BYTES) return { status: 413 };
+export async function readPartyBody(
+  req: Request,
+  maxBytes = PARTY_BODY_MAX_BYTES,
+): Promise<{ value?: unknown; status?: number }> {
+  if (Number(req.headers.get("content-length") ?? 0) > maxBytes) return { status: 413 };
   if (!req.body) return { status: 400 };
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -151,7 +154,7 @@ export async function readPartyBody(req: Request): Promise<{ value?: unknown; st
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > PARTY_BODY_MAX_BYTES) {
+      if (size > maxBytes) {
         await reader.cancel();
         return { status: 413 };
       }
