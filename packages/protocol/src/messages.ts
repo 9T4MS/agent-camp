@@ -38,6 +38,8 @@ export const PersonId = z.string().min(1).max(64);
 /** Stable viewer-side session id: `${clientId}:${sessionKey}`. */
 export const SessionId = z.string().min(1).max(130);
 export const ProjectName = z.string().max(80);
+/** Share of the model's context window in use, 0..1 (rounded; omitted when unknown). */
+export const ContextShare = z.number().min(0).max(1);
 /** User-chosen label of the machine a connector runs on ("laptop", "devbox"). Optional. */
 export const MachineName = z.string().trim().max(40);
 
@@ -54,6 +56,7 @@ export const SessionInfo = z.object({
   activity: Activity,
   subagents: z.number().int().nonnegative(),
   startedAt: EpochMs,
+  context: ContextShare.optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfo>;
 
@@ -69,6 +72,7 @@ export const SessionView = z.object({
   machine: MachineName.optional(),
   /** the session's connector missed its heartbeat (laptop asleep, offline, crashed) */
   offline: z.boolean().optional(),
+  context: ContextShare.optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -166,6 +170,17 @@ export const OfficeSnapshot = msg(
     people: z.array(PersonView),
     /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
     timezone: z.string().max(64).optional(),
+    /** deployed version (newest connector release, e.g. "0.1.42") */
+    version: z.string().max(40).optional(),
+    /** today's numbers from the server's history, so a reload doesn't reset the whiteboard */
+    today: z
+      .object({
+        started: z.number().int().nonnegative(),
+        peak: z.number().int().nonnegative(),
+        /** sessions running every 5 min over the last 40 min, oldest first */
+        recent: z.array(z.number().int().nonnegative()).max(12),
+      })
+      .optional(),
   }),
 );
 export const PersonJoined = msg("person.joined", z.object({ person: PersonView }));
@@ -194,6 +209,11 @@ export const SubagentFinished = msg(
 export const AvatarUpdated = msg(
   "avatar.updated",
   z.object({ personId: PersonId, avatar: AvatarSpec }),
+);
+/** Context use moved by at least one 5% step (connectors round to 0.05). */
+export const SessionContextChanged = msg(
+  "session.contextChanged",
+  z.object({ personId: PersonId, sessionId: SessionId, context: ContextShare.nullable() }),
 );
 export const SessionConnectionChanged = msg(
   "session.connectionChanged",
@@ -236,6 +256,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   SubagentFinished,
   AvatarUpdated,
   SessionConnectionChanged,
+  SessionContextChanged,
   InteractionHappened,
 ]);
 export type ServerToViewer = z.infer<typeof ServerToViewer>;

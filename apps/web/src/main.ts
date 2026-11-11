@@ -2,7 +2,8 @@
  * Office renderer entry. URL params:
  *   ?demo=busy|one|empty|join|party (or 1)  local fake feed, no server; &seed=, &people=, &sessions=
  *                 (party: office life moments fast: chats, coffee, /clear zap, records, pizza)
- *   ?weather=sun|clouds|rain  force the window weather (default: seeded by the local date)
+ *   ?weather=sun|clouds|rain|snow  force the weather (default: changes hour by hour, seeded)
+ *   ?season=winter|spring|summer|autumn  force the season (default: the local month)
  *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
  *   ?key=...      viewer key passed through to /ws/viewer
  *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour)
@@ -22,6 +23,7 @@ import { Application, TextureStyle } from "pixi.js";
 import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
+import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
@@ -35,6 +37,7 @@ import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
 import { Effects } from "./world/effects.ts";
 import { OfficeLife } from "./world/life.ts";
+import { SEASONS, type Season, seasonFor } from "./world/lifeRules.ts";
 import { Living } from "./world/living.ts";
 import {
   type AreaName,
@@ -111,6 +114,12 @@ async function boot() {
   }
 
   const model = new OfficeModel();
+  const seasonParam = params.get("season") as Season | null;
+  const season =
+    seasonParam && SEASONS.includes(seasonParam)
+      ? seasonParam
+      : seasonFor(new Date().getMonth() + 1);
+  setArtSeason(season);
   const scene = new OfficeScene(buildOfficeMap(BASE_POD_ROWS));
   app.stage.addChild(scene.root);
   const effects = new Effects(scene.fx);
@@ -152,9 +161,13 @@ async function boot() {
     },
     {
       weather:
-        weatherParam === "sun" || weatherParam === "clouds" || weatherParam === "rain"
+        weatherParam === "sun" ||
+        weatherParam === "clouds" ||
+        weatherParam === "rain" ||
+        weatherParam === "snow"
           ? weatherParam
           : null,
+      season,
       ...(party ? { droneDelay: demo === "party" ? 6 : 3 } : {}),
     },
   );
@@ -209,6 +222,7 @@ async function boot() {
     }
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
+      hud.setVersion(model.version, __BUILD__);
       chars.syncSlots();
     }
     hud.setStats(model.stats());
@@ -329,6 +343,10 @@ async function boot() {
   };
 
   camera.onTap = (wx, wy) => {
+    if (!kiosk && life.hitCar(wx, wy)) {
+      location.href = key ? `./stats?key=${encodeURIComponent(key)}` : "./stats";
+      return;
+    }
     if (cat.hit(wx, wy)) {
       cat.meow();
       if (!demo) void poke({ kind: "pet" });

@@ -83,6 +83,21 @@ export function normalizeCodex(entry: Record<string, unknown>): TurnEvent | null
   return null;
 }
 
+/** Context in use from the latest `token_count` event (it carries the model's window). */
+export function codexContext(entries: readonly Record<string, unknown>[]): number | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.type !== "event_msg" || !isObj(e.payload) || e.payload.type !== "token_count") continue;
+    const info = e.payload.info;
+    if (!isObj(info) || !isObj(info.last_token_usage)) continue;
+    const used = info.last_token_usage.input_tokens;
+    const window = info.model_context_window;
+    if (typeof used === "number" && typeof window === "number" && window > 0 && used > 0)
+      return used / window;
+  }
+  return undefined;
+}
+
 /** Find Codex session candidates. Never throws. */
 export function scanCodex(codexDir: string, cache: MetaCache = new Map()): Candidate[] {
   const out: Candidate[] = [];
@@ -127,6 +142,7 @@ export function scanCodex(codexDir: string, cache: MetaCache = new Map()): Candi
         matchesCwd: (cwd) => meta().cwd === cwd,
         meta,
         normalize: normalizeCodex,
+        context: codexContext,
       });
     }
   }

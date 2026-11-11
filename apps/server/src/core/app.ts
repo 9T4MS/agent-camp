@@ -16,7 +16,7 @@ import { z } from "zod";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
-import { computePersonDay, computeStats, historyToCsv } from "./stats.ts";
+import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
 
 export type AppEnv = GenuiEnv & {
@@ -165,7 +165,22 @@ export class OfficeApp {
 
   /** JSON of the office.snapshot a new viewer gets. */
   viewerSnapshot(): string {
-    return JSON.stringify(this.hub.snapshot(this.now()));
+    return JSON.stringify(this.snapshot());
+  }
+
+  /** The hub's snapshot plus the deployed version and today's whiteboard numbers. */
+  snapshot(): MessageOf<"office.snapshot"> {
+    const now = this.now();
+    const snap = this.hub.snapshot(now);
+    const live = snap.data.people.reduce((n, p) => n + p.sessions.length, 0);
+    const today = computeOfficeDay(this.store.history(now - 3 * 86_400_000), {
+      timezone: this.timezone,
+      now,
+      liveSessions: live,
+    });
+    const v = serverVersion(this.env);
+    const version = v !== "dev" ? v : this.latest.current;
+    return { ...snap, data: { ...snap.data, today, ...(version ? { version } : {}) } };
   }
 
   alarm(): void {
@@ -213,7 +228,7 @@ export class OfficeApp {
     const path = url.pathname;
     const method = req.method.toUpperCase();
 
-    if (path === "/api/state" && method === "GET") return json(this.hub.snapshot(this.now()));
+    if (path === "/api/state" && method === "GET") return json(this.snapshot());
 
     if (path === "/api/me" && method === "GET") return json({ ok: true });
 

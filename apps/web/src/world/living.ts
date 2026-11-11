@@ -79,7 +79,10 @@ export class Living {
     this.scene.setHour(hour);
     const st = this.model.stats();
     const now = Date.now();
-    if (this.history.length === 0 || now - this.lastSample > 5 * 60_000) {
+    if (this.history.length === 0 && this.model.recentSessions.length > 0) {
+      this.history = this.model.recentSessions.slice(-8);
+      this.lastSample = now;
+    } else if (this.history.length === 0 || now - this.lastSample > 5 * 60_000) {
       this.history.push(st.sessions);
       this.history = this.history.slice(-8);
       this.lastSample = now;

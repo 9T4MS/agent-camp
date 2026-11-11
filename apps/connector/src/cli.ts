@@ -89,7 +89,7 @@ Commands:
   help              this text
 
 Only status metadata is sent: agent kind, hashed session id, project folder name
-(disable with share_project_names = false), activity, subagent count, start time,
+(disable with share_project_names = false), activity, subagent count, context use %, start time,
 and the machine label you chose (machine_name).`;
 
 export async function main(argv: string[]): Promise<number> {

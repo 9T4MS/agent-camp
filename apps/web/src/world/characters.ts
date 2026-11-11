@@ -47,6 +47,7 @@ import {
   selectArrowTextures,
   zzzTextures,
 } from "../art/fx.ts";
+import { flameTextures, smokeTexture } from "../art/heat.ts";
 import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
@@ -118,6 +119,22 @@ const ERRANDS: readonly Point[] = [
   { x: 43, y: 4 },
 ];
 
+/** Helpers stay within a few steps of their agent's chair, inside the pod's aisle. */
+export function helperArea(
+  aisle: { x: number; y: number; w: number; h: number },
+  seat: { x: number; y: number },
+): { x: number; y: number; w: number; h: number } {
+  const x0 = Math.max(aisle.x, seat.x - 22);
+  const x1 = Math.min(aisle.x + aisle.w, seat.x + 22);
+  const y0 = Math.max(aisle.y, seat.y - 4);
+  const y1 = Math.min(aisle.y + aisle.h, seat.y + 18);
+  return x1 - x0 < 8 || y1 - y0 < 4 ? aisle : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Context-window share where a session starts smoking / catches fire. */
+export const SMOKE_AT = 0.5;
+export const FIRE_AT = 0.8;
+
 const tileCenter = (t: Point): Point => ({ x: t.x * TILE + 8, y: t.y * TILE + 13 });
 
 export class SessionCharacter {
@@ -147,6 +164,9 @@ export class SessionCharacter {
   iconT = 0;
   /** "ping" ring for long waits */
   ring: Sprite;
+  /** flames over the head: context window nearly full */
+  flame: Sprite;
+  smokeT = 0;
   chat: Chat | null = null;
   chatCooldown = 8;
   chatCheck = 0;
@@ -187,6 +207,9 @@ export class SessionCharacter {
     this.ring = new Sprite(ringTextures()[0]!);
     this.ring.anchor.set(0.5);
     this.ring.visible = false;
+    this.flame = new Sprite(flameTextures()[0]!);
+    this.flame.anchor.set(0.5, 1);
+    this.flame.visible = false;
   }
 
   get hasDesk() {
@@ -312,6 +335,11 @@ export class CharacterManager {
         if (c.mode === "poi" || (c.mode === "walking" && c.goal !== "exit")) this.goToDesk(c);
         break;
       }
+      case "contextChanged": {
+        const c = this.chars.get(ch.sessionId);
+        if (c && (ch.context ?? 0) >= FIRE_AT) this.effects.puff(c.x, c.y - 20);
+        break;
+      }
       case "officeRenamed":
       case "interaction":
         break;
@@ -390,7 +418,7 @@ export class CharacterManager {
       }
       if (!changed.includes(c.pod)) continue;
       const seat = this.seatOf(c.pod, c.desk);
-      c.helpers.setArea(podAisle(c.pod), seat);
+      c.helpers.setArea(helperArea(podAisle(c.pod), seat), seat);
       if (c.mode === "seated" && c.hasDesk) this.sit(c);
       else if (c.mode === "walking" && c.goal === "desk") this.goToDesk(c);
     }
@@ -586,7 +614,7 @@ export class CharacterManager {
       this.scene.fx,
       this.effects,
       s.agent,
-      podAisle(p.pod),
+      helperArea(podAisle(p.pod), seat),
       seat,
       seededRandom(`helpers:${sessionId}`),
       this.helperWorld,
@@ -605,7 +633,7 @@ export class CharacterManager {
     c.machine = s.machine;
     this.chars.set(sessionId, c);
     this.scene.objects.addChild(c.sprite, c.mug);
-    this.scene.fx.addChild(c.ring, c.marker, c.icon, c.bubble);
+    this.scene.fx.addChild(c.ring, c.marker, c.icon, c.bubble, c.flame);
     if (instant) {
       if (c.hasDesk) {
         this.sit(c);
@@ -669,7 +697,7 @@ export class CharacterManager {
       this.resetChair(c);
     }
     this.scene.objects.removeChild(c.sprite, c.mug);
-    this.scene.fx.removeChild(c.bubble, c.marker, c.icon, c.ring);
+    this.scene.fx.removeChild(c.bubble, c.marker, c.icon, c.ring, c.flame);
     for (const sp of [c.sprite, c.bubble, c.marker, c.mug, c.icon, c.ring]) sp.destroy();
     this.chars.delete(c.sessionId);
     this.syncSlots();
@@ -968,6 +996,24 @@ export class CharacterManager {
     return out;
   }
 
+  /** Past half the context window: smoke; past 80%: on fire. Only at the desk, only online. */
+  private heat(c: SessionCharacter, dt: number, time: number) {
+    const ctx = this.model.sessions.get(c.sessionId)?.context ?? 0;
+    const hot = c.mode === "seated" && c.sprite.visible && !this.isOffline(c);
+    const head = c.y - 21;
+    c.flame.visible = hot && ctx >= FIRE_AT;
+    if (c.flame.visible) {
+      c.flame.texture = flameTextures()[Math.floor(time * 8 + c.desk) % 3]!;
+      c.flame.position.set(Math.round(c.x + 1), Math.round(head + 3));
+    }
+    if (!hot || ctx < SMOKE_AT) return;
+    c.smokeT -= dt;
+    if (c.smokeT > 0) return;
+    // fuller context, thicker smoke
+    c.smokeT = ctx >= FIRE_AT ? 0.45 : 1.6 - (ctx - SMOKE_AT) * 3;
+    this.effects.floater(smokeTexture(), c.x + (this.rand() - 0.5) * 6, head - 2, 1.8, 14, 1.5);
+  }
+
   private isOffline(c: SessionCharacter): boolean {
     return this.model.sessions.get(c.sessionId)?.offline === true;
   }
@@ -1009,6 +1055,7 @@ export class CharacterManager {
         c.sprite.tint = off ? 0x5a6988 : 0xffffff;
         c.sprite.alpha = off ? 0.6 : 1;
       }
+      this.heat(c, dt, time);
       if (Math.abs(c.x - door.x) < 26 && Math.abs(c.y - door.y) < 30) doorBusy = true;
       c.helpers.update(dt, time);
       if (c.mode === "poi" && c.poi?.id.startsWith("arcade"))

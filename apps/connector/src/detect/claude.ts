@@ -114,6 +114,33 @@ export function normalizeClaude(entry: Record<string, unknown>): TurnEvent | nul
   return null; // summary, file-history-snapshot, system, attachment, progress, ...
 }
 
+export const CLAUDE_WINDOW = 200_000;
+export const CLAUDE_LONG_WINDOW = 1_000_000;
+
+/**
+ * Context in use = everything the last main-thread request sent (input + cache reads/writes).
+ * The window isn't in the transcript: 200k, or 1M once a session is past 200k or the model id
+ * says so ("[1m]").
+ */
+export function claudeContext(entries: readonly Record<string, unknown>[]): number | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.type !== "assistant" || e.isSidechain === true || !isObj(e.message)) continue;
+    const m = e.message;
+    if (m.model === "<synthetic>" || !isObj(m.usage)) continue;
+    const n = (k: string) =>
+      typeof m.usage === "object" && typeof (m.usage as Record<string, unknown>)[k] === "number"
+        ? ((m.usage as Record<string, number>)[k] ?? 0)
+        : 0;
+    const used =
+      n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens");
+    if (used <= 0) continue;
+    const long = used > CLAUDE_WINDOW || String(m.model ?? "").includes("[1m]");
+    return used / (long ? CLAUDE_LONG_WINDOW : CLAUDE_WINDOW);
+  }
+  return undefined;
+}
+
 /** Count subagent transcripts (`agent-*.jsonl`, up to 3 levels below subagents/) written recently. */
 export function countSubagents(subagentsDir: string, now: number): number {
   let count = 0;
@@ -261,6 +288,7 @@ function makeCandidate(
       return meta;
     },
     normalize: normalizeClaude,
+    context: claudeContext,
     subagents: (now) => countSubagents(join(o.folderPath, o.rawId, "subagents"), now),
   };
 }

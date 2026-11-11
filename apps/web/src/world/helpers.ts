@@ -43,7 +43,7 @@ export class HelperSwarm {
   private badge: Sprite | null = null;
   private count = 0;
   /** seconds a helper spends at least between errands */
-  errandEvery = 9;
+  errandEvery = 25;
 
   constructor(
     private readonly objects: Container,

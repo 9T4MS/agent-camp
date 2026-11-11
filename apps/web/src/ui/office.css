@@ -781,3 +781,33 @@ body.kiosk .hud-reconnect {
 .hud-panel .now.offline .act-since {
   white-space: normal;
 }
+
+.hud-top .brand .ver {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--grey);
+  opacity: 0.8;
+}
+.hud-panel .ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hud-panel .ctx-bar {
+  display: inline-block;
+  width: 64px;
+  height: 6px;
+  background: var(--night);
+  border: 1px solid var(--dusk);
+}
+.hud-panel .ctx-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--leaf);
+}
+.hud-panel .ctx.warm .ctx-bar > span {
+  background: var(--amber);
+}
+.hud-panel .ctx.fire .ctx-bar > span {
+  background: var(--red);
+}

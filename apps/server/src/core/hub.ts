@@ -519,6 +519,7 @@ export class Hub {
             startedAt: s.startedAt,
             ...(c.machine ? { machine: c.machine } : {}),
             ...(offline ? { offline } : {}),
+            ...(s.context !== undefined ? { context: s.context } : {}),
           });
         }
       }

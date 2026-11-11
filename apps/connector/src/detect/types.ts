@@ -27,6 +27,8 @@ export type Candidate = {
   meta(): CandidateMeta;
   /** raw JSONL entry -> normalized event (null = irrelevant line) */
   normalize(entry: Record<string, unknown>): TurnEvent | null;
+  /** share of the context window in use, from the transcript's latest usage numbers */
+  context?(entries: readonly Record<string, unknown>[]): number | undefined;
   /** Claude only: count live subagent transcripts */
   subagents?(now: number): number;
 };

@@ -111,6 +111,15 @@ function duration(ms: number) {
   return `${h} h ${m % 60} min`;
 }
 
+/** Context window bar for the agent card: calm, then smoking (50%), then burning (80%). */
+export function contextMeter(share: number | undefined): string {
+  if (share === undefined) return '<span class="dim">unknown</span>';
+  const pct = Math.round(share * 100);
+  const tone = share >= 0.8 ? "fire" : share >= 0.5 ? "warm" : "ok";
+  const icon = share >= 0.8 ? " &#128293;" : share >= 0.5 ? " &#128168;" : "";
+  return `<span class="ctx ${tone}" title="share of the model's context window in use"><span class="ctx-bar"><span style="width:${pct}%"></span></span>${pct}%${icon}</span>`;
+}
+
 /** Fun client-side badges for the side panel. */
 export function badgesFor(
   person: PersonState,
@@ -123,6 +132,7 @@ export function badgesFor(
   const kinds = new Set(sessions.map((s) => s.agent));
   if (kinds.size >= 2) out.push("Multi-agent");
   const helpers = sessions.reduce((a, s) => a + s.subagents, 0);
+  if (sessions.some((s) => (s.context ?? 0) >= 0.8)) out.push("On fire");
   if (helpers >= 5) out.push(`Swarm boss (${helpers} helpers)`);
   else if (helpers > 0) out.push("Delegator");
   const projects = new Set(sessions.map((s) => s.project).filter(Boolean));
@@ -183,7 +193,7 @@ export class Hud {
     this.name = el(
       opts.kiosk ? "div" : "button",
       "brand",
-      `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span>${opts.kiosk ? "" : '<i class="caret" aria-hidden="true"></i>'}`,
+      `<img alt="" src="${iconUrl("logo")}"><span>Agent Office</span><span class="ver"></span>${opts.kiosk ? "" : '<i class="caret" aria-hidden="true"></i>'}`,
     );
     this.menu = el("div", "hud-menu pixel-box");
     this.chips = el("div", "chips");
@@ -293,6 +303,14 @@ export class Hud {
   setOfficeName(name: string) {
     this.name.querySelector("span")!.textContent = name;
     document.title = name;
+  }
+
+  /** "v0.1.42" next to the office name; the build's commit in the tooltip. */
+  setVersion(version: string | undefined, build: string) {
+    const v = this.name.querySelector<HTMLElement>(".ver");
+    if (!v) return;
+    v.textContent = version && version !== "0.0.0" ? `v${version.replace(/^v/, "")}` : build;
+    v.title = `server ${version ?? "?"} · web build ${build}`;
   }
 
   setStats(st: OfficeStats) {
@@ -620,6 +638,7 @@ export class Hud {
         ${fact("running", shortDuration(now - (s.startedAt - this.model.clockSkew)))}
         ${fact("helpers", `${s.subagents} now <span class="dim">&middot; peak ${s.peakSubagents}</span>`)}
         ${fact("machine", s.machine ? esc(s.machine) : '<span class="dim">unknown</span>')}
+        ${fact("context", contextMeter(s.context))}
       </div>
       <div class="today-title">${esc(p.name)} today</div>
       <div class="today">

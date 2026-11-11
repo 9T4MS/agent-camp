@@ -10,6 +10,7 @@ import { type OfficeMap, type Terrain, TILE } from "../world/map.ts";
 import { drawText } from "./font.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
+import { artSeason, foliage, lawn } from "./seasons.ts";
 
 const rnd = (x: number, y: number, salt = 0) => hashString(`${x},${y},${salt}`) / 4294967296;
 
@@ -80,8 +81,9 @@ const PAINT: Record<Terrain, Painter> = {
       let c: string = C.moss;
       if (r < 0.07) c = C.leaf;
       else if (r < 0.1) c = C.forest;
-      pc.set(px, py, c);
+      pc.set(px, py, lawn(c, r));
     });
+    if (artSeason() === "winter") return;
     // tufts and the odd flower
     const r = rnd(gx, gy, 3);
     if (r < 0.5) {
@@ -91,10 +93,11 @@ const PAINT: Record<Terrain, Painter> = {
       pc.set(x + 2, y, C.leaf);
       pc.set(x + 1, y - 1, C.leaf);
     }
-    if (r < 0.08) {
+    if (r < (artSeason() === "spring" ? 0.3 : 0.08)) {
       const x = gx + 2 + Math.floor(rnd(gx, gy, 6) * 11);
       const y = gy + 2 + Math.floor(rnd(gx, gy, 8) * 11);
-      pc.set(x, y, r < 0.04 ? C.white : C.lemon);
+      const spring = [C.pink, C.white, C.lemon, C.neon][Math.floor(rnd(gx, gy, 10) * 4)]!;
+      pc.set(x, y, artSeason() === "spring" ? spring : r < 0.04 ? C.white : C.lemon);
     }
   },
   path(pc, gx, gy) {
@@ -139,7 +142,8 @@ const PAINT: Record<Terrain, Painter> = {
   hedge(pc, gx, gy) {
     each((lx, ly) => {
       const r = rnd(gx + lx, gy + ly, 9);
-      pc.set(gx + lx, gy + ly, r < 0.3 ? C.pine : r < 0.8 ? C.forest : C.moss);
+      const top = artSeason() === "winter" && ly < 5 + Math.floor(rnd(gx + lx, gy, 11) * 3);
+      pc.set(gx + lx, gy + ly, top ? C.white : r < 0.3 ? C.pine : r < 0.8 ? C.forest : C.moss);
     });
   },
   wallTop(pc, gx, gy) {
@@ -339,7 +343,7 @@ const paneCache = new Map<string, Texture>();
 
 export type { Weather };
 /** Frames a weather animates through in the window panes. */
-export const WEATHER_FRAMES: Record<Weather, number> = { sun: 1, clouds: 4, rain: 3 };
+export const WEATHER_FRAMES: Record<Weather, number> = { sun: 1, clouds: 4, rain: 3, snow: 4 };
 
 export function windowPane(
   kind: "day" | "dusk" | "night",
@@ -356,7 +360,7 @@ export function windowPane(
   const bands =
     kind === "day"
       ? grey
-        ? weather === "rain"
+        ? weather === "rain" || weather === "snow"
           ? [C.slate, C.grey, C.grey, C.silver, C.silver]
           : [C.sky, C.silver, C.cyan, C.cyan, C.white]
         : [C.sky, C.sky, C.cyan, C.cyan, C.white]
@@ -387,8 +391,9 @@ export function windowPane(
   }
   if (grey) {
     // drifting clouds (wrap around the pane)
-    const cloud = weather === "rain" ? (kind === "night" ? C.dusk : C.grey) : C.white;
-    const shade = weather === "rain" ? (kind === "night" ? C.ink : C.slate) : C.silver;
+    const wet = weather === "rain" || weather === "snow";
+    const cloud = wet ? (kind === "night" ? C.dusk : C.grey) : C.white;
+    const shade = wet ? (kind === "night" ? C.ink : C.slate) : C.silver;
     const n = WEATHER_FRAMES[weather];
     for (const [cx, cy, cw] of [
       [2, 2, 10],
@@ -406,6 +411,13 @@ export function windowPane(
         const x = (i * 7 + 3) % w;
         const y = (i * 5 + frame * 4) % h;
         pc.vline(x, y, 2, kind === "night" ? C.sky : C.cyan);
+      }
+    }
+    if (weather === "snow") {
+      for (let i = 0; i < 9; i++) {
+        const x = (i * 7 + 3 + (frame % 2)) % w;
+        const y = (i * 5 + frame * 2) % h;
+        pc.set(x, y, C.white);
       }
     }
   }
@@ -469,21 +481,56 @@ export function renderSurround(map: OfficeMap): SurroundPiece[] {
           c = (wx & 15) === 15 || ((wy - H) & 15) === 9 ? C.slate : C.grey;
         } else {
           const r = rnd(wx, wy, 27);
-          c = r < 0.06 ? C.moss : r < 0.12 ? C.pine : C.forest;
+          c = lawn(r < 0.06 ? C.moss : r < 0.12 ? C.pine : C.forest, r);
         }
         pc.set(x, y, c);
       }
     }
     pc.at(-st.x, -st.y);
+    const winter = artSeason() === "winter";
     for (const t of trees) {
-      pc.ellipse(t.x - t.r, t.y + t.r - 4, t.r * 2, 8, C.pine);
+      pc.ellipse(t.x - t.r, t.y + t.r - 4, t.r * 2, 8, winter ? C.silver : C.pine);
       pc.rect(t.x - 2, t.y, 4, t.r, C.bark);
       const top = t.y - t.r - 6;
-      const main = [C.moss, C.forest, C.leaf][t.v]!;
+      if (winter) {
+        // bare branches with a little snow on top
+        pc.rect(t.x - 1, top + 4, 2, t.r + 2, C.bark);
+        for (const [dx, dy, len] of [
+          [-1, 6, -t.r + 2],
+          [1, 3, t.r - 3],
+          [-1, 11, -t.r + 4],
+          [1, 9, t.r - 2],
+        ] as const) {
+          const n = Math.abs(len);
+          for (let i = 0; i < n; i++) {
+            const x = t.x + dx + Math.sign(len) * i;
+            const y = top + dy - Math.floor(i / 2);
+            pc.set(x, y, C.cocoa);
+            if (i % 3 === 0) pc.set(x, y - 1, C.white);
+          }
+        }
+        continue;
+      }
+      const f = foliage(t.v);
+      const main = f?.mid ?? [C.moss, C.forest, C.leaf][t.v]!;
       pc.ellipse(t.x - t.r - 1, top - 1, t.r * 2 + 2, t.r * 2 + 2, C.night);
-      pc.ellipse(t.x - t.r, top, t.r * 2, t.r * 2, t.v === 1 ? C.pine : C.forest);
+      pc.ellipse(t.x - t.r, top, t.r * 2, t.r * 2, f?.dark ?? (t.v === 1 ? C.pine : C.forest));
       pc.ellipse(t.x - t.r + 1, top, t.r * 2 - 3, t.r * 2 - 4, main);
-      pc.ellipse(t.x - t.r / 2, top + 2, t.r, t.r - 2, t.v === 2 ? C.lemon : C.leaf, 140);
+      pc.ellipse(
+        t.x - t.r / 2,
+        top + 2,
+        t.r,
+        t.r - 2,
+        f?.light ?? (t.v === 2 ? C.lemon : C.leaf),
+        140,
+      );
+      if (f?.dot) {
+        for (let i = 0; i < 5; i++) {
+          const a = rnd(t.x, t.y, 30 + i) * Math.PI * 2;
+          const d = rnd(t.x, t.y, 40 + i) * (t.r - 3);
+          pc.set(Math.round(t.x + Math.cos(a) * d), Math.round(top + t.r + Math.sin(a) * d), f.dot);
+        }
+      }
     }
     pc.at(0, 0);
     return { texture: Texture.from(pc.toCanvas()), x: st.x, y: st.y };

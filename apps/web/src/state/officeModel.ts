@@ -39,6 +39,8 @@ export type SessionState = {
   machine: string | undefined;
   /** its connector stopped heartbeating (laptop asleep / offline) */
   offline: boolean;
+  /** share of the context window in use (0..1), when the connector knows it */
+  context: number | undefined;
   /** most subagents seen at once for this session (since this viewer saw it) */
   peakSubagents: number;
   /** activity changes seen by this viewer (client clock), oldest first, pruned to ~1 h */
@@ -73,6 +75,7 @@ export type ModelChange =
       previous: number;
     }
   | { kind: "connectionChanged"; personId: string; sessionId: string; offline: boolean }
+  | { kind: "contextChanged"; personId: string; sessionId: string; context: number | undefined }
   | {
       kind: "interaction";
       interaction: InteractionKind;
@@ -113,6 +116,10 @@ export class OfficeModel {
   private day = "";
   private startedIds = new Set<string>();
   hasSnapshot = false;
+  /** deployed version from the server */
+  version: string | undefined;
+  /** sessions running every 5 min over the last 40 min, from the server's history */
+  recentSessions: number[] = [];
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -201,6 +208,15 @@ export class OfficeModel {
         }
         for (const pv of d.people) this.upsertPerson(pv, true, out);
         this.hasSnapshot = true;
+        this.version = d.version;
+        if (d.today) {
+          // the server's history knows the whole day; a reload must not reset the whiteboard
+          this.rollDay();
+          this.started = Math.max(this.started, d.today.started);
+          for (const id of this.sessions.keys()) this.startedIds.add(id);
+          this.peak = Math.max(this.peak, d.today.peak);
+          this.recentSessions = [...d.today.recent];
+        }
         break;
       }
       case "person.joined":
@@ -269,6 +285,11 @@ export class OfficeModel {
         if (s) this.setOffline(s, msg.data.offline, out);
         break;
       }
+      case "session.contextChanged": {
+        const s = this.sessions.get(msg.data.sessionId);
+        if (s) this.setContext(s, msg.data.context ?? undefined, out);
+        break;
+      }
       case "interaction.happened": {
         const d = msg.data;
         out.push({
@@ -295,6 +316,12 @@ export class OfficeModel {
   }
 
   // ---- internals ------------------------------------------------------------------------
+  private setContext(s: SessionState, context: number | undefined, out: ModelChange[]) {
+    if (s.context === context) return;
+    s.context = context;
+    out.push({ kind: "contextChanged", personId: s.personId, sessionId: s.sessionId, context });
+  }
+
   private setOffline(s: SessionState, offline: boolean, out: ModelChange[]) {
     if (s.offline === offline) return;
     s.offline = offline;
@@ -394,6 +421,7 @@ export class OfficeModel {
         activitySince: this.now(),
         machine: sv.machine,
         offline: !!sv.offline,
+        context: sv.context,
         peakSubagents: sv.subagents,
         activityLog: [{ activity: sv.activity, at: this.now() }],
       };
@@ -407,6 +435,7 @@ export class OfficeModel {
     s.project = sv.project;
     s.machine = sv.machine;
     this.setOffline(s, !!sv.offline, out);
+    this.setContext(s, sv.context, out);
     if (s.activity !== sv.activity) {
       const previous = s.activity;
       s.activity = sv.activity;

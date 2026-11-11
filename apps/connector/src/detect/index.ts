@@ -137,9 +137,12 @@ export class Detector {
   private describe(c: Candidate, now: number): SessionInfo {
     const meta = c.meta();
     let activity: SessionInfo["activity"];
+    let context: number | undefined;
     if (c.transcript) {
-      const events = this.tail.read(c.transcript).map((e) => safe(() => c.normalize(e), null));
+      const entries = this.tail.read(c.transcript);
+      const events = entries.map((e) => safe(() => c.normalize(e), null));
       activity = deriveActivity(events, c.mtimeMs, now);
+      context = roundContext(safe(() => c.context?.(entries), undefined));
     } else {
       // pid file but nothing typed yet
       activity = now - (meta.startedAt ?? now) >= IDLE_AFTER_MS ? "idle" : "waiting";
@@ -153,6 +156,7 @@ export class Detector {
       subagents,
       startedAt,
     };
+    if (context !== undefined) info.context = context;
     if (this.opts.shareProjectNames) {
       const project = projectName(meta.cwd);
       if (project) info.project = project;
@@ -169,9 +173,22 @@ function safe<T>(fn: () => T, fallback?: T): T {
   }
 }
 
+/** 5% steps, so a growing context sends a snapshot every few turns, not every turn. */
+export function roundContext(share: number | undefined): number | undefined {
+  if (share === undefined || !Number.isFinite(share) || share < 0) return undefined;
+  return Math.min(1, Math.round(share * 20) / 20);
+}
+
 /** Stable comparison key for "did the snapshot change?". */
 export function snapshotKey(sessions: readonly SessionInfo[]): string {
   return JSON.stringify(
-    sessions.map((s) => [s.sessionKey, s.agent, s.project ?? "", s.activity, s.subagents]),
+    sessions.map((s) => [
+      s.sessionKey,
+      s.agent,
+      s.project ?? "",
+      s.activity,
+      s.subagents,
+      s.context ?? -1,
+    ]),
   );
 }

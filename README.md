@@ -121,7 +121,8 @@ with tiny variations, and your pod has one desk per running session (at least 2,
 
 Sent: agent kind (Claude/Codex/Pi), a salted hash of the session id, the project **folder
 name** (turn off with `share_project_names = false` in `~/.config/agent-office/config.toml`),
-an activity verb (typing/reading/thinking/running/waiting/idle), the subagent count, when the
+an activity verb (typing/reading/thinking/running/waiting/idle), the subagent count, how full
+the context window is (a percentage), when the
 session started, the connector version, and the **machine name** you chose (`machine_name`,
 defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like).
 
@@ -158,13 +159,19 @@ still opens offline):
 The logo menu also has Stats, Timelapse and Log out, since an installed app has no address
 bar.
 
-Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?nohud=1`, `?demo=busy` (no
-server needed).
+Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?season=winter` (or spring,
+summer, autumn), `?weather=snow` (sun, clouds, rain, snow; otherwise it changes every hour),
+`?nohud=1`, `?demo=busy` (no server needed). A car drives by every minute or so: click it
+for the stats.
 
 Everything is behind the office password (the same one as the connector's): the first visit
 shows a login page and the browser stays logged in for 30 days; opening the office during the
 last 15 of those days starts a fresh 30. If the server also sets
 `VIEWER_KEY`, `?key=…` links (handy for the kiosk iPad) skip the login.
+
+Agents that have filled more than half of their context window start to smoke, past 80% they
+are on fire (the agent card shows the exact share; Claude Code and Codex). Helpers stay close
+to their agent's desk. The version of the office is shown next to its name.
 
 When a Mac goes to sleep or loses its network, its agents fade out with their screens off
 after about 45 s (one missed heartbeat), and leave the office after 3 minutes.

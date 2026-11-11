@@ -2,7 +2,8 @@
  * Ambient office life around the real status (never instead of it): a roomba cleaning the
  * desk floor, a pizza drone at lunch and dinner time, birds in the garden, a ping-pong ball
  * when two people play, the chef bot for someone waiting 10+ minutes, the garden graveyard
- * of today's ended sessions, party mode and the weather of the day.
+ * of today's ended sessions, party mode, and (outdoors.ts) the street, the forest at night and
+ * the sky of every hour.
  * Sprites only, cached textures, position updates per frame; decisions a few times a second.
  */
 import { seededRandom } from "@agent-office/protocol";
@@ -23,9 +24,19 @@ import { pixelTexture } from "../art/fx.ts";
 import type { OfficeModel } from "../state/officeModel.ts";
 import type { WaitSpot } from "./cat.ts";
 import type { Effects } from "./effects.ts";
-import { localDayKey, PARTY_HELPERS, pizzaWindow, type Weather, weatherFor } from "./lifeRules.ts";
+import {
+  forcedSky,
+  localDayKey,
+  PARTY_HELPERS,
+  pizzaWindow,
+  type Season,
+  type SkyNow,
+  skyAt,
+  type Weather,
+} from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
 import type { OfficeScene } from "./office.ts";
+import { Outdoors } from "./outdoors.ts";
 import { findPath } from "./pathing.ts";
 
 export type LifeHooks = {
@@ -45,6 +56,8 @@ export type LifeHooks = {
 
 export type LifeOptions = {
   weather?: Weather | null;
+  /** season of the office (snow instead of rain in winter, petals/leaves in the wind) */
+  season?: Season;
   /** seconds until the drone shows up once a pizza window starts */
   droneDelay?: number;
 };
@@ -182,8 +195,9 @@ class PizzaDrone {
   }
 
   slow(day: string) {
+    // lunch belongs to the food truck now (outdoors.ts); the drone brings dinner
     const w = pizzaWindow(this.hooks.hour());
-    const key = w ? `${day}:${w}` : null;
+    const key = w === "dinner" ? `${day}:${w}` : null;
     if (key !== this.window) {
       // a window ended: the empty box goes away
       if (this.phase === "served") {
@@ -533,8 +547,8 @@ export class OfficeLife {
   private chef: Chef;
   readonly graveyard: Graveyard;
   private ball = new Sprite(pixelTexture());
-  /** rain streaks over the garden on rainy days */
-  private drops: Sprite[] = [];
+  private outdoors: Outdoors;
+  private sky: SkyNow = forcedSky("sun");
   private acc = 99;
   private day = "";
   private readonly effects: Effects;
@@ -571,15 +585,7 @@ export class OfficeLife {
       },
       effects,
     );
-    for (let i = 0; i < 70; i++) {
-      const d = new Sprite(pixelTexture());
-      d.scale.set(0.5, 3);
-      d.tint = 0xc0cbdc;
-      d.alpha = 0.8;
-      d.visible = false;
-      scene.fx.addChild(d);
-      this.drops.push(d);
-    }
+    this.outdoors = new Outdoors(scene, effects, opts.season ?? "summer");
     this.ball.anchor.set(0.5);
     this.ball.visible = false;
     this.ball.label = "actor";
@@ -589,6 +595,11 @@ export class OfficeLife {
   /** Rebuilt map (desk floor grew): actors keep going, labels re-attach them. */
   reattach() {
     this.graveyard.relayout();
+  }
+
+  /** the car on the street was clicked (it goes to /stats) */
+  hitCar(wx: number, wy: number): boolean {
+    return this.outdoors.hitCar(wx, wy);
   }
 
   get pizzaOnTable() {
@@ -610,19 +621,10 @@ export class OfficeLife {
     this.roomba.update(dt, time);
     this.drone.update(dt, time);
     const night = this.scene.night > 0.5;
-    this.birds.update(dt, time, !night && this.scene.weather !== "rain");
+    const wet = this.sky.precip > 0.15;
+    this.birds.update(dt, time, !night && !wet);
     this.chef.update(dt, time);
-    const raining = this.scene.weather === "rain";
-    if (raining || this.drops[0]!.visible) {
-      const g = this.scene.map.areas.find((a) => a.name === "garden")!;
-      const h = g.h * TILE;
-      this.drops.forEach((d, i) => {
-        d.visible = raining;
-        const x = g.x * TILE + 24 + ((i * 53) % (g.w * TILE - 20));
-        const y = (i * 97 + time * 170) % h;
-        d.position.set(Math.round(x - y * 0.05), Math.round(g.y * TILE + y));
-      });
-    }
+    this.outdoors.update(dt, time, this.sky, this.hooks.hour(), this.day);
     // ping-pong rally
     const match = this.hooks.pongMatch();
     this.ball.visible = match;
@@ -644,9 +646,14 @@ export class OfficeLife {
     const day = localDayKey(this.model.timezone);
     if (day !== this.day) {
       this.day = day;
-      this.scene.weather = this.opts.weather ?? weatherFor(day);
       this.graveyard.setDay(day);
     }
+    const hour = this.hooks.hour();
+    this.sky = this.opts.weather
+      ? forcedSky(this.opts.weather)
+      : skyAt(day, hour, this.opts.season ?? "summer");
+    this.scene.weather = this.sky.weather;
+    this.outdoors.slow(day, hour);
     this.drone.slow(day);
     this.chef.slow();
     // party mode: someone runs 10+ helpers at once

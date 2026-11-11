@@ -6,6 +6,7 @@ import { Rectangle, Texture } from "pixi.js";
 import type { ObjectKind } from "../world/map.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
+import { artSeason, foliage } from "./seasons.ts";
 
 type Art = {
   w: number;
@@ -430,19 +431,51 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
     frames: 2,
     dy: 2,
     draw(pc, v, f) {
-      pc.ellipse(4, 40, 28, 8, C.forest, 255);
+      const winter = artSeason() === "winter";
+      pc.ellipse(4, 40, 28, 8, winter ? C.silver : C.forest, 255);
       pc.rect(15, 28, 6, 16, C.bark);
       pc.vline(16, 28, 15, C.wood);
       const s = f;
-      const dark = v === 1 ? C.pine : C.forest;
-      const mid = v === 1 ? C.forest : C.moss;
-      const lt = v === 1 ? C.moss : C.leaf;
+      if (winter) {
+        // bare crown: trunk forks into branches, snow on the upper sides
+        pc.rect(16, 10, 4, 20, C.bark);
+        const branches = [
+          [17, 22, -1, 10],
+          [19, 18, 1, 11],
+          [17, 14, -1, 8],
+          [19, 11, 1, 7],
+          [18, 9, 0, 6],
+        ] as const;
+        for (const [x0, y0, dir, len] of branches) {
+          for (let i = 0; i < len; i++) {
+            const x = x0 + dir * i + (dir === 0 ? 0 : s);
+            const y = y0 - Math.floor(i * (dir === 0 ? 1 : 0.6));
+            pc.set(x, y, C.cocoa);
+            if (i % 2 === 1) pc.set(x, y - 1, C.white);
+          }
+        }
+        return;
+      }
+      const fol = foliage(v);
+      const dark = fol?.dark ?? (v === 1 ? C.pine : C.forest);
+      const mid = fol?.mid ?? (v === 1 ? C.forest : C.moss);
+      const lt = fol?.light ?? (v === 1 ? C.moss : C.leaf);
       pc.ellipse(2 + s, 8, 32, 26, dark);
       pc.ellipse(4 + s, 4, 28, 24, mid);
       pc.ellipse(8 + s, 2, 18, 16, lt);
       pc.ellipse(10 + s, 4, 6, 4, C.lemon, 255);
       pc.ellipse(20 + s, 18, 10, 8, mid);
-      if (v === 1) {
+      if (fol?.dot) {
+        for (const [x, y] of [
+          [9, 10],
+          [22, 7],
+          [15, 18],
+          [26, 15],
+          [7, 20],
+          [18, 4],
+        ] as const)
+          pc.set(x + s, y, fol.dot);
+      } else if (v === 1) {
         pc.set(10 + s, 14, C.red);
         pc.set(22 + s, 9, C.red);
         pc.set(17 + s, 21, C.red);
@@ -561,9 +594,12 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
     h: 16,
     dy: 1,
     draw(pc, v) {
-      pc.ellipse(0, 2, 16, 14, C.forest);
-      pc.ellipse(1, 1, 13, 11, C.moss);
-      pc.ellipse(3, 2, 7, 5, C.leaf);
+      const season = artSeason();
+      const fol = foliage(v);
+      pc.ellipse(0, 2, 16, 14, fol?.dark ?? C.forest);
+      pc.ellipse(1, 1, 13, 11, fol?.mid ?? C.moss);
+      pc.ellipse(3, 2, 7, 5, season === "winter" ? C.white : (fol?.light ?? C.leaf));
+      if (season === "winter") pc.hline(2, 1, 11, C.white);
       if (v === 1) {
         pc.set(4, 8, C.pink);
         pc.set(10, 5, C.pink);

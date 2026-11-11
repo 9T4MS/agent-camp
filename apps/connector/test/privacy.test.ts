@@ -96,11 +96,12 @@ describe("privacy", () => {
     expect((snap.data.sessions as unknown[]).length).toBe(4);
     for (const raw of srv.received) expect(parseConnectorMessage(raw).ok).toBe(true);
     assertClean(srv.received, h.home);
-    // the only per-session fields are the allowed ones
+    // the only per-session fields are the allowed ones (context: a 0..1 number, when known)
+    const allowed = ["activity", "agent", "project", "sessionKey", "startedAt", "subagents"];
     for (const s of snap.data.sessions as Record<string, unknown>[]) {
-      expect(Object.keys(s).sort()).toEqual(
-        ["activity", "agent", "project", "sessionKey", "startedAt", "subagents"].sort(),
-      );
+      const keys = Object.keys(s).filter((k) => k !== "context");
+      expect(keys.sort()).toEqual(allowed.sort());
+      if ("context" in s) expect(typeof s.context).toBe("number");
     }
   });
 

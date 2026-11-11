@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type HistoryRow, StatsResponse } from "@agent-office/protocol";
 import {
+  computeOfficeDay,
   computePersonDay,
   computeStats,
   historyToCsv,
@@ -161,5 +162,40 @@ describe("person day", () => {
     });
     const nobody = computePersonDay(rows, "carl", { timezone: "UTC", now: MON_0800Z });
     expect(nobody).toMatchObject({ sessionsToday: 0, peakParallelToday: 0, online: false });
+  });
+});
+
+describe("computeOfficeDay", () => {
+  const TZ = "UTC";
+  const NOW = Date.UTC(2026, 10, 11, 12, 0);
+  const row = (min: number, type: string, person = "a") => ({
+    ts: NOW - min * 60_000,
+    type,
+    person,
+    agent: null,
+    project: null,
+    subagents: null,
+  });
+
+  test("started today, peak across people, and recent samples", () => {
+    const rows = [
+      row(24 * 60, "session.started"), // yesterday, still running
+      row(30, "session.started", "b"),
+      row(20, "session.started", "b"),
+      row(10, "session.ended", "b"),
+      row(5, "person.left", "a"),
+    ];
+    const d = computeOfficeDay(rows, { timezone: TZ, now: NOW, liveSessions: 1 });
+    expect(d.started).toBe(2);
+    expect(d.peak).toBe(3);
+    expect(d.recent).toEqual([1, 2, 2, 3, 3, 2, 1, 1]);
+  });
+
+  test("empty history: live sessions are the peak", () => {
+    expect(computeOfficeDay([], { timezone: TZ, now: NOW, liveSessions: 4 })).toEqual({
+      started: 0,
+      peak: 4,
+      recent: [0, 0, 0, 0, 0, 0, 0, 4],
+    });
   });
 });

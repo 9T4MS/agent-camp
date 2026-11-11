@@ -44,6 +44,10 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
       const s = lookup(person, e.data.sessionId);
       return `${e.type} ${person} ${s?.agent ?? "?"} ${s?.project ?? "-"} count=${e.data.count}`;
     }
+    case "session.contextChanged": {
+      const s = lookup(person, e.data.sessionId);
+      return `${e.type} ${person} ${s?.agent ?? "?"} ${s?.project ?? "-"} ${e.data.context === null ? "?" : `${Math.round(e.data.context * 100)}%`}`;
+    }
     case "session.connectionChanged": {
       const s = lookup(person, e.data.sessionId);
       return `${e.type} ${person} ${s?.agent ?? "?"} ${s?.project ?? "-"} ${e.data.offline ? "offline" : "online"}`;
@@ -55,6 +59,7 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
 export const HISTORY_SKIP = new Set<ViewerEvent["type"]>([
   "session.activityChanged",
   "session.connectionChanged",
+  "session.contextChanged",
 ]);
 
 export function historyRow(e: ViewerEvent, lookup: SessionLookup): HistoryRow | null {
