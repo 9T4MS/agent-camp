@@ -161,6 +161,20 @@ describe("avatars", () => {
     expect(styles.size).toBeGreaterThan(4);
     expect(avatarFromSeed("anna")).not.toEqual(avatarFromSeed("martin"));
   });
+  test("looks from before outfits / held items get the defaults", () => {
+    const { outfit: _o, leftHand: _l, rightHand: _r, ...old } = avatarFromSeed("anna");
+    const r = AvatarSpec.parse(old);
+    expect(r.outfit).toBe("jacket");
+    expect(r.leftHand).toBe("none");
+    expect(r.rightHand).toBe("none");
+  });
+  test("seeded looks stay plain: jacket, empty hands, no editor-only cap", () => {
+    for (let i = 0; i < 500; i++) {
+      const a = avatarFromSeed(`p${i}`);
+      expect([a.outfit, a.leftHand, a.rightHand]).toEqual(["jacket", "none", "none"]);
+      expect(a.accessory).not.toBe("cap-mint");
+    }
+  });
   test("coerceAvatar falls back on garbage", () => {
     expect(coerceAvatar({ hairStyle: "nope" }, "anna")).toEqual(avatarFromSeed("anna"));
     const good = avatarFromSeed("x");

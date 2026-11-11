@@ -2,7 +2,7 @@
  * Storage interface the Hub depends on. Synchronous on purpose: Durable Object SQLite
  * (`ctx.storage.sql`) and bun:sqlite are both synchronous, and tests use memory.
  */
-import type { AvatarSpec, HistoryRow, SnapshotMeta } from "@agent-office/protocol";
+import { AvatarSpec, type HistoryRow, type SnapshotMeta } from "@agent-office/protocol";
 
 /**
  * A person's look. `selfDescription` is the person-level description the look was made
@@ -138,8 +138,11 @@ export class SqlStore implements Store {
     if (!r) return null;
     try {
       const desc = optStr(r.descr);
+      const raw: unknown = JSON.parse(String(r.spec));
+      // rows from before newer catalog fields existed get their defaults
+      const look = AvatarSpec.safeParse(raw);
       return {
-        avatar: JSON.parse(String(r.spec)) as AvatarSpec,
+        avatar: look.success ? look.data : (raw as AvatarSpec),
         key: String(r.key),
         ...(desc !== null ? { selfDescription: desc } : {}),
       };

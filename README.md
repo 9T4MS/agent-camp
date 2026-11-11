@@ -117,6 +117,15 @@ clothes and props, so everyone stays in the same pixel style. Your jacket colour
 which agent a session runs (Claude, Codex, Pi). Every extra session is a sibling of you
 with tiny variations, and your pod has one desk per running session (at least 2, up to 6).
 
+Want a say? Click your name plate and **Customize look**: pick hair, face, glasses, cap,
+outfit (jacket, hoodie, flannel, tee), something for each hand (beer, coffee, phone, ...)
+and your desk props, with a live preview. Saving pins the look; **Automatic** goes back to
+the one from your description. Outfits that are not in the agent colour carry a small agent
+badge on the tee and a band across the back, so you can still tell Claude from Codex at the
+desk.
+
+![Look editor](screenshots/14-look-editor-laptop.png)
+
 ### Privacy
 
 Sent: agent kind (Claude/Codex/Pi), a salted hash of the session id, the project **folder

@@ -273,3 +273,81 @@ describe("OfficeApp interactions", () => {
     expect((await post({ kind: "wave", personId: "bob" }))!.status).toBe(404);
   });
 });
+
+describe("OfficeApp look editor", () => {
+  const hello = (name: string, selfDescription?: string) =>
+    JSON.stringify(
+      envelope("connector.hello", {
+        name,
+        password: "pw",
+        clientId: `c-${name}`,
+        connectorVersion: "1.0.0",
+        ...(selfDescription ? { selfDescription } : {}),
+      }),
+    );
+  const tomLook = {
+    hairStyle: "short",
+    hairColor: "dark-brown",
+    skinTone: "light",
+    glasses: "round",
+    facialHair: "beard",
+    accessory: "cap-mint",
+    outfit: "flannel",
+    leftHand: "beer",
+    rightHand: "joint",
+    deskProps: ["plant"],
+    deskMess: 1,
+  };
+  const put = (app: OfficeApp, personId: string, body: unknown, ip = "1.1.1.1") =>
+    app.handleHttp(
+      req(`/api/people/${personId}/avatar`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  test("pins a custom look, broadcasts it and survives a new description", async () => {
+    const { app, sent, advance } = setup();
+    app.connectorMessage("s1", hello("Tom"));
+    await Bun.sleep(1);
+    const r = (await put(app, "tom", { avatar: tomLook, from: "Tom" }))!;
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, custom: true, avatar: tomLook });
+    const ev = JSON.parse(sent.at(-1)!);
+    expect(ev.type).toBe("avatar.updated");
+    expect(ev.data.avatar).toMatchObject(tomLook);
+
+    const get = (await (await app.handleHttp(req("/api/people/tom/avatar")))!.json()) as {
+      custom: boolean;
+    };
+    expect(get.custom).toBe(true);
+
+    // a hello with a new description does not replace the custom look
+    const before = sent.length;
+    app.connectorMessage("s2", hello("Tom", "blue mohawk"));
+    await Bun.sleep(1);
+    expect(sent.slice(before).some((s) => JSON.parse(s).type === "avatar.updated")).toBe(false);
+    expect(app.hub.state().people[0]!.avatar).toMatchObject(tomLook);
+
+    // back to automatic: the seeded look again, no longer custom
+    advance(2_000);
+    const back = (await put(app, "tom", { avatar: null }))!;
+    expect(back.status).toBe(200);
+    const body = (await back.json()) as { custom: boolean; avatar: { outfit: string } };
+    expect(body.custom).toBe(false);
+    expect(body.avatar.outfit).toBe("jacket");
+    expect(app.hub.isCustomLook("tom")).toBe(false);
+  });
+
+  test("validates, rate limits and needs the person in the office", async () => {
+    const { app, advance } = setup();
+    app.connectorMessage("s1", hello("Tom"));
+    expect((await put(app, "tom", { avatar: { ...tomLook, outfit: "tux" } }))!.status).toBe(400);
+    expect((await put(app, "nobody", { avatar: tomLook }, "2.2.2.2"))!.status).toBe(404);
+    expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(200);
+    expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(429);
+    advance(2_000);
+    expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(200);
+  });
+});
