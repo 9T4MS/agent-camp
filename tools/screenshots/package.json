@@ -6,7 +6,8 @@
   "scripts": {
     "shoot": "bun run shoot.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "install-browsers": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@agent-office/protocol": "workspace:*",
