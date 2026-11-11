@@ -7,6 +7,9 @@
 import { type AppEnv, connectorPassword } from "./app.ts";
 
 export const SESSION_COOKIE = "ao_session";
+/** "This browser is <personId>": proven with a code sent to that person's Macs. */
+export const ME_COOKIE = "ao_me";
+export const ME_TTL_MS = 365 * 86_400_000;
 export const SESSION_TTL_MS = 30 * 86_400_000;
 export const LOGIN_PATH = "/login";
 
@@ -70,6 +73,32 @@ export async function verifySessionToken(
   const [exp, sig] = token.split(".");
   if (!exp || !sig || !(Number(exp) > now)) return false;
   return safeEqual(sig, await sign(password, exp));
+}
+
+/** Signed `<personId>.<exp>.<sig>` for the ME_COOKIE. */
+export async function makeMeToken(password: string, personId: string, now: number) {
+  const exp = String(now + ME_TTL_MS);
+  return `${personId}.${exp}.${await sign(password, `me:${personId}:${exp}`)}`;
+}
+
+/** The person this browser proved to be (ME_COOKIE), or null. */
+export async function meFromRequest(
+  req: Request,
+  env: AppEnv,
+  now = Date.now(),
+): Promise<string | null> {
+  const pw = connectorPassword(env);
+  const token = cookieValue(req, ME_COOKIE);
+  if (!pw || !token) return null;
+  const [personId, exp, sig] = token.split(".");
+  if (!personId || !exp || !sig || !(Number(exp) > now)) return null;
+  return safeEqual(sig, await sign(pw, `me:${personId}:${exp}`)) ? personId : null;
+}
+
+/** Set-Cookie for ME_COOKIE (empty value + 0 = forget). */
+export function meCookie(req: Request, value: string, maxAgeS: number): string {
+  const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
+  return `${ME_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeS}${secure}`;
 }
 
 function cookieValue(req: Request, name: string): string | null {
@@ -170,7 +199,10 @@ export async function gate(req: Request, env: AppEnv, now = Date.now()): Promise
   }
 
   if (path === "/api/logout" && method === "POST") {
-    return redirect(LOGIN_PATH, { "set-cookie": sessionCookie(req, "", 0) });
+    const out = redirect(LOGIN_PATH, { "set-cookie": sessionCookie(req, "", 0) });
+    // a shared device that logs out also forgets who it was
+    out.headers.append("set-cookie", meCookie(req, "", 0));
+    return out;
   }
 
   if (path === LOGIN_PATH && method === "GET") {

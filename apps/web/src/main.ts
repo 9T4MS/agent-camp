@@ -437,6 +437,57 @@ async function boot() {
     }
   }
   if (!kiosk) hud.onEditLook = editLook;
+  /** POST helper for the "This is me" flow (cookie auth, JSON errors -> status line). */
+  const postJson = async (
+    path: string,
+    body: unknown,
+  ): Promise<PokeResult & { data?: unknown }> => {
+    try {
+      const r = await fetch(`${path}${key ? `?key=${encodeURIComponent(key)}` : ""}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      if (r.status === 401) void loginIfLoggedOut();
+      return r.ok
+        ? { ok: true, message: "", data }
+        : { ok: false, message: data.error ?? `failed (${r.status})` };
+    } catch {
+      return { ok: false, message: "could not reach the office" };
+    }
+  };
+  if (demo) hud.editAnyLook = true;
+  else if (!kiosk) {
+    hud.onClaim = {
+      send: async (personId) => {
+        const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim`, {});
+        return r.ok
+          ? {
+              ok: true,
+              message:
+                "code sent as a notification on your Mac (needs notifications on for the Agent Office connector). Nothing after 30 s? Send again.",
+            }
+          : r;
+      },
+      verify: async (personId, code) => {
+        const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim/verify`, {
+          code,
+        });
+        return r.ok ? { ok: true, message: "that's you!" } : r;
+      },
+      forget: async () => {
+        await fetch("/api/me", { method: "DELETE" }).catch(() => {});
+      },
+    };
+    void fetch("/api/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ personId?: string | null }>) : null))
+      .then((me) => {
+        hud.me = me?.personId ?? null;
+        hud.refresh();
+      })
+      .catch(() => {});
+  }
   hud.previewLook = (avatar, agent) => {
     const look = lookFor(avatar, agent, null);
     // front, side, at the desk (back to the camera: the agent patch)
@@ -478,7 +529,7 @@ async function boot() {
     return true;
   };
   hud.onOpenSession = (id) => void openSession(id);
-  camera.holdWhile = () => hud.panelOpen;
+  camera.holdWhile = () => hud.panelOpen || hud.lookEditorOpen;
   hud.onPanelChange = () => {
     chars.selected = hud.openSessionId;
   };

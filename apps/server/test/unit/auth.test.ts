@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   gate,
   isAuthorized,
+  ME_COOKIE,
+  makeMeToken,
   makeSessionToken,
+  meFromRequest,
   renewedSessionCookie,
   SESSION_COOKIE,
   SESSION_RENEW_BELOW_MS,
@@ -96,6 +99,18 @@ describe("viewer gate", () => {
     const res = await gate(req("/api/logout", { method: "POST" }), ENV, NOW);
     expect(res?.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=;`);
     expect(res?.headers.get("set-cookie")).toContain("Max-Age=0");
+    // a shared device that logs out also forgets who it was
+    expect(res?.headers.get("set-cookie")).toContain(`${ME_COOKIE}=;`);
+  });
+
+  test("me cookie: signed per person, expires, rejects tampering and other passwords", async () => {
+    const token = await makeMeToken("pw", "tom", NOW);
+    const withMe = (t: string) => req("/", { headers: { cookie: `${ME_COOKIE}=${t}` } });
+    expect(await meFromRequest(withMe(token), ENV, NOW)).toBe("tom");
+    expect(await meFromRequest(withMe(token.replace("tom.", "anna.")), ENV, NOW)).toBeNull();
+    expect(await meFromRequest(withMe(token), { CONNECTOR_PASSWORD: "other" }, NOW)).toBeNull();
+    expect(await meFromRequest(withMe(token), ENV, NOW + 366 * 86_400_000)).toBeNull();
+    expect(await meFromRequest(req("/"), ENV, NOW)).toBeNull();
   });
 
   test("next only allows same-site paths", () => {
