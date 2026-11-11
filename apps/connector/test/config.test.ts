@@ -43,6 +43,7 @@ describe("config.toml", () => {
         machine_name: "devbox",
         share_project_names: false,
         helpers: "cats" as const,
+        cowork: true,
       };
       saveConfig(path, written);
       expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -84,6 +85,7 @@ describe("config.toml", () => {
         notifications: true,
         look_generator: "auto",
         helpers: "robots",
+        cowork: false,
         client_id: "c_abc",
         name: "Zoe",
       });
@@ -165,6 +167,36 @@ describe("helpers", () => {
       expect((await run("configure", "--get", "helpers")).out).toBe("cats");
       expect((await run("configure", "--helpers", "robots")).code).toBe(0);
       expect((await run("configure", "--get", "helpers")).out).toBe("robots");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cowork", () => {
+  test("off by default; configure --cowork writes it", async () => {
+    expect(toConfig({}).cowork).toBe(false);
+    expect(toConfig({ cowork: true }).cowork).toBe(true);
+    const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
+    try {
+      const main = join(import.meta.dir, "..", "src", "main.ts");
+      const env = { ...process.env, AGENT_OFFICE_CONFIG_DIR: dir };
+      const run = async (...args: string[]) => {
+        const p = Bun.spawn([process.execPath, main, ...args], {
+          env,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const out = await new Response(p.stdout).text();
+        return { code: await p.exited, out: out.trim() };
+      };
+      expect((await run("configure", "--get", "cowork")).out).toBe("false");
+      const on = await run("configure", "--cowork", "true");
+      expect(on.code).toBe(0);
+      expect(on.out).toContain("Restart the connector");
+      expect((await run("configure", "--get", "cowork")).out).toBe("true");
+      expect((await run("configure", "--cowork", "false")).code).toBe(0);
+      expect((await run("configure", "--get", "cowork")).out).toBe("false");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

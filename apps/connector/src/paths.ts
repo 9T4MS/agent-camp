@@ -33,8 +33,13 @@ export function logPath(env: Env = process.env, platform: string = process.platf
     : join(configDir(env), "agent-office.log");
 }
 
-/** Directories the detectors scan. */
-export type AgentDirs = { claude: string; codex: string; pi: string };
+/**
+ * Directories the detectors scan. `claudeDesktop` is the Claude desktop app's data folder
+ * (macOS: ~/Library/Application Support/Claude), where Cowork sessions keep their transcripts.
+ */
+export type AgentDirs = { claude: string; codex: string; pi: string; claudeDesktop: string };
+
+const desktopDir = (home: string) => join(home, "Library", "Application Support", "Claude");
 
 /**
  * Resolve agent data directories. If an agent home override is given (AGENT_OFFICE_HOME or
@@ -49,6 +54,7 @@ export function agentDirs(env: Env = process.env, homeOverride?: string): AgentD
       claude: join(override, ".claude"),
       codex: join(override, ".codex"),
       pi: join(override, ".pi", "agent"),
+      claudeDesktop: desktopDir(override),
     };
   }
   const home = userHome(env);
@@ -56,5 +62,6 @@ export function agentDirs(env: Env = process.env, homeOverride?: string): AgentD
     claude: env.CLAUDE_CONFIG_DIR || join(home, ".claude"),
     codex: env.CODEX_HOME || join(home, ".codex"),
     pi: env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent"),
+    claudeDesktop: desktopDir(home),
   };
 }

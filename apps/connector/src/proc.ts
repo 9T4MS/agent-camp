@@ -9,6 +9,9 @@
  * (pi-claude-bridge) spawning the Claude Agent SDK's `claude` binary as its model backend.
  * Such a process gets `hostPid`; the detector folds its session into the host's and counts
  * hosted agents (e.g. purrness subagent workers) as the host's helpers, except model backends.
+ *
+ * The Claude desktop app (`Claude.app`) is not an agent process, but we note whether it runs:
+ * its Cowork sessions only count while it does.
  */
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
@@ -51,6 +54,25 @@ export interface ProcessSource {
   list(): Promise<ProcInfo[]>;
   /** Working directories of the given pids (missing entries = unknown). */
   cwds(pids: number[]): Promise<Map<number, string>>;
+  /** Whether the Claude desktop app runs, as of the last `list()`. Absent = never. */
+  claudeDesktop?(): Promise<boolean>;
+}
+
+/**
+ * Does a `ps` args line belong to the Claude desktop app's main process? Its helpers live in
+ * `Claude.app/Contents/Frameworks/…` and do not match.
+ */
+export function isClaudeDesktopArgs(args: string): boolean {
+  return /(^|\/)Claude\.app\/Contents\/MacOS\/Claude(\s|$)/.test(args);
+}
+
+/** Whether `ps -axo pid=,ppid=,args=` output lists the Claude desktop app. */
+export function claudeDesktopInPs(out: string): boolean {
+  for (const line of out.split("\n")) {
+    const m = line.match(/^\s*\d+\s+\d+\s+(.*)$/);
+    if (m && isClaudeDesktopArgs(m[1]!)) return true;
+  }
+  return false;
 }
 
 const RUNTIMES = new Set(["node", "bun", "deno", "nodejs"]);
@@ -161,9 +183,16 @@ export function parseLsof(out: string): Map<number, string> {
 
 class MacProcesses implements ProcessSource {
   private cwdCache = new Map<number, string>();
+  private desktop = false;
 
   async list(): Promise<ProcInfo[]> {
-    return parsePs(await run(["ps", "-axo", "pid=,ppid=,args="]));
+    const out = await run(["ps", "-axo", "pid=,ppid=,args="]);
+    this.desktop = claudeDesktopInPs(out);
+    return parsePs(out);
+  }
+
+  async claudeDesktop(): Promise<boolean> {
+    return this.desktop;
   }
 
   async cwds(pids: number[]): Promise<Map<number, string>> {
@@ -235,10 +264,15 @@ export function systemProcesses(platform: string = process.platform): ProcessSou
   return new NoProcesses();
 }
 
-/** A fixed process list, for tests. */
-export function fakeProcesses(procs: ProcInfo[], cwds: Record<number, string> = {}): ProcessSource {
+/** A fixed process list, for tests. `desktop`: the Claude desktop app runs. */
+export function fakeProcesses(
+  procs: ProcInfo[],
+  cwds: Record<number, string> = {},
+  desktop = false,
+): ProcessSource {
   return {
     list: async () => procs,
+    claudeDesktop: async () => desktop,
     cwds: async (pids) => {
       const m = new Map<number, string>();
       for (const p of pids) if (cwds[p]) m.set(p, cwds[p]);

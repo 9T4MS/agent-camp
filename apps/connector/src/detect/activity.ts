@@ -43,6 +43,8 @@ const TYPING = new Set([
   "create_file",
   "str_replace_editor",
   "str_replace_based_edit_tool",
+  // Cowork's tool that creates and edits designs in Claude Design
+  "claudedesign",
 ]);
 const READING = new Set([
   "read",

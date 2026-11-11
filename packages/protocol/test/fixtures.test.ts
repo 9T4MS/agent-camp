@@ -110,7 +110,6 @@ describe("negative parsing", () => {
     const snap = load("presence.snapshot") as { data: { sessions: Record<string, unknown>[] } };
     const s0 = snap.data.sessions[0]!;
     const bad = [
-      { ...s0, agent: "gemini" },
       { ...s0, activity: "dancing" },
       { ...s0, subagents: -1 },
       { ...s0, subagents: 1.5 },
@@ -120,6 +119,43 @@ describe("negative parsing", () => {
     for (const s of bad) {
       expect(parseConnectorMessage({ ...snap, data: { sessions: [s] } }).ok).toBe(false);
     }
+  });
+  test("an unknown agent kind degrades to unknown instead of failing the message", () => {
+    // a newer connector or server may add kinds; older readers must keep the rest
+    const snap = load("presence.snapshot") as { data: { sessions: Record<string, unknown>[] } };
+    const future = { ...snap.data.sessions[0]!, agent: "some-future-agent" };
+    const r = parseConnectorMessage({
+      ...snap,
+      data: { sessions: [future, ...snap.data.sessions] },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.msg.type === "presence.snapshot") {
+      expect(r.msg.data.sessions[0]!.agent).toBe("unknown");
+      expect(r.msg.data.sessions.slice(1).map((x): string => x.agent)).toEqual(
+        snap.data.sessions.map((x) => x.agent as string),
+      );
+    }
+    const started = load("session.started") as { data: { session: Record<string, unknown> } };
+    const v = parseViewerMessage({
+      ...started,
+      data: { ...started.data, session: { ...started.data.session, agent: "gemini" } },
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok && v.msg.type === "session.started") expect(v.msg.data.session.agent).toBe("unknown");
+    const office = load("office.snapshot") as {
+      data: { people: { sessions: Record<string, unknown>[] }[] };
+    };
+    const person = office.data.people.find((p) => p.sessions.length > 0)!;
+    const o = parseViewerMessage({
+      ...office,
+      data: {
+        ...office.data,
+        people: office.data.people.map((p) =>
+          p === person ? { ...p, sessions: p.sessions.map((x) => ({ ...x, agent: "gemini" })) } : p,
+        ),
+      },
+    });
+    expect(o.ok).toBe(true);
   });
   test("party state is optional for older snapshots and validates equipment and rolls", () => {
     expect(parseViewerMessage(load("office.snapshot")).ok).toBe(true);

@@ -43,7 +43,8 @@ same password the first time you open it.
 
 Paste it where Claude can run commands on your Mac: the **Code** tab of the Claude desktop
 app, or Claude Code in a terminal or IDE. A normal chat or Claude Design can't install it. The
-office shows sessions of Claude Code, Codex and Pi running on your Mac; Claude Design and
+office shows sessions of Claude Code, Codex and Pi running on your Mac, and Cowork sessions of
+the Claude desktop app if you turn them on (see [Cowork](#cowork)). Claude Design and
 claude.ai chats run in the cloud and don't appear.
 
 ### By hand
@@ -133,6 +134,15 @@ without one never changes your look, and the last description you set wins. The 
 name (`agent-office configure --machine-name devbox`, or `AO_MACHINE=` for the installer)
 shows up on the agent card so you can tell the sessions apart.
 
+### Cowork
+
+**Cowork** is off by default, because it is often not coding work. Turn it on with
+`agent-office configure --cowork true` and restart the connector. Each Cowork session whose
+transcript is on your Mac is then a Claude desk with the project name "Cowork" and real
+activity. A quiet session keeps its desk for 30 minutes. Current versions of the Claude app
+run Cowork chats inside the app's own virtual machine and keep their transcripts there, so
+those don't show up.
+
 ### How do I look?
 
 Your look is drawn by AI from your description. If you opt in, the AI is **your own**: the
@@ -155,10 +165,10 @@ clothing with its collar, buttons, pockets, pattern and embroidery, socks, shoes
 expression and a pose. Exact colours (`#1f3d2b`, "forest green") are used as given. All of it
 is painted by the same renderer at the same pixel size, so everyone stays in one style.
 
-Which agent a session runs (Claude, Codex, Pi) shows in its colour: if you don't name a
-jacket colour, your jacket takes the agent's colour as before; if you do, you keep your
-jacket and get a badge on the chest (and a patch across the shoulders from behind) in the
-agent's colour instead. Every extra
+Which agent a session runs (Claude, Codex, Pi) shows in its colour: if you
+don't name a jacket colour, your jacket takes the agent's colour as before; if you do, you
+keep your jacket and get a badge on the chest (and a patch across the shoulders from behind)
+in the agent's colour instead. Every extra
 session is a sibling of you with tiny variations, and your pod has one desk per running
 session (at least 2, up to 6).
 
@@ -207,6 +217,9 @@ avatar. A description your connector sends is drawn by the office's AI provider,
 set. One you write in the look studio goes to the Mac you confirmed **It's me** on, whose
 Claude Code (your own account, if you opted in) turns it into the look, which the connector sends to
 the office; only when that Mac cannot does it go to the office's AI provider.
+
+With `cowork` on (see [Cowork](#cowork)), Cowork sessions are sent like Claude Code
+sessions, with the project name always "Cowork".
 
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).

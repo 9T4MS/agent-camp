@@ -425,12 +425,19 @@ describe("helpers", () => {
       CODEX_HOME: "/cfg/codex",
       PI_CODING_AGENT_DIR: "/cfg/pi",
     };
-    expect(agentDirs(env)).toEqual({ claude: "/cfg/claude", codex: "/cfg/codex", pi: "/cfg/pi" });
+    expect(agentDirs(env)).toEqual({
+      claude: "/cfg/claude",
+      codex: "/cfg/codex",
+      pi: "/cfg/pi",
+      claudeDesktop: "/home/u/Library/Application Support/Claude",
+    });
     expect(agentDirs({ HOME: "/home/u" })).toEqual({
       claude: "/home/u/.claude",
       codex: "/home/u/.codex",
       pi: "/home/u/.pi/agent",
+      claudeDesktop: "/home/u/Library/Application Support/Claude",
     });
+    expect(agentDirs(env, "/fy").claudeDesktop).toBe("/fy/Library/Application Support/Claude");
     expect(agentDirs({ ...env, AGENT_OFFICE_HOME: "/fx" }).claude).toBe("/fx/.claude");
     expect(agentDirs(env, "/fy").pi).toBe("/fy/.pi/agent");
   });

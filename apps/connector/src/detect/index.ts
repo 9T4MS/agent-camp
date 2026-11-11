@@ -7,7 +7,11 @@
  *   2. it is the newest transcript whose folder/cwd matches a running agent process's cwd
  *      (stays live as `idle`), or
  *   3. its transcript was written < TRANSCRIPT_LIVE_MS ago and some process of that agent runs.
- * With `assumeProcesses` every agent counts as running and every pid in a pid file as alive.
+ *   4. opt-in (`cowork`): it is a Cowork session of the Claude desktop app (`Candidate.desktop`),
+ *      the app runs and the transcript was written < COWORK_LIVE_MS ago (no process on this
+ *      machine owns it).
+ * With `assumeProcesses` every agent counts as running, every pid in a pid file as alive, and
+ * the Claude desktop app as running.
  *
  * An agent process running inside another agent (`ProcInfo.hostPid`, e.g. the Claude Agent SDK
  * binary that Pi's Claude bridge spawns as its model backend) is not a session of its own: it
@@ -30,6 +34,7 @@ import type { ProcessSource, ProcInfo } from "../proc.ts";
 import { deriveActivity } from "./activity.ts";
 import { scanClaude } from "./claude.ts";
 import { scanCodex } from "./codex.ts";
+import { COWORK_LIVE_MS, CoworkScanner } from "./cowork.ts";
 import { scanPi } from "./pi.ts";
 import { TailReader } from "./tail.ts";
 import type { Candidate, MetaCache } from "./types.ts";
@@ -42,6 +47,8 @@ export type DetectorOptions = {
   processes: ProcessSource;
   /** treat every agent as running (fixtures / Linux CI) */
   assumeProcesses?: boolean;
+  /** show Cowork sessions of the Claude desktop app (opt-in: often not coding work) */
+  cowork?: boolean;
   now?: () => number;
 };
 
@@ -64,6 +71,7 @@ export const HOSTED_BUSY_MAX_MS = 10 * 60_000;
 
 export class Detector {
   private tail = new TailReader();
+  private cowork = new CoworkScanner();
   private metaCache: MetaCache = new Map();
   /** `agent:rawId` of sessions owned by an agent hosted inside another agent */
   private hostedIds = new Set<string>();
@@ -85,10 +93,21 @@ export class Detector {
         procs = [];
       }
     }
+    let desktop = assumeProcesses === true;
+    if (!desktop) {
+      try {
+        desktop = (await this.opts.processes.claudeDesktop?.()) === true;
+      } catch {
+        desktop = false;
+      }
+    }
+    const cowork = desktop && this.opts.cowork === true;
+    if (!cowork) this.cowork.reset();
     const scanned = [
       ...safe(() => scanClaude(dirs.claude, this.metaCache)),
       ...safe(() => scanCodex(dirs.codex, this.metaCache)),
       ...safe(() => scanPi(dirs.pi, this.metaCache)),
+      ...(cowork ? safe(() => this.cowork.scan(dirs.claudeDesktop, now, this.metaCache)) : []),
     ];
 
     // 0. agents hosted inside another agent: their sessions belong to the host's desk
@@ -153,7 +172,12 @@ export class Detector {
     }
     // 3. recently written transcripts
     for (const c of candidates) {
+      if (c.desktop) continue;
       if (c.transcript && now - c.mtimeMs < TRANSCRIPT_LIVE_MS && running(c.agent)) live.add(c);
+    }
+    // 4. Cowork sessions of the running Claude desktop app
+    for (const c of candidates) {
+      if (c.desktop && desktop && c.transcript && now - c.mtimeMs < COWORK_LIVE_MS) live.add(c);
     }
 
     // hosted processes -> helpers / busy flag of the session their top-level host owns
@@ -218,7 +242,7 @@ export class Detector {
     };
     if (context !== undefined) info.context = context;
     if (this.opts.shareProjectNames) {
-      const project = projectName(meta.cwd);
+      const project = c.project ?? projectName(meta.cwd);
       if (project) info.project = project;
     }
     return info;

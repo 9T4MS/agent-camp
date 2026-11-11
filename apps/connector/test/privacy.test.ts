@@ -3,6 +3,7 @@
  * sure nothing but status metadata leaves the machine.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseConnectorMessage } from "@agent-office/protocol";
 import { helloDescription } from "../src/cli.ts";
@@ -12,7 +13,7 @@ import { silent } from "../src/log.ts";
 import { agentDirs } from "../src/paths.ts";
 import { fakeProcesses } from "../src/proc.ts";
 import { type FakeServer, fakeServer, waitFor } from "./fake-server.ts";
-import { type FakeHome, makeHome, RAW_IDS, SECRET } from "./helpers.ts";
+import { addCowork, COWORK_PRIVATE, type FakeHome, makeHome, RAW_IDS, SECRET } from "./helpers.ts";
 
 /** A detailed (>200 chars) look description, as typed by the user. */
 const LOOK =
@@ -33,6 +34,9 @@ function forbidden(home: string): string[] {
     SECRET,
     ...RAW_IDS,
     ...RAW_IDS.map((id) => id.split("-")[0]!),
+    ...COWORK_PRIVATE,
+    "pricing page", // Cowork prompt text
+    "outputs",
     "/Users/anna",
     "Users-anna",
     "anna",
@@ -54,6 +58,7 @@ function assertClean(texts: string[], home: string) {
 describe("privacy", () => {
   test("hello + snapshots over the wire contain only status metadata", async () => {
     h = makeHome();
+    addCowork(h, { lastTool: "ClaudeDesign" });
     srv = fakeServer();
     const detector = new Detector({
       dirs: agentDirs({}, h.home),
@@ -61,6 +66,7 @@ describe("privacy", () => {
       shareProjectNames: true,
       processes: fakeProcesses([]),
       assumeProcesses: true,
+      cowork: true,
     });
     const d = new Daemon({
       server: srv.url,
@@ -103,12 +109,15 @@ describe("privacy", () => {
     expect((helloMsg.data.selfDescription as string).length).toBe(200);
     expect(helloMsg.data.machine).toBe("devbox");
     const snap = srv.of("presence.snapshot")[0]!;
-    expect((snap.data.sessions as unknown[]).length).toBe(4);
+    // 4 from fixtures/home + the Cowork session
+    const sent = snap.data.sessions as Record<string, unknown>[];
+    expect(sent.length).toBe(5);
+    expect(sent.find((s) => s.project === "Cowork")).toMatchObject({ agent: "claude" });
     for (const raw of srv.received) expect(parseConnectorMessage(raw).ok).toBe(true);
     assertClean(srv.received, h.home);
     // the only per-session fields are the allowed ones (context: a 0..1 number, when known)
     const allowed = ["activity", "agent", "project", "sessionKey", "startedAt", "subagents"];
-    for (const s of snap.data.sessions as Record<string, unknown>[]) {
+    for (const s of sent) {
       const keys = Object.keys(s).filter((k) => k !== "context");
       expect(keys.sort()).toEqual(allowed.sort());
       if ("context" in s) expect(typeof s.context).toBe("number");
@@ -117,6 +126,10 @@ describe("privacy", () => {
 
   test("`run --once` output is clean too", async () => {
     h = makeHome();
+    addCowork(h);
+    // Cowork is opt-in: turn it on so its session is part of the privacy check
+    mkdirSync(join(h.home, "cfg"), { recursive: true });
+    writeFileSync(join(h.home, "cfg", "config.toml"), "cowork = true\n");
     const main = join(import.meta.dir, "..", "src", "main.ts");
     const p = Bun.spawn(
       [process.execPath, main, "run", "--once", "--home", h.home, "--assume-processes"],
@@ -131,7 +144,7 @@ describe("privacy", () => {
     const msg = parseConnectorMessage(out);
     expect(msg.ok).toBe(true);
     if (msg.ok && msg.msg.type === "presence.snapshot") {
-      expect(msg.msg.data.sessions).toHaveLength(4);
+      expect(msg.msg.data.sessions).toHaveLength(5);
     }
     assertClean([out], h.home);
   });

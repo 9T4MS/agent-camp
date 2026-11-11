@@ -31,6 +31,14 @@ export type Candidate = {
   context?(entries: readonly Record<string, unknown>[]): number | undefined;
   /** Claude only: count live subagent transcripts */
   subagents?(now: number): number;
+  /**
+   * A session of the Claude desktop app (Cowork). It may run inside the app's VM, so no
+   * process on this machine owns it: it is live while the app runs and its transcript was
+   * written recently (COWORK_LIVE_MS).
+   */
+  desktop?: boolean;
+  /** fixed project label, used instead of the cwd's folder name */
+  project?: string;
 };
 
 /** Transcript path -> header metadata, so headers are read once per file. */
