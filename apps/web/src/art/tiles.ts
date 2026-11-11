@@ -73,6 +73,29 @@ const PAINT: Record<Terrain, Painter> = {
       pc.set(px, py, c);
     });
   },
+  bar(pc, gx, gy) {
+    // dark pub planks with brass nail heads
+    each((lx, ly) => {
+      const px = gx + lx;
+      const py = gy + ly;
+      const row = Math.floor(py / 5);
+      let c: string = C.bark;
+      if (py % 5 === 4) c = C.cocoa;
+      else if ((px + row * 13) % 24 === 0) c = C.cocoa;
+      else if ((px + row * 13) % 24 === 2 && py % 5 === 2) c = C.amber;
+      else if (rnd(px, py, 12) < 0.05) c = C.wood;
+      pc.set(px, py, c);
+    });
+  },
+  shop(pc, gx, gy) {
+    // pale green-and-cream tiles
+    each((lx, ly) => {
+      const checker = (Math.floor(lx / 8) + Math.floor(ly / 8)) % 2 === 0;
+      let c: string = checker ? C.cream : C.leaf;
+      if (lx % 8 === 7 || ly % 8 === 7) c = checker ? C.sand : C.moss;
+      pc.set(gx + lx, gy + ly, c);
+    });
+  },
   grass(pc, gx, gy) {
     each((lx, ly) => {
       const px = gx + lx;
@@ -187,6 +210,8 @@ const FLOOR_SHADOW: Partial<Record<Terrain, string>> = {
   carpet: C.pine,
   meeting: C.ink,
   game: C.night,
+  bar: C.cocoa,
+  shop: C.moss,
   doorway: C.bark,
 };
 const isWall = (t: Terrain | undefined) =>

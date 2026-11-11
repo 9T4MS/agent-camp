@@ -55,7 +55,7 @@ type Anim = {
   frames: Texture[];
   fps: number;
   phase: number;
-  kind: "loop" | "arcade" | "neon";
+  kind: "loop" | "arcade" | "neon" | "bar" | "shop";
   /** tile x of the object (arcades: which machine someone plays) */
   tileX: number;
 };
@@ -130,6 +130,11 @@ export class OfficeScene {
   /** tile x of arcade machines someone is playing right now */
   readonly arcadeBusy = new Set<number>();
   private partyGlows: { sprite: Sprite; y: number }[] = [];
+  /** bar / shop signs light up while the place is open (life.ts sets these) */
+  barOpen = false;
+  shopOpen = false;
+  happyHour = false;
+  private signGlows: { sprite: Sprite; place: "bar" | "shop"; base: number }[] = [];
   private leaves: { sprite: Sprite; from: number }[] = [];
   private sky: "day" | "dusk" | "night" = "day";
   weather: Weather = "sun";
@@ -170,6 +175,7 @@ export class OfficeScene {
     this.panes = [];
     this.steam = [];
     this.partyGlows = [];
+    this.signGlows = [];
     this.leaves = [];
     this.whiteboardKey = "";
     this.build();
@@ -259,7 +265,16 @@ export class OfficeScene {
     const left = s.x + meta.pad;
     const top = s.y + meta.pad;
     if (frames.length > 1) {
-      const kind = ob.kind === "arcade" ? "arcade" : ob.kind === "neon" ? "neon" : "loop";
+      const kind =
+        ob.kind === "arcade"
+          ? "arcade"
+          : ob.kind === "neon"
+            ? "neon"
+            : ob.kind === "neonBeer"
+              ? "bar"
+              : ob.kind === "greenCross" || ob.kind === "openSign"
+                ? "shop"
+                : "loop";
       const fps = ob.kind === "tree" ? 0.7 : ob.kind === "tv" ? 2 : 1.4;
       this.anims.push({
         sprite: s,
@@ -317,6 +332,20 @@ export class OfficeScene {
         this.whiteboard.zIndex = s.zIndex + 1;
         this.objects.addChild(this.whiteboard);
         break;
+      case "neonBeer":
+      case "greenCross":
+      case "openSign": {
+        const place = ob.kind === "neonBeer" ? "bar" : "shop";
+        const color = ob.kind === "neonBeer" ? C.pink : ob.kind === "greenCross" ? C.leaf : C.moss;
+        const g = new Sprite(glowTexture(ob.kind === "openSign" ? 14 : 22, color));
+        g.anchor.set(0.5);
+        g.position.set(Math.round(left + meta.w / 2), Math.round(top + meta.h / 2 + 6));
+        g.visible = false;
+        this.glows.addChild(g);
+        this.signGlows.push({ sprite: g, place, base: ob.kind === "openSign" ? 0.5 : 0.8 });
+        added.push(g);
+        break;
+      }
       case "arcade":
       case "tv":
         this.addGlow(
@@ -624,6 +653,16 @@ export class OfficeScene {
             : Math.floor(time * 0.5 + a.phase) % 7 === 0
               ? 1
               : 0;
+      else if (a.kind === "bar")
+        // open: steady, a quick flicker now and then; happy hour: blinks
+        idx = !this.barOpen
+          ? 0
+          : this.happyHour
+            ? Math.floor(time * 3) % 2
+            : Math.floor(time * 1.7 + a.phase) % 23 === 0
+              ? 0
+              : 1;
+      else if (a.kind === "shop") idx = this.shopOpen ? 1 : 0;
       else idx = Math.floor(time * a.fps + a.phase) % a.frames.length;
       const tex = a.frames[idx]!;
       if (a.sprite.texture !== tex) a.sprite.texture = tex;
@@ -667,6 +706,12 @@ export class OfficeScene {
       g.texture = glowTexture(30, cols[(Math.floor(time * 3) + i) % cols.length]!);
       g.alpha = 0.75 + 0.25 * Math.sin(time * 7 + i * 1.3);
       g.y = Math.round(y + Math.sin(time * 2 + i) * 6);
+    }
+    // bar / shop signs glow while open (stronger at night)
+    for (const g of this.signGlows) {
+      const open = g.place === "bar" ? this.barOpen : this.shopOpen;
+      g.sprite.visible = open;
+      if (open) g.sprite.alpha = g.base * (0.35 + 0.65 * this.night);
     }
     // coffee steam
     for (const p of this.steam) {

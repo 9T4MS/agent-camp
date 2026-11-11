@@ -124,14 +124,20 @@ clothes and props, so everyone stays in the same pixel style. Your jacket colour
 which agent a session runs (Claude, Codex, Pi). Every extra session is a sibling of you
 with tiny variations, and your pod has one desk per running session (at least 2, up to 6).
 
-Want a say? Click your name plate and **Customize look**: pick hair, face, glasses, cap,
-outfit (jacket, hoodie, flannel, tee), something for each hand (beer, coffee, phone, ...)
-and your desk props, with a live preview. Saving pins the look; **Automatic** goes back to
-the one from your description. Outfits that are not in the agent colour carry a small agent
+Want a say? Click your name plate. The first time, tap **It's me: send a code**: a 6-digit
+code pops up as a notification on your Mac (via the connector, so its notifications must be
+allowed in macOS; if nothing shows up, send again after 30 s), and typing it in marks this
+browser as you. From then on **Customize look** opens a fullscreen studio: flip through hair,
+face, glasses, cap, outfit (jacket, hoodie, flannel, tee), something for each hand (beer,
+coffee, phone, ...), your ride and desk items with the ◀ ▶ buttons (or the arrow keys), with a
+big live preview. You can only change your own look. This is a courtesy lock for a team
+office, not real identity: anyone with the office password could start a connector under your
+name. Saving pins it; **Automatic** goes back to the one from your description. On a shared device, "not you? forget this device" (or
+logging out) drops the claim. Outfits that are not in the agent colour carry a small agent
 badge on the tee and a band across the back, so you can still tell Claude from Codex at the
 desk.
 
-![Look editor](screenshots/14-look-editor-laptop.png)
+![Look studio](screenshots/14-look-editor-laptop.png)
 
 ### Privacy
 
@@ -269,8 +275,16 @@ bar.
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?season=winter` (or spring,
 summer, autumn), `?weather=snow` (sun, clouds, rain, snow; otherwise it changes every hour),
 `?nohud=1`, `?demo=busy` (no server needed), `?event=kaiju` (also tornado, meteors, eclipse,
-raccoons, alarm, catboss, flood) and `?birthday=<personId>` to see the rare stuff now. A car
-drives by every minute or so: click it for the stats.
+raccoons, alarm, catboss, flood, happyhour) and `?birthday=<personId>` to see the rare stuff
+now. A car drives by every minute or so: click it for the stats.
+
+East of the garden there is a street block with the **Feierabend bar** (17:00–02:00, Fridays
+from 16:00 with happy hour until 18:00) and a **weed shop** (10:00–20:00) with a smokers'
+corner outside. Idle agents pour a beer at the tap and take it to a stool or standing table,
+or buy something at the shop and smoke it in the corner. Closed places stay empty. Try
+`?demo=feierabend`, or `?bar=open` / `?shop=closed` to ignore the opening hours.
+
+![Bar, weed shop and smokers' corner](screenshots/16-bar-and-shop-laptop.png)
 
 Everything is behind the office password (the same one as the connector's): the first visit
 shows a login page and the browser stays logged in for 30 days; opening the office during the

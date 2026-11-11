@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import {
+  barOpen,
   findClearedSession,
   forcedSky,
+  happyHour,
   hourSky,
   isClearRestart,
   isFullMoon,
   monthOf,
   moonAge,
+  parseForcedEvent,
+  parseOpenOverride,
   pizzaWindow,
   ripLabel,
   SKY_FADE,
   seasonFor,
+  shopOpen,
   skyAt,
   truckWindow,
   weatherFor,
@@ -113,5 +118,44 @@ describe("sky, seasons, moon, food truck", () => {
     expect(werewolfHour(23)).toBe(true);
     expect(werewolfHour(3)).toBe(true);
     expect(werewolfHour(12)).toBe(false);
+  });
+});
+
+describe("bar + weed shop opening hours", () => {
+  const MON = 1;
+  const FRI = 5;
+  const SAT = 6;
+  test("bar: 17:00-02:00 every night, Friday from 16:00", () => {
+    expect(barOpen(16.99, MON)).toBe(false);
+    expect(barOpen(17, MON)).toBe(true);
+    expect(barOpen(23.5, MON)).toBe(true);
+    expect(barOpen(1.99, SAT)).toBe(true);
+    expect(barOpen(2, SAT)).toBe(false);
+    expect(barOpen(12, FRI)).toBe(false);
+    expect(barOpen(16, FRI)).toBe(true);
+    expect(barOpen(16, SAT)).toBe(false);
+  });
+  test("happy hour: Fridays 16:00-18:00 only", () => {
+    expect(happyHour(15.99, FRI)).toBe(false);
+    expect(happyHour(16, FRI)).toBe(true);
+    expect(happyHour(17.99, FRI)).toBe(true);
+    expect(happyHour(18, FRI)).toBe(false);
+    expect(happyHour(17, MON)).toBe(false);
+    // happy hour always falls inside opening hours
+    for (let h = 0; h < 24; h += 0.25) if (happyHour(h, FRI)) expect(barOpen(h, FRI)).toBe(true);
+  });
+  test("shop: 10:00-20:00", () => {
+    expect(shopOpen(9.99)).toBe(false);
+    expect(shopOpen(10)).toBe(true);
+    expect(shopOpen(19.99)).toBe(true);
+    expect(shopOpen(20)).toBe(false);
+    expect(shopOpen(23)).toBe(false);
+  });
+  test("?bar= / ?shop= overrides and ?event=happyhour", () => {
+    expect(parseOpenOverride("open")).toBe(true);
+    expect(parseOpenOverride("closed")).toBe(false);
+    expect(parseOpenOverride("nope")).toBeNull();
+    expect(parseOpenOverride(null)).toBeNull();
+    expect(parseForcedEvent("happyhour")).toBe("happyhour");
   });
 });

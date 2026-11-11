@@ -1,7 +1,10 @@
 /**
  * Office renderer entry. URL params:
- *   ?demo=busy|one|empty|join|party (or 1)  local fake feed, no server; &seed=, &people=, &sessions=
- *                 (party: office life moments fast: chats, coffee, /clear zap, records, pizza)
+ *   ?demo=busy|one|empty|join|party|feierabend (or 1)  local fake feed, no server; &seed=, &people=, &sessions=
+ *                 (party: office life moments fast: chats, coffee, /clear zap, records, pizza;
+ *                  feierabend: Friday 17:30 happy hour, bar + weed shop + smokers' corner)
+ *   ?feierabend=1  the feierabend setup on any feed (17:30 happy hour, lively, busy shop)
+ *   ?bar=open|closed  ?shop=open|closed  ignore the opening hours (17-02 / 10-20)
  *   ?weather=sun|clouds|rain|snow  force the weather (default: changes hour by hour, seeded)
  *   ?season=winter|spring|summer|autumn  force the season (default: the local month)
  *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
@@ -57,6 +60,7 @@ import {
   type AreaName,
   BASE_POD_ROWS,
   buildOfficeMap,
+  OFFICE_COLS,
   POD_COLS,
   podDeskSpan,
   podOrigin,
@@ -64,6 +68,7 @@ import {
 } from "./world/map.ts";
 import { OfficeScene } from "./world/office.ts";
 import { PartyWorld } from "./world/party.ts";
+import { OfficeQueen } from "./world/queen.ts";
 
 type OfficeApi = {
   ready: boolean;
@@ -74,6 +79,8 @@ type OfficeApi = {
   camera: {
     zoomToFit(): void;
     focusArea(name: AreaName | "all"): void;
+    /** center on a tile at a zoom (screenshots) */
+    lookAt(tileX: number, tileY: number, zoom: number): void;
     focusPerson(personId: string, zoom?: number): boolean;
   };
   injectEvent(msg: unknown): boolean;
@@ -140,13 +147,18 @@ async function boot() {
   const effects = new Effects(scene.fx);
   const chars = new CharacterManager(scene, model, effects);
   const partyWorld = new PartyWorld(scene, chars, model);
-  const party = demo === "party" || flag("lively");
+  // Friday after work (`?demo=feierabend`, or `?feierabend=1` on a live feed): happy hour at
+  // 17:30, office life at party speed, the weed shop sells more
+  const feierabend = demo === "feierabend" || flag("feierabend");
+  const party = demo === "party" || feierabend || flag("lively");
   // the party demo runs the waiting thresholds 10x faster and starts at lunch time
   if (party) {
     chars.timeScale = 10;
     chars.chatChance = 0.8;
     chars.dwell = 0.4;
   }
+  // Friday after work: the shop sells more, so the smokers' corner fills up quickly
+  if (feierabend) chars.shopChance = 0.4;
   const cat = new OfficeCat(
     scene.objects,
     scene.fx,
@@ -156,11 +168,20 @@ async function boot() {
     () => chars.catWaitSpots(),
   );
   chars.catEats = (sprite, x, y) => cat.tryEat(sprite, x, y);
+  const queen = new OfficeQueen(
+    scene.objects,
+    scene.map,
+    effects,
+    () => chars.pageable(),
+    (id, text) => chars.answerPage(id, text),
+  );
   if (party) {
     cat.eatChance = 0.6;
     cat.eatRange = 900;
+    queen.pageEvery = 12;
   }
-  const hourValue = hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : null;
+  const hourValue =
+    hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : feierabend ? 17.5 : null;
   const living = new Living(scene, model, hourValue);
   const weatherParam = params.get("weather");
   const life = new OfficeLife(
@@ -189,6 +210,8 @@ async function boot() {
           : null,
       season,
       ...(party ? { droneDelay: demo === "party" ? 6 : 3 } : {}),
+      // the feierabend demo is a Friday: happy hour (unless ?event= asks for something else)
+      ...(feierabend && !params.get("event") ? { forceEvent: "happyhour" } : {}),
     },
   );
   chars.pizzaActive = () => life.pizzaOnTable;
@@ -215,6 +238,12 @@ async function boot() {
     },
   );
   camera.attach(app.canvas);
+  // wall screens and the fit view frame the office (64 columns); the east street block joins
+  // the frame only while someone is there, so tiles stay big on a 1080p wall
+  camera.fitWidth = () =>
+    chars.positions().some((p) => p.x >= OFFICE_COLS * 16) ? scene.widthPx : OFFICE_COLS * 16;
+  camera.skipStop = (name) =>
+    (name === "bar" && !scene.barOpen) || (name === "shop" && !scene.shopOpen);
   const minimap = new Minimap(hud.minimapHost, camera, chars);
   minimap.setTerrain(scene.terrainCanvas);
   minimap.desks = () => scene.deskRects();
@@ -223,7 +252,7 @@ async function boot() {
   if (zoomParam === "fit") camera.zoomToFit(true);
   else if (zoomParam && Number(zoomParam) > 0)
     camera.set({ x: 25 * 16, y: 15 * 16, zoom: Number(zoomParam) }, true);
-  else if (app.screen.width / scene.widthPx > 1.6)
+  else if (app.screen.width / (OFFICE_COLS * 16) > 1.6)
     camera.set({ x: 32 * 16, y: 15 * 16, zoom: 2 }, true);
   else camera.set({ x: 22 * 16, y: 14 * 16, zoom: 2 }, true);
 
@@ -233,6 +262,7 @@ async function boot() {
     if (need <= scene.map.podRows * POD_COLS) return;
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     cat.setMap(scene.map);
+    queen.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
     chars.syncSlots();
@@ -499,6 +529,57 @@ async function boot() {
     }
   }
   if (!kiosk) hud.onEditLook = editLook;
+  /** POST helper for the "This is me" flow (cookie auth, JSON errors -> status line). */
+  const postJson = async (
+    path: string,
+    body: unknown,
+  ): Promise<PokeResult & { data?: unknown }> => {
+    try {
+      const r = await fetch(`${path}${key ? `?key=${encodeURIComponent(key)}` : ""}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      if (r.status === 401) void loginIfLoggedOut();
+      return r.ok
+        ? { ok: true, message: "", data }
+        : { ok: false, message: data.error ?? `failed (${r.status})` };
+    } catch {
+      return { ok: false, message: "could not reach the office" };
+    }
+  };
+  if (demo) hud.editAnyLook = true;
+  else if (!kiosk) {
+    hud.onClaim = {
+      send: async (personId) => {
+        const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim`, {});
+        return r.ok
+          ? {
+              ok: true,
+              message:
+                "code sent as a notification on your Mac (needs notifications on for the Agent Office connector). Nothing after 30 s? Send again.",
+            }
+          : r;
+      },
+      verify: async (personId, code) => {
+        const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim/verify`, {
+          code,
+        });
+        return r.ok ? { ok: true, message: "that's you!" } : r;
+      },
+      forget: async () => {
+        await fetch("/api/me", { method: "DELETE" }).catch(() => {});
+      },
+    };
+    void fetch("/api/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ personId?: string | null }>) : null))
+      .then((me) => {
+        hud.me = me?.personId ?? null;
+        hud.refresh();
+      })
+      .catch(() => {});
+  }
   hud.previewLook = (avatar, agent) => {
     const look = lookFor(avatar, agent, null);
     // front, side, at the desk (back to the camera: the agent patch)
@@ -540,7 +621,8 @@ async function boot() {
     return true;
   };
   hud.onOpenSession = (id) => void openSession(id);
-  camera.holdWhile = () => hud.panelOpen || (messagesPanel?.expanded ?? false);
+  camera.holdWhile = () =>
+    hud.panelOpen || hud.lookEditorOpen || (messagesPanel?.expanded ?? false);
   hud.onPanelChange = () => {
     if (hud.panelOpen && matchMedia("(max-width: 560px)").matches && messagesPanel?.expanded)
       messagesPanel.collapse(false);
@@ -564,6 +646,10 @@ async function boot() {
       return;
     }
     const c = chars.pick(wx, wy);
+    if (queen.hit(wx, wy) && (!c || queen.y > c.y)) {
+      queen.poke();
+      return;
+    }
     if (c) {
       openSession(c.sessionId);
       return;
@@ -760,14 +846,15 @@ async function boot() {
     render(...a);
     renMs += performance.now() - t0;
   };
-  app.ticker.add((ticker) => {
+  const frame = (deltaMS: number) => {
     const t0 = performance.now();
-    const dt = Math.min(0.1, ticker.deltaMS / 1000) * speed;
+    const dt = Math.min(0.1, deltaMS / 1000) * speed;
     time += dt;
     scene.update(time, dt);
     chars.update(dt, time);
     partyWorld.update(dt, time);
     cat.update(dt, time);
+    queen.update(dt, time);
     life.update(dt, time);
     effects.update(dt);
     living.update(dt);
@@ -785,6 +872,16 @@ async function boot() {
       frames = 0;
       fpsWindowStart = now;
     }
+  };
+  let frameFailed = false;
+  app.ticker.add((ticker) => {
+    // Pixi stops requesting frames when a ticker callback throws, which freezes a wall screen
+    try {
+      frame(ticker.deltaMS);
+    } catch (e) {
+      if (!frameFailed) console.error("[office] frame update failed", e);
+      frameFailed = true;
+    }
   });
   window.addEventListener("resize", () => camera.resized());
 
@@ -799,6 +896,7 @@ async function boot() {
     camera: {
       zoomToFit: () => camera.zoomToFit(true),
       focusArea: (name) => camera.focusArea(name, true),
+      lookAt: (x, y, zoom) => camera.set({ x: x * 16, y: y * 16, zoom }, true),
       focusPerson: (personId, zoom) => focusPerson(personId, zoom),
     },
     injectEvent(raw) {

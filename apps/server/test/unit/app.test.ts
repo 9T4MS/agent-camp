@@ -9,13 +9,22 @@ function setup(env: Record<string, string> = { CONNECTOR_PASSWORD: "pw" }) {
   let now = 1_000_000;
   const sent: string[] = [];
   const alarms: (number | null)[] = [];
+  /** messages the app sent to single connector sockets (pokes, claim codes) */
+  const toConnector: { socketId: string; data: string }[] = [];
   const app = new OfficeApp(
     env,
     new MemoryStore(),
-    { broadcast: (d) => sent.push(d), scheduleAlarm: (a) => alarms.push(a) },
+    {
+      broadcast: (d) => sent.push(d),
+      scheduleAlarm: (a) => alarms.push(a),
+      sendToConnector: (socketId, data) => {
+        toConnector.push({ socketId, data });
+        return true;
+      },
+    },
     { now: () => now, log: () => {} },
   );
-  return { app, sent, alarms, advance: (ms: number) => (now += ms) };
+  return { app, sent, alarms, toConnector, advance: (ms: number) => (now += ms) };
 }
 const req = (path: string, init?: RequestInit) => new Request(`http://x${path}`, init);
 
@@ -298,19 +307,44 @@ describe("OfficeApp look editor", () => {
     deskProps: ["plant"],
     deskMess: 1,
   };
-  const put = (app: OfficeApp, personId: string, body: unknown, ip = "1.1.1.1") =>
+  /** the `ao_me` cookie of the current test's browser */
+  let me = "";
+  const put = (app: OfficeApp, personId: string, body: unknown, ip = "1.1.1.1", cookie = me) =>
     app.handleHttp(
       req(`/api/people/${personId}/avatar`, {
         method: "PUT",
+        headers: { "content-type": "application/json", "cf-connecting-ip": ip, cookie },
+        body: JSON.stringify(body),
+      }),
+    );
+  const post = (app: OfficeApp, path: string, body: unknown = {}, ip = "9.9.9.9") =>
+    app.handleHttp(
+      req(path, {
+        method: "POST",
         headers: { "content-type": "application/json", "cf-connecting-ip": ip },
         body: JSON.stringify(body),
       }),
     );
+  /** "This is me": ask for a code, read it off the Mac notification, confirm it. */
+  async function claim(
+    { app, toConnector }: ReturnType<typeof setup>,
+    personId: string,
+  ): Promise<string> {
+    expect((await post(app, `/api/people/${personId}/claim`))!.status).toBe(200);
+    const poke = JSON.parse(toConnector.at(-1)!.data);
+    expect(poke.type).toBe("connector.poked");
+    const code = /\b(\d{6})\b/.exec(poke.data.text)![1];
+    const r = (await post(app, `/api/people/${personId}/claim/verify`, { code }))!;
+    expect(r.status).toBe(200);
+    return r.headers.get("set-cookie")!.split(";")[0]!;
+  }
 
   test("pins a custom look, broadcasts it and survives a new description", async () => {
-    const { app, sent, advance } = setup();
+    const t = setup();
+    const { app, sent, advance } = t;
     app.connectorMessage("s1", hello("Tom"));
     await Bun.sleep(1);
+    me = await claim(t, "tom");
     const r = (await put(app, "tom", { avatar: tomLook, from: "Tom" }))!;
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ ok: true, custom: true, avatar: tomLook });
@@ -341,13 +375,85 @@ describe("OfficeApp look editor", () => {
   });
 
   test("validates, rate limits and needs the person in the office", async () => {
-    const { app, advance } = setup();
+    const t = setup();
+    const { app, advance } = t;
     app.connectorMessage("s1", hello("Tom"));
+    me = await claim(t, "tom");
     expect((await put(app, "tom", { avatar: { ...tomLook, outfit: "tux" } }))!.status).toBe(400);
-    expect((await put(app, "nobody", { avatar: tomLook }, "2.2.2.2"))!.status).toBe(404);
+    // someone else (even one not in the office) is never yours to edit
+    expect((await put(app, "nobody", { avatar: tomLook }, "2.2.2.2"))!.status).toBe(403);
     expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(200);
     expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(429);
     advance(2_000);
     expect((await put(app, "tom", { avatar: tomLook }, "3.3.3.3"))!.status).toBe(200);
+  });
+
+  test("only your own look: no cookie or someone else's cookie -> 403", async () => {
+    const t = setup();
+    const { app, advance } = t;
+    app.connectorMessage("s1", hello("Tom"));
+    app.connectorMessage("s2", hello("Anna"));
+    expect((await put(app, "tom", { avatar: tomLook }, "1.1.1.1", ""))!.status).toBe(403);
+    const anna = await claim(t, "anna");
+    advance(2_000);
+    expect((await put(app, "tom", { avatar: tomLook }, "1.1.1.2", anna))!.status).toBe(403);
+    expect((await put(app, "tom", { avatar: null }, "1.1.1.3", anna))!.status).toBe(403);
+    expect((await put(app, "anna", { avatar: tomLook }, "1.1.1.4", anna))!.status).toBe(200);
+    // a forged cookie for tom is rejected
+    const forged = anna.replace("ao_me=anna.", "ao_me=tom.");
+    expect((await put(app, "tom", { avatar: tomLook }, "1.1.1.5", forged))!.status).toBe(403);
+    const who = (await (await app.handleHttp(
+      req("/api/me", { headers: { cookie: anna } }),
+    ))!.json()) as { personId: string | null };
+    expect(who.personId).toBe("anna");
+  });
+
+  test("claim codes: sent only to that person's Macs, single use, limited tries", async () => {
+    const t = setup();
+    const { app, toConnector, advance } = t;
+    app.connectorMessage("s1", hello("Tom"));
+    app.connectorMessage("s2", hello("Anna"));
+    expect((await post(app, "/api/people/tom/claim"))!.status).toBe(200);
+    expect(toConnector.map((m) => m.socketId)).toEqual(["s1"]);
+    const code = /\b(\d{6})\b/.exec(JSON.parse(toConnector[0]!.data).data.text)![1]!;
+    // resend is throttled
+    advance(5_000);
+    expect((await post(app, "/api/people/tom/claim", {}, "8.8.8.8"))!.status).toBe(429);
+    const wrong = code === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 5; i++)
+      expect((await post(app, "/api/people/tom/claim/verify", { code: wrong }))!.status).toBe(403);
+    // too many wrong tries burn the code, even the right one no longer works
+    expect((await post(app, "/api/people/tom/claim/verify", { code }))!.status).toBe(410);
+    advance(30_000);
+    const cookie = await claim(t, "tom");
+    expect(cookie.startsWith("ao_me=tom.")).toBe(true);
+    const codeNow = /\b(\d{6})\b/.exec(JSON.parse(toConnector.at(-1)!.data).data.text)![1];
+    expect((await post(app, "/api/people/tom/claim/verify", { code: codeNow }))!.status).toBe(410);
+    expect((await post(app, "/api/people/nobody/claim", {}, "7.7.7.7"))!.status).toBe(404);
+  });
+
+  test("at most 10 codes per person per day, so guessing and Mac spam stay bounded", async () => {
+    const t = setup();
+    t.app.connectorMessage("s1", hello("Tom"));
+    for (let i = 0; i < 10; i++) {
+      expect((await post(t.app, "/api/people/tom/claim", {}, `10.0.0.${i}`))!.status).toBe(200);
+      t.advance(30_000);
+      t.app.connectorMessage("s1", hello("Tom")); // keep the connector fresh
+    }
+    const r = (await post(t.app, "/api/people/tom/claim", {}, "10.0.1.1"))!;
+    expect(r.status).toBe(429);
+    expect(t.toConnector).toHaveLength(10);
+    t.advance(86_400_000);
+    t.app.connectorMessage("s1", hello("Tom"));
+    expect((await post(t.app, "/api/people/tom/claim", {}, "10.0.1.2"))!.status).toBe(200);
+  });
+
+  test("an expired code is rejected", async () => {
+    const t = setup();
+    t.app.connectorMessage("s1", hello("Tom"));
+    expect((await post(t.app, "/api/people/tom/claim"))!.status).toBe(200);
+    const code = /\b(\d{6})\b/.exec(JSON.parse(t.toConnector[0]!.data).data.text)![1];
+    t.advance(5 * 60_000 + 1);
+    expect((await post(t.app, "/api/people/tom/claim/verify", { code }))!.status).toBe(410);
   });
 });

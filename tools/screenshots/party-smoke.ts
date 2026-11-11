@@ -23,6 +23,8 @@ const server = Bun.spawn([process.execPath, "apps/server/src/dev/bun-server.ts"]
 });
 let browser: Browser | undefined;
 const sockets: WebSocket[] = [];
+/** latest "This is me" code each fake Mac got as a notification (by connector name) */
+const macCodes = new Map<string, string>();
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const usable = [
@@ -83,7 +85,9 @@ try {
           ),
         );
       ws.onmessage = (e) => {
-        const msg = JSON.parse(String(e.data)) as { type: string };
+        const msg = JSON.parse(String(e.data)) as { type: string; data?: { text?: string } };
+        const code = msg.type === "connector.poked" && /\b(\d{6})\b/.exec(msg.data?.text ?? "");
+        if (code) macCodes.set(name, code[1]!);
         if (msg.type === "connector.welcomed") {
           ws.send(JSON.stringify(presence()));
           resolve();
@@ -166,17 +170,47 @@ try {
     await page.getByRole("button", { name: "Save look", exact: true }).click();
     assert.equal((await response).status(), 200);
   };
+  /** Look studio rows are arrow carousels: click "next" until the row shows `value`. */
+  const pick = async (field: string, value: string) => {
+    const row = page.locator(`.look-row[data-field="${field}"]`);
+    for (let i = 0; i < 60 && (await row.getAttribute("data-value")) !== value; i++)
+      await row.locator(".next").click();
+    assert.equal(await row.getAttribute("data-value"), value, `${field} reaches ${value}`);
+  };
+  // Only your own look: without proving it, Customize opens the "This is me" box, not the
+  // studio, and the API refuses a direct PUT.
   await page.getByRole("button", { name: "Customize look", exact: true }).click();
-  await page.locator('select[name="accessory"]').selectOption("cat-ears");
-  await page.locator('select[name="wrist"]').selectOption("neon-cyan");
-  await page.locator('select[name="outfit"]').selectOption("cat");
-  await page.locator('select[name="accentColor"]').selectOption("pink");
-  await page.locator('select[name="vehicle"]').selectOption("hoverboard");
-  await page.locator('select[name="leftHand"]').selectOption("confetti");
-  await page.locator('select[name="rightHand"]').selectOption("lightsaber");
+  assert.equal(await page.locator(".look-studio").count(), 0, "no studio before the code");
+  const forged = await other.evaluate(async () => {
+    const r = await fetch("/api/people/player-one/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ avatar: null }),
+    });
+    return r.status;
+  });
+  assert.equal(forged, 403, "someone else's look cannot be changed");
+  // the browser logs that refused request; it is the expected one, not a bug
+  await pause(200);
+  const refused = errors.findIndex((e) => e.includes("status of 403"));
+  if (refused >= 0) errors.splice(refused, 1);
+  await page.locator(".claim-send").click();
+  for (let i = 0; i < 50 && !macCodes.has("Player One"); i++) await pause(100);
+  assert(!macCodes.has("Player Two"), "the code only goes to that person's Mac");
+  await page.locator(".claim-form input").fill(macCodes.get("Player One")!);
+  await page.locator(".claim-form button").click();
+  await page.locator(".look-studio").waitFor();
+  console.log("PASS: looks are owner-only (courtesy lock: a code on that person's Mac)");
+  await pick("accessory", "cat-ears");
+  await pick("wrist", "neon-cyan");
+  await pick("outfit", "cat");
+  await pick("accentColor", "pink");
+  await pick("vehicle", "hoverboard");
+  await pick("leftHand", "confetti");
+  await pick("rightHand", "lightsaber");
   await saveLook();
   await page.setViewportSize({ width: 1440, height: 1200 });
-  await page.locator(".hud-panel").evaluate((el) => {
+  await page.locator(".look-studio .studio-rows").evaluate((el) => {
     el.scrollTop = 0;
   });
   await page.screenshot({ path: `${out}/shared-look-editor-desktop.png` });
@@ -192,7 +226,7 @@ try {
   // Every hand item can be saved in the shared editor and used through cookie auth.
   for (const item of usable) {
     await pause(1300);
-    await page.locator('select[name="rightHand"]').selectOption(item);
+    await pick("rightHand", item);
     await saveLook();
     await page.locator(".look-editor .close").click();
     await page.getByRole("button", { name: "Office games", exact: false }).click();

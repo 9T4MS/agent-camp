@@ -7,12 +7,17 @@
  *             cozy nooks elsewhere; rows grow as people join)
  *   x 34..49  kitchen + lounge (top), meeting room (middle), game corner (bottom)
  *   x 51..62  garden; main door in the bottom wall at x 16..17
+ *   x 63      hedge with a gate at y 7..8 (the garden path crosses into the street block)
+ *   x 64..79  east street block: a sidewalk lane (x 64), the "Feierabend" bar (top), the
+ *             weed shop (middle) and the smokers' corner (bottom); hedge at x 79
  *
  * To add an area: edit BASE_ROWS, add objects/areas/pois below. `test/map.test.ts`
  * checks row lengths and that every desk and POI is reachable from the door.
  */
 
 export const TILE = 16;
+/** Columns of the original office (desks, rooms, garden); the east street block comes after. */
+export const OFFICE_COLS = 64;
 
 /** Terrain legend. */
 export const TERRAIN = {
@@ -33,6 +38,8 @@ export const TERRAIN = {
   D: "door",
   "~": "water",
   h: "hedge",
+  b: "bar",
+  p: "shop",
 } as const;
 export type TerrainChar = keyof typeof TERRAIN;
 export type Terrain = (typeof TERRAIN)[TerrainChar];
@@ -43,6 +50,8 @@ const WALKABLE: ReadonlySet<Terrain> = new Set([
   "carpet",
   "meeting",
   "game",
+  "bar",
+  "shop",
   "grass",
   "path",
   "sidewalk",
@@ -55,44 +64,58 @@ const G_GRASS = ",,,,,,,,,,,,h";
 const G_CROSS = "::::::,,,,,,h";
 const G_PATH = ",,,,::,,,,,,h";
 const G_POND = ",,,,::,,~~~,h";
+const G_GATE = ":".repeat(13);
 const DESK_ROW = `#${".".repeat(32)}`;
 
-/** Hand-written base map (64 x 30). Row comments give y. */
+// east street block (x 64..79): sidewalk lane, bar / shop walls, smokers' patio, hedge
+const E_TOP = `h${"#".repeat(14)}h`;
+const E_WALL = `s${"#".repeat(14)}h`;
+const E_BAR_U = "s#UUUUwwUwwUUU#h";
+const E_SHOP_U = "s#UUUUUUUUwwUU#h";
+const E_LOW = `s#${"L".repeat(12)}#h`;
+const E_BAR = `s#${"b".repeat(12)}#h`;
+const E_BAR_DOOR = `so${"b".repeat(12)}#h`;
+const E_SHOP = `s#${"p".repeat(12)}#h`;
+const E_SHOP_DOOR = `so${"p".repeat(12)}#h`;
+const E_LAWN = `s${",".repeat(14)}h`;
+const E_PATIO = `s,${":".repeat(6)}${",".repeat(7)}h`;
+
+/** Hand-written base map (80 x 30). Row comments give y. */
 const BASE_ROWS: readonly string[] = [
-  /*  0 */ `${"#".repeat(51)}${G_TOP}`,
-  /*  1 */ `#UUUUwwUUUUUwwUUUUUwwUUUUUwwUUUUU#UUUUUUUUUUUwwUUU#${G_GRASS}`,
-  /*  2 */ `#${"L".repeat(32)}#${"L".repeat(16)}#${G_GRASS}`,
-  /*  3 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}`,
-  /*  4 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}`,
-  /*  5 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}`,
-  /*  6 */ `${DESK_ROW}okkkkkkkkcccccccc#${G_GRASS}`,
-  /*  7 */ `${DESK_ROW}okkkkkkkkcccccccco${G_CROSS}`,
-  /*  8 */ `${DESK_ROW}#kkkkkkkkcccccccco${G_CROSS}`,
-  /*  9 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_PATH}`,
-  /* 10 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_PATH}`,
-  /* 11 */ `${DESK_ROW}#####oo###########${G_PATH}`,
-  /* 12 */ `${DESK_ROW}#ffffooffffffffff#${G_POND}`,
-  /* 13 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_POND}`,
-  /* 14 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 15 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 16 */ `${DESK_ROW}ommmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 17 */ `${DESK_ROW}ommmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 18 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 19 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}`,
-  /* 20 */ `${DESK_ROW}#####oo###########${G_PATH}`,
-  /* 21 */ `${DESK_ROW}#ffffooffffffffff#${G_PATH}`,
-  /* 22 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}`,
-  /* 23 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}`,
-  /* 24 */ `${DESK_ROW}oggggggggggggggggo${G_CROSS}`,
-  /* 25 */ `${DESK_ROW}oggggggggggggggggo${G_CROSS}`,
-  /* 26 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}`,
-  /* 27 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}`,
-  /* 28 */ `${"#".repeat(16)}DD${"#".repeat(33)}${G_PATH}`,
-  /* 29 */ `${"s".repeat(51)}ssssssssssssh`,
+  /*  0 */ `${"#".repeat(51)}${G_TOP}${E_TOP}`,
+  /*  1 */ `#UUUUwwUUUUUwwUUUUUwwUUUUUwwUUUUU#UUUUUUUUUUUwwUUU#${G_GRASS}${E_BAR_U}`,
+  /*  2 */ `#${"L".repeat(32)}#${"L".repeat(16)}#${G_GRASS}${E_LOW}`,
+  /*  3 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}${E_BAR}`,
+  /*  4 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}${E_BAR}`,
+  /*  5 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_GRASS}${E_BAR}`,
+  /*  6 */ `${DESK_ROW}okkkkkkkkcccccccc#${G_GRASS}${E_BAR}`,
+  /*  7 */ `${DESK_ROW}okkkkkkkkcccccccco${G_GATE}${E_BAR_DOOR}`,
+  /*  8 */ `${DESK_ROW}#kkkkkkkkcccccccco${G_GATE}${E_BAR_DOOR}`,
+  /*  9 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_PATH}${E_BAR}`,
+  /* 10 */ `${DESK_ROW}#kkkkkkkkcccccccc#${G_PATH}${E_BAR}`,
+  /* 11 */ `${DESK_ROW}#####oo###########${G_PATH}${E_BAR}`,
+  /* 12 */ `${DESK_ROW}#ffffooffffffffff#${G_POND}${E_WALL}`,
+  /* 13 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_POND}${E_LAWN}`,
+  /* 14 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}${E_WALL}`,
+  /* 15 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}${E_SHOP_U}`,
+  /* 16 */ `${DESK_ROW}ommmmmmmmmmmmmmmm#${G_PATH}${E_LOW}`,
+  /* 17 */ `${DESK_ROW}ommmmmmmmmmmmmmmm#${G_PATH}${E_SHOP}`,
+  /* 18 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}${E_SHOP}`,
+  /* 19 */ `${DESK_ROW}#mmmmmmmmmmmmmmmm#${G_PATH}${E_SHOP_DOOR}`,
+  /* 20 */ `${DESK_ROW}#####oo###########${G_PATH}${E_SHOP_DOOR}`,
+  /* 21 */ `${DESK_ROW}#ffffooffffffffff#${G_PATH}${E_SHOP}`,
+  /* 22 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}${E_SHOP}`,
+  /* 23 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}${E_SHOP}`,
+  /* 24 */ `${DESK_ROW}oggggggggggggggggo${G_CROSS}${E_WALL}`,
+  /* 25 */ `${DESK_ROW}oggggggggggggggggo${G_CROSS}${E_PATIO}`,
+  /* 26 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}${E_PATIO}`,
+  /* 27 */ `${DESK_ROW}#gggggggggggggggg#${G_PATH}${E_LAWN}`,
+  /* 28 */ `${"#".repeat(16)}DD${"#".repeat(33)}${G_PATH}${E_LAWN}`,
+  /* 29 */ `${"s".repeat(79)}h`,
 ];
 
 /** Template row repeated (6 per pod row) when the desk floor grows. */
-const GROW_ROW = `${DESK_ROW}#gggggggggggggggg#${G_PATH}`;
+const GROW_ROW = `${DESK_ROW}#gggggggggggggggg#${G_PATH}${E_LAWN}`;
 /** Rows are inserted before this y (the last floor row, so things along the bottom wall move with it). */
 const GROW_AT = 27;
 export const BASE_POD_ROWS = 4;
@@ -220,6 +243,20 @@ export const FOOTPRINTS = {
   serverRack: { w: 1, h: 1, solid: true },
   bush: { w: 1, h: 1, solid: true },
   doormat: { w: 2, h: 1, solid: false },
+  // bar
+  barCounter: { w: 6, h: 1, solid: true },
+  barBack: { w: 1, h: 1, solid: true },
+  beerTap: { w: 1, h: 1, solid: false },
+  barStool: { w: 1, h: 1, solid: false },
+  bottleShelf: { w: 3, h: 1, solid: true },
+  standingTable: { w: 1, h: 1, solid: true },
+  neonBeer: { w: 3, h: 1, solid: false },
+  // weed shop + smokers' corner
+  shopCounter: { w: 3, h: 1, solid: true },
+  jarShelf: { w: 3, h: 1, solid: true },
+  greenCross: { w: 1, h: 1, solid: false },
+  openSign: { w: 2, h: 1, solid: false },
+  ashtray: { w: 1, h: 1, solid: true },
 } as const;
 export type ObjectKind = keyof typeof FOOTPRINTS;
 export type MapObject = { kind: ObjectKind; x: number; y: number; variant?: number };
@@ -297,10 +334,44 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("floorLamp", 1, 9),
   o("floorLamp", 32, 21),
   o("doormat", 16, 27),
+  // "Feierabend" bar (x 66..77, y 3..11; door at x 65, y 7..8)
+  o("bottleShelf", 66, 3),
+  ...[69, 70, 71].map((x) => o("barBack", x, 3)),
+  o("beerTap", 70, 3),
+  o("barCounter", 66, 5),
+  ...[67, 68, 70, 71].map((x, i) => o("barStool", x, 6, i % 2)),
+  o("neonBeer", 75, 2),
+  o("standingTable", 75, 5),
+  o("standingTable", 75, 9),
+  o("plantBig", 77, 7),
+  o("plant", 77, 11, 1),
+  o("floorLamp", 66, 11),
+  // weed shop (x 66..77, y 17..23; door at x 65, y 19..20)
+  o("jarShelf", 66, 17),
+  o("jarShelf", 69, 17, 1),
+  o("openSign", 72, 16),
+  o("greenCross", 76, 16),
+  o("shopCounter", 72, 20),
+  o("plantBig", 77, 17),
+  o("armchair", 76, 22),
+  o("plant", 66, 23, 2),
+  // smokers' corner (patio x 66..71, y 25..26)
+  o("ashtray", 68, 25),
+  o("bench", 73, 25, 1),
+  o("lampPost", 77, 26),
+  o("bush", 78, 25, 1),
 ];
 
 // ---- areas & points of interest -------------------------------------------------------------
-export type AreaName = "desks" | "kitchen" | "lounge" | "meeting" | "game" | "garden";
+export type AreaName =
+  | "desks"
+  | "kitchen"
+  | "lounge"
+  | "meeting"
+  | "game"
+  | "garden"
+  | "bar"
+  | "shop";
 export type Area = { name: AreaName; label: string; x: number; y: number; w: number; h: number };
 export type Facing = "down" | "up" | "left" | "right";
 /** stand = standing; sit = seated facing camera; sitBack = seated facing away; play = busy standing */
@@ -366,7 +437,36 @@ const BASE_POIS: readonly Poi[] = [
   poi("cooler-d", "desks", 2, 15, "left", "stand"),
   poi("printer", "desks", 31, 9, "right", "stand"),
   poi("plant-d", "desks", 2, 3, "left", "stand"),
+  // bar: pour a beer at the tap, sit at the counter, lean on a standing table
+  poi("tap", "bar", 70, 4, "up", "play"),
+  poi("bar-1", "bar", 67, 6, "up", "sitBack", seat(67, 6)),
+  poi("bar-2", "bar", 68, 6, "up", "sitBack", seat(68, 6)),
+  poi("bar-3", "bar", 70, 6, "up", "sitBack", seat(70, 6)),
+  poi("bar-4", "bar", 71, 6, "up", "sitBack", seat(71, 6)),
+  poi("table-1l", "bar", 74, 5, "right", "stand"),
+  poi("table-1r", "bar", 76, 5, "left", "stand"),
+  poi("table-2l", "bar", 74, 9, "right", "stand"),
+  poi("table-2r", "bar", 76, 9, "left", "stand"),
+  // weed shop: buy at the counter, browse the jars, sit in the armchair
+  poi("shop-counter", "shop", 73, 21, "up", "stand"),
+  poi("jars-1", "shop", 67, 18, "up", "stand"),
+  poi("jars-2", "shop", 70, 18, "up", "stand"),
+  poi("shop-chair", "shop", 76, 23, "down", "sit", seat(76, 22)),
+  // smokers' corner (outside, open around the clock)
+  poi("smoke-1", "shop", 67, 25, "right", "stand"),
+  poi("smoke-2", "shop", 69, 25, "left", "stand"),
+  poi("smoke-3", "shop", 73, 26, "down", "sit", seat(73, 25)),
+  poi("smoke-4", "shop", 74, 26, "down", "sit", seat(74, 25)),
 ];
+
+/** Bar spots (only while the bar is open). */
+export const isBarPoi = (p: Poi) => p.area === "bar";
+/** The 4 stools at the bar counter (seated facing away from the camera). */
+export const isBarStool = (p: Poi) => p.id.startsWith("bar-");
+/** Smokers' corner spots (outside the shop, always open). */
+export const isSmokePoi = (p: Poi) => p.id.startsWith("smoke-");
+/** Inside the shop (only while it is open). */
+export const isShopPoi = (p: Poi) => p.area === "shop" && !isSmokePoi(p);
 
 // ---- nooks (empty pod slots) ------------------------------------------------------------------
 type NookSpec = {
@@ -564,6 +664,8 @@ export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
     { name: "meeting", label: "Meeting room", x: 34, y: 13, w: 16, h: 7 },
     { name: "game", label: "Game corner", x: 34, y: 22, w: 16, h: 6 + extra },
     { name: "garden", label: "Garden", x: 51, y: 1, w: 12, h: height - 2 },
+    { name: "bar", label: "Bar", x: 65, y: 1, w: 14, h: 12 },
+    { name: "shop", label: "Weed shop", x: 65, y: 15, w: 14, h: 13 + extra },
   ];
 
   const terrainAt = (x: number, y: number): Terrain | undefined => {
