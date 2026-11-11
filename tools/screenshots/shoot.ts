@@ -6,6 +6,7 @@
  *   bun run screenshots -- --only busy  # scenes whose name contains "busy"
  *   bun run screenshots -- --no-build   # reuse apps/web/dist
  *   bun run screenshots -- --no-gif
+ *   bun run screenshots -- --shard 2/4  # one of 4 balanced parts (CI runs them in parallel)
  *
  * Each scene gets a fresh server so nobody lingers in the 60 s leave grace between scenes.
  */
@@ -35,6 +36,17 @@ const argv = process.argv.slice(2);
 const ONLY = argv.includes("--only") ? (argv[argv.indexOf("--only") + 1] ?? "") : "";
 const BUILD = !argv.includes("--no-build");
 const GIF = !argv.includes("--no-gif");
+/** `--shard 2/4`: only this part of the scenes (parallel CI jobs) */
+const SHARD = (() => {
+  const m = argv.includes("--shard")
+    ? /^(\d+)\/(\d+)$/.exec(argv[argv.indexOf("--shard") + 1] ?? "")
+    : null;
+  if (!m) return null;
+  const index = Number(m[1]);
+  const of = Number(m[2]);
+  if (index < 1 || index > of) throw new Error(`--shard ${index}/${of}: index out of range`);
+  return { index, of };
+})();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (s: string) => console.log(`[shots] ${s}`);
@@ -1087,6 +1099,56 @@ async function sceneMessages() {
 
 // ---- main -------------------------------------------------------------------------------------
 
+/** [seconds a scene took in CI, scene]: `--shard` balances by these */
+const SCENES: readonly [number, () => Promise<void>][] = [
+  [18, () => sceneSimple("01-empty", "empty", "hour=14", { people: 0, sessions: 0 })],
+  [
+    20,
+    () =>
+      sceneSimple("02-one-typing", "one", "hour=14&zoom=4", { people: 1, sessions: 1 }, 2500, {
+        person: "anna",
+        zoom: 4,
+      }),
+  ],
+  [20, () => sceneSimple("03-busy", "busy", "hour=15", BUSY, 3500)],
+  [30, busyGif],
+  [32, sceneJoined],
+  [23, () => sceneSimple("05-kiosk", "busy", "kiosk=1&hour=16", BUSY, 5000)],
+  [18, () => sceneSimple("06-zoomed-out", "busy", "zoom=fit&hour=13", BUSY, 3000)],
+  [4, sceneStats],
+  [60, sceneTimelapse],
+  [26, sceneSidePanel],
+  [52, sceneAgentCard],
+  [110, sceneMessages],
+  [25, sceneOfficeLife],
+  [18, sceneCleared],
+  [162, sceneBarAndShop],
+  [13, sceneTerminal],
+  [44, sceneDetailedLook],
+  [5, sceneLookGallery],
+];
+
+/** Greedy split: the longest scene goes to the shard with the least work so far. */
+function shardOf(weights: readonly number[], shards: number): number[] {
+  const load = Array<number>(shards).fill(0);
+  const out = Array<number>(weights.length).fill(0);
+  const order = weights.map((w, i) => [w, i] as const).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (const [w, i] of order) {
+    const s = load.indexOf(Math.min(...load));
+    out[i] = s;
+    load[s] = load[s]! + w;
+  }
+  return out;
+}
+
+const SHARDS = SHARD
+  ? shardOf(
+      SCENES.map(([w]) => w),
+      SHARD.of,
+    )
+  : null;
+const inShard = (i: number) => !SHARDS || !SHARD || SHARDS[i] === SHARD.index - 1;
+
 function cleanup() {
   for (const p of servers) p.kill();
   servers.clear();
@@ -1111,32 +1173,12 @@ async function main() {
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
   });
   try {
-    await sceneSimple("01-empty", "empty", "hour=14", { people: 0, sessions: 0 });
-    await sceneSimple("02-one-typing", "one", "hour=14&zoom=4", { people: 1, sessions: 1 }, 2500, {
-      person: "anna",
-      zoom: 4,
-    });
-    await sceneSimple("03-busy", "busy", "hour=15", BUSY, 3500);
-    await busyGif();
-    await sceneJoined();
-    await sceneSimple("05-kiosk", "busy", "kiosk=1&hour=16", BUSY, 5000);
-    await sceneSimple("06-zoomed-out", "busy", "zoom=fit&hour=13", BUSY, 3000);
-    await sceneStats();
-    await sceneTimelapse();
-    await sceneSidePanel();
-    await sceneAgentCard();
-    await sceneMessages();
-    await sceneOfficeLife();
-    await sceneCleared();
-    await sceneBarAndShop();
-    await sceneTerminal();
-    await sceneDetailedLook();
-    await sceneLookGallery();
+    for (const [, run] of SCENES.filter((_, i) => inShard(i))) await run();
   } finally {
     await browser.close();
     cleanup();
   }
-  if (!ONLY) rmSync(join(OUT, "dev"), { recursive: true, force: true });
+  if (!ONLY && !SHARD) rmSync(join(OUT, "dev"), { recursive: true, force: true });
   log(`done: ${shots.length} files in ${OUT}`);
 }
 

@@ -1,9 +1,9 @@
 name: CI
 
+# PRs only: a push to a PR branch used to run everything twice (push + pull_request).
+# main is handled by release.yml (CI already ran on the PR); other branches can run it by hand.
 on:
   pull_request:
-  push:
-    branches-ignore: [main] # main is handled by release.yml (CI already ran on the PR)
   workflow_dispatch:
 
 concurrency:
@@ -18,9 +18,9 @@ env:
 
 jobs:
   check:
-    name: Lint, typecheck, test, e2e, web, screenshots
+    name: Lint, typecheck, test, e2e, web
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -46,21 +46,29 @@ jobs:
       - name: Build web
         run: bun run --filter @agent-office/web build
 
-      - name: Check for screenshots script
-        id: shots
-        run: |
-          if [ -n "$(jq -r '.scripts.screenshots // empty' package.json)" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::No root 'screenshots' script yet; skipping screenshots"
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
+  # the scenes run one after another in real time (~12 min in one job): 4 balanced parts in parallel
+  screenshots:
+    name: Screenshots ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install
+        run: bun install --frozen-lockfile
 
       # the runner's apt mirrors are sometimes unreachable or hang: time out, retry, then skip the screenshots
       # (a warning, not a red build) instead of blocking every PR on a network outage
       - name: Install Playwright Chromium
         id: browsers
-        if: steps.shots.outputs.enabled == 'true'
         run: |
           for i in 1 2 3; do
             if timeout 180 bun run --cwd tools/screenshots install-browsers; then # pinned playwright version
@@ -72,16 +80,37 @@ jobs:
           echo "ok=false" >> "$GITHUB_OUTPUT"
 
       - name: Screenshots
-        if: steps.shots.outputs.enabled == 'true' && steps.browsers.outputs.ok == 'true'
-        run: bun run screenshots
+        if: steps.browsers.outputs.ok == 'true'
+        run: bun run screenshots -- --shard ${{ matrix.shard }}/4
+
+      # only what this shard (re)shot: the committed images from the other shards would overwrite theirs
+      - name: Collect this shard's files
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p shard
+          git ls-files -m -o --exclude-standard screenshots | xargs -r cp --parents -t shard
 
       - name: Upload screenshots
-        if: steps.shots.outputs.enabled == 'true' && !cancelled()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
-          path: screenshots/
+          name: screenshots-${{ matrix.shard }}
+          path: shard/screenshots/
           if-no-files-found: warn
+          retention-days: 1
+
+  screenshots-merge:
+    name: Collect screenshots
+    needs: screenshots
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/upload-artifact/merge@v4
+        with:
+          name: screenshots
+          pattern: screenshots-*
+          delete-merged: true
           retention-days: 14
 
   connector:
