@@ -5,6 +5,7 @@
  */
 import { seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
+import { tieTexture } from "../art/chaos.ts";
 import { heartTexture, textBubbleTexture } from "../art/fun.ts";
 import { CAT, catTextures, zzzTextures } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
@@ -29,6 +30,10 @@ export class OfficeCat {
   private heading: string | null = null;
   private prey: { sprite: Sprite; x: number; y: number } | null = null;
   private meowCooldown = 0;
+  private tie: Sprite;
+  /** Friday meeting: where the boss sits (null = an ordinary cat) */
+  private boss: Point | null = null;
+  private bossTalk = 3;
   /** chance a finished helper nearby gets eaten */
   eatChance = 0.25;
   /** how far (px) the cat will dash for a finished helper */
@@ -47,8 +52,11 @@ export class OfficeCat {
     this.sprite.label = "actor";
     this.zzz = new Sprite(zzzTextures()[0]!);
     this.zzz.anchor.set(0, 1);
+    this.tie = new Sprite(tieTexture());
+    this.tie.anchor.set(0.5, 0);
+    this.tie.visible = false;
     objects.addChild(this.sprite);
-    fx.addChild(this.zzz);
+    fx.addChild(this.zzz, this.tie);
     const home = this.home();
     this.x = home.x;
     this.y = home.y;
@@ -56,6 +64,32 @@ export class OfficeCat {
 
   setMap(map: OfficeMap) {
     this.map = map;
+  }
+
+  /** The cat is the boss now (wears a tie, sits at the head of the table), or not anymore. */
+  setBoss(spot: Point | null) {
+    if (
+      spot === this.boss ||
+      (spot && this.boss && spot.x === this.boss.x && spot.y === this.boss.y)
+    )
+      return;
+    this.boss = spot;
+    this.guarding = null;
+    this.heading = null;
+    if (!spot) {
+      this.effects.floater(textBubbleTexture("MEETING OVER."), this.x, this.y - 14, 2.5, 8);
+      this.mode = "sit";
+      this.timer = 3;
+      return;
+    }
+    this.prey = null;
+    this.bossTalk = 2;
+    if (!this.goTo(spot)) {
+      this.x = spot.x;
+      this.y = spot.y;
+      this.mode = "sit";
+    }
+    this.timer = 9999;
   }
 
   private home(): Point {
@@ -91,6 +125,13 @@ export class OfficeCat {
   }
 
   private pickTarget() {
+    if (this.boss) {
+      if (Math.hypot(this.x - this.boss.x, this.y - this.boss.y) > 2 && this.goTo(this.boss))
+        return;
+      this.mode = "sit";
+      this.timer = 9999;
+      return;
+    }
     // waiting alarm first: whoever waits the longest gets company
     const waiting = this.waitSpots();
     if (waiting.length > 0) {
@@ -135,7 +176,7 @@ export class OfficeCat {
 
   /** A finished helper bot at (x, y): pounce on it (true = the cat owns the sprite now). */
   tryEat(sprite: Sprite, x: number, y: number): boolean {
-    if (this.prey || this.guarding || this.heading) return false;
+    if (this.prey || this.guarding || this.heading || this.boss) return false;
     if (Math.hypot(x - this.x, y - this.y) > this.eatRange) return false;
     if (this.rand() >= this.eatChance) return false;
     this.prey = { sprite, x, y };
@@ -210,7 +251,10 @@ export class OfficeCat {
       const walk = this.dir < 0 ? CAT.walkLeft : CAT.walkRight;
       this.sprite.texture = frames[walk[Math.floor(time * 6) % 2]!]!;
       if (this.path.length === 0) {
-        if (this.heading) {
+        if (this.boss) {
+          this.mode = "sit";
+          this.timer = 9999;
+        } else if (this.heading) {
           this.guarding = this.heading;
           this.heading = null;
           this.mode = "sit";
@@ -249,6 +293,27 @@ export class OfficeCat {
       this.mode === "walk" || this.mode === "pounce" ? 1 : this.dir < 0 ? 1 : -1;
     this.sprite.position.set(Math.round(this.x), Math.round(this.y + hopY));
     this.sprite.zIndex = this.y - 1;
+    this.tie.visible = this.boss !== null;
+    if (this.tie.visible) {
+      this.tie.position.set(
+        Math.round(this.x + (this.mode === "walk" ? this.dir * 3 : 0)),
+        Math.round(this.y - 7),
+      );
+      if (this.mode === "sit") {
+        this.bossTalk -= dt;
+        if (this.bossTalk <= 0) {
+          this.bossTalk = 18 + this.rand() * 12;
+          const lines = [
+            "MEETING. NOW.",
+            "WHO ATE MY BOT?",
+            "AGENDA: ME.",
+            "NO HUMANS ON THE SOFA.",
+          ];
+          const text = lines[Math.floor(this.rand() * lines.length)]!;
+          this.effects.floater(textBubbleTexture(text, C.plum), this.x + 6, this.y - 14, 3, 8);
+        }
+      }
+    }
     this.zzz.visible = this.mode === "sleep";
     this.zzz.texture = zzzTextures()[Math.floor(time * 1.5) % 3]!;
     this.zzz.position.set(Math.round(this.x + 4), Math.round(this.y - 12));

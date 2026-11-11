@@ -202,3 +202,178 @@ export function ripLabel(project: string | undefined, ageMs: number): string {
   const name = (project ?? "session").slice(0, 14);
   return `${name} ${dur}`;
 }
+
+// ---- office chaos ---------------------------------------------------------------------------
+
+/** "YYYY-MM-DD" of the day before (calendar math only, no time zones involved). */
+export function prevDayKey(dayKey: string): string {
+  const t = Date.UTC(+dayKey.slice(0, 4), +dayKey.slice(5, 7) - 1, +dayKey.slice(8, 10));
+  return new Date(t - 86_400_000).toISOString().slice(0, 10);
+}
+
+/** 0 = Sunday ... 6 = Saturday, of a day key. */
+export function weekdayOf(dayKey: string): number {
+  return new Date(`${dayKey}T12:00:00Z`).getUTCDay();
+}
+
+/** Fire alarm: 3+ agents on fire for 5 s turns it on; calm for 20 s (or 90 s max) turns it off. */
+export const ALARM_BURNING = 3;
+export const ALARM_ARM_S = 5;
+export const ALARM_CALM_S = 20;
+export const ALARM_MAX_S = 90;
+export const ALARM_COOLDOWN_S = 600;
+export type AlarmState = {
+  on: boolean;
+  hot: number;
+  calm: number;
+  onFor: number;
+  cooldown: number;
+};
+export const ALARM_IDLE: AlarmState = { on: false, hot: 0, calm: 0, onFor: 0, cooldown: 0 };
+
+export function alarmTick(s: AlarmState, burning: number, dt: number): AlarmState {
+  const fire = burning >= ALARM_BURNING;
+  if (!s.on) {
+    const cooldown = Math.max(0, s.cooldown - dt);
+    const hot = fire ? s.hot + dt : 0;
+    if (hot >= ALARM_ARM_S && cooldown <= 0)
+      return { on: true, hot: 0, calm: 0, onFor: 0, cooldown: 0 };
+    return { ...s, hot, cooldown };
+  }
+  const onFor = s.onFor + dt;
+  const calm = fire ? 0 : s.calm + dt;
+  if (calm >= ALARM_CALM_S || onFor >= ALARM_MAX_S)
+    return { on: false, hot: 0, calm: 0, onFor: 0, cooldown: ALARM_COOLDOWN_S };
+  return { ...s, onFor, calm };
+}
+
+/** The cat holds a meeting: Fridays 17:00-17:45 office time. */
+export function catBossWindow(dayKey: string, hour: number): boolean {
+  return weekdayOf(dayKey) === 5 && hour >= 17 && hour < 17.75;
+}
+
+/** Raccoons raid the bin on about a third of the nights; the raid starts between 23:00 and 04:00. */
+export function raccoonRaid(nightOf: string): number | null {
+  if (unit(`raccoon:${nightOf}`) >= 0.35) return null;
+  return 23 + unit(`raccoon-at:${nightOf}`) * 4.9;
+}
+export const RACCOON_RAID_H = 70 / 3600;
+
+/** Hours since the raid of the current night started (null = no raid yet / none tonight). */
+export function raccoonPhase(dayKey: string, hour: number): number | null {
+  // the night belongs to the evening it started on: 00:00-10:00 count as last night
+  const night = hour < 10 ? prevDayKey(dayKey) : dayKey;
+  const start = raccoonRaid(night);
+  if (start === null) return null;
+  const h = hour < 10 ? hour + 24 : hour;
+  return h >= start ? h - start : null;
+}
+
+/** Raid going on right now. */
+export function raccoonsOut(dayKey: string, hour: number): boolean {
+  const p = raccoonPhase(dayKey, hour);
+  return p !== null && p < RACCOON_RAID_H;
+}
+
+/** Trash lies around from the raid until 10:00 the next morning. */
+export function trashOut(dayKey: string, hour: number): boolean {
+  const p = raccoonPhase(dayKey, hour);
+  return p !== null && p >= RACCOON_RAID_H * 0.6 && (hour < 10 || hour >= 23);
+}
+
+/** Kaiju day: one per month, between 10:00 and 16:00, for 40 seconds. */
+export const KAIJU_S = 40;
+export function kaijuStart(dayKey: string): number | null {
+  const month = dayKey.slice(0, 7);
+  const day = 1 + Math.floor(unit(`kaiju-day:${month}`) * 28);
+  if (Number(dayKey.slice(8, 10)) !== day) return null;
+  return 10 + unit(`kaiju-at:${month}`) * 6;
+}
+/** 0..1 progress of the kaiju walk, or null. */
+export function kaijuAt(dayKey: string, hour: number): number | null {
+  const start = kaijuStart(dayKey);
+  if (start === null) return null;
+  const p = ((hour - start) * 3600) / KAIJU_S;
+  return p >= 0 && p < 1 ? p : null;
+}
+
+/** Solar eclipse: ~3 days a year at a fixed time around midday, 10 minutes of darkness. */
+export const ECLIPSE_H = 10 / 60;
+export function eclipseStart(dayKey: string): number | null {
+  if (unit(`eclipse:${dayKey}`) >= 3 / 365) return null;
+  return 11 + unit(`eclipse-at:${dayKey}`) * 4;
+}
+/** Darkness 0..1 of an eclipse at that moment (smooth in and out). */
+export function eclipseDark(dayKey: string, hour: number, start = eclipseStart(dayKey)): number {
+  if (start === null) return 0;
+  const p = (hour - start) / ECLIPSE_H;
+  if (p < 0 || p > 1) return 0;
+  return smooth(clamp01(Math.min(p, 1 - p) * 4));
+}
+
+/** Rare weather events of an hour (~1 in 60 hours each; meteors only at night). */
+export type RareEvent = "tornado" | "meteors";
+export function rareEventOf(dayKey: string, hour: number): RareEvent | null {
+  const h = Math.floor(hour);
+  const r = unit(`rare:${dayKey}:${h}`);
+  const night = h >= 21 || h < 4;
+  // nights are 7 of 24 hours: scale up so meteors still come about once per 60 hours overall
+  if (night && r < (1 / 60) * (24 / 7)) return "meteors";
+  if (!night && r < 1 / 60) return "tornado";
+  return null;
+}
+/** The tornado crosses for 30 s at a fixed minute of its hour: 0..1 progress or null. */
+export const TORNADO_S = 30;
+export function tornadoAt(dayKey: string, hour: number): number | null {
+  if (rareEventOf(dayKey, hour) !== "tornado") return null;
+  const h = Math.floor(hour);
+  const start = h + 0.1 + unit(`tornado-at:${dayKey}:${h}`) * 0.8;
+  const p = ((hour - start) * 3600) / TORNADO_S;
+  return p >= 0 && p < 1 ? p : null;
+}
+
+/** Rain (not snow) in that hour's sky. */
+export function rainyHour(dayKey: string, h: number, season: Season): boolean {
+  return season !== "winter" && hourSky(dayKey, h).precip > 0.15;
+}
+
+/** Consecutive rainy hours ending with hour `h` (max 8 looked at). */
+export function rainStreak(dayKey: string, h: number, season: Season): number {
+  let n = 0;
+  while (n < 8 && rainyHour(dayKey, h - n, season)) n++;
+  return n;
+}
+
+/** Flood water in the garden, 0..1: rises after 3+ rainy hours, drains over the next 2. */
+export const FLOOD_AFTER_H = 3;
+export function floodLevel(dayKey: string, hour: number, season: Season): number {
+  const h = Math.floor(hour);
+  const frac = hour - h;
+  const now = rainStreak(dayKey, h, season);
+  if (now >= FLOOD_AFTER_H) return clamp01(0.4 + 0.3 * (now - FLOOD_AFTER_H) + 0.3 * frac);
+  if (now > 0) return 0;
+  for (let k = 1; k <= 2; k++) {
+    if (rainStreak(dayKey, h - k, season) >= FLOOD_AFTER_H) {
+      // dry hours since then drain it: k-1 full hours + this one
+      return clamp01(1 - (k - 1 + frac) / 2);
+    }
+    if (rainyHour(dayKey, h - k, season)) return 0;
+  }
+  return 0;
+}
+
+/** `?event=` names for screenshots and demos. */
+export const FORCE_EVENTS = [
+  "tornado",
+  "meteors",
+  "eclipse",
+  "kaiju",
+  "raccoons",
+  "alarm",
+  "catboss",
+  "flood",
+] as const;
+export type ForcedEvent = (typeof FORCE_EVENTS)[number];
+export function parseForcedEvent(v: string | null | undefined): ForcedEvent | null {
+  return (FORCE_EVENTS as readonly string[]).includes(v ?? "") ? (v as ForcedEvent) : null;
+}

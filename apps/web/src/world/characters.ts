@@ -28,6 +28,13 @@ import {
 } from "../art/characters.ts";
 import type { MonitorState } from "../art/desk.ts";
 import {
+  cobwebTexture,
+  craterTexture,
+  signTexture,
+  skeletonTexture,
+  splatTexture,
+} from "../art/drama.ts";
+import {
   boltTextures,
   CHAT_ICONS,
   chatIconTextures,
@@ -52,6 +59,21 @@ import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
 import type { WaitSpot } from "./cat.ts";
+import {
+  CRATER_S,
+  type EndedDesk,
+  explodeCheck,
+  HitCounter,
+  isGhostHour,
+  pickGhosts,
+  REARM_BELOW,
+  REBELLION_EVERY_S,
+  REBELLION_HELPERS,
+  REBELLION_S,
+  SPLAT_S,
+  skeletonAmount,
+  ZOMBIE_AFTER_MS,
+} from "./dramaRules.ts";
 import type { Effects } from "./effects.ts";
 import { HelperSwarm, type HelperWorld } from "./helpers.ts";
 import {
@@ -97,8 +119,11 @@ export type Moment = {
 /** Seconds between `person.joined` and the door/confetti, so an auto camera can get there. */
 const JOIN_LEAD = 1.8;
 
-type Mode = "queued" | "walking" | "seated" | "poi" | "waving" | "leaving" | "zapped";
-type Goal = "desk" | "poi" | "exit" | "chat";
+type Mode = "queued" | "walking" | "seated" | "poi" | "waving" | "leaving" | "zapped" | "carried";
+type Goal = "desk" | "poi" | "exit" | "chat" | "lunch" | "evac";
+type Crater = { crater: Sprite; sign: Sprite; t: number };
+type Rebellion = { cool: number; t: number; c: SessionCharacter | null; seat: Point };
+type Ghost = EndedDesk & { sheet: CharacterSheet };
 type Chat = { partner: SessionCharacter; t: number; next: number };
 type Remains = {
   pile: Sprite;
@@ -118,6 +143,12 @@ const ERRANDS: readonly Point[] = [
   { x: 31, y: 15 },
   { x: 43, y: 4 },
 ];
+
+/** Local calendar day key (night ghosts belong to one day). */
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
 
 /** Helpers stay within a few steps of their agent's chair, inside the pod's aisle. */
 export function helperArea(
@@ -167,6 +198,18 @@ export class SessionCharacter {
   /** flames over the head: context window nearly full */
   flame: Sprite;
   smokeT = 0;
+  /** blows up once its context crosses EXPLODE_AT (re-arms below REARM_BELOW) */
+  explodeArmed = true;
+  /** skeleton overlay (long waits) and its cobweb; skelK = 0..1 */
+  skel: Sprite;
+  web: Sprite;
+  skelK = 0;
+  /** tomato splat that stays on for a while */
+  splat: Sprite;
+  splatT = 0;
+  zombieT = 8;
+  /** standing outside during a fire alarm */
+  evac = false;
   chat: Chat | null = null;
   chatCooldown = 8;
   chatCheck = 0;
@@ -210,6 +253,16 @@ export class SessionCharacter {
     this.flame = new Sprite(flameTextures()[0]!);
     this.flame.anchor.set(0.5, 1);
     this.flame.visible = false;
+    this.skel = new Sprite(skeletonTexture());
+    this.skel.anchor.set(0.5, 1);
+    this.skel.label = "actor";
+    this.skel.visible = false;
+    this.web = new Sprite(cobwebTexture());
+    this.web.anchor.set(0.5, 1);
+    this.web.visible = false;
+    this.splat = new Sprite(splatTexture());
+    this.splat.anchor.set(0.5);
+    this.splat.visible = false;
   }
 
   get hasDesk() {
@@ -236,6 +289,19 @@ export class CharacterManager {
   pizzaActive: () => boolean = () => false;
   /** the office cat may eat a finished helper (wired up in main.ts) */
   catEats: (sprite: Sprite, x: number, y: number) => boolean = () => false;
+  /** office-local hour 0..24 (night ghosts) */
+  hour: () => number = () => 12;
+  /** where the parked food truck serves (world px), or null when there is none */
+  lunchSpot: () => { x: number; y: number } | null = () => null;
+  /** a character just picked up a coffee */
+  onCoffee: (personId: string) => void = () => {};
+  private hits = new HitCounter();
+  private craters: Crater[] = [];
+  private rebels = new Map<string, Rebellion>();
+  private endedDesks: Ghost[] = [];
+  private ghostSprites: Sprite[] = [];
+  private ghosts: Ghost[] = [];
+  private ghostCheck = 0;
   /** ended sessions of the last seconds, to spot `/clear` restarts */
   private recentEnds: (EndedSession & { char: SessionCharacter | null; cleared: boolean })[] = [];
   /** most sessions at once per person (personal record) */
@@ -312,7 +378,8 @@ export class CharacterManager {
         }
         if (
           s.activity !== "idle" &&
-          (c.mode === "poi" || (c.mode === "walking" && c.goal === "poi"))
+          !c.evac &&
+          (c.mode === "poi" || (c.mode === "walking" && (c.goal === "poi" || c.goal === "lunch")))
         ) {
           this.goToDesk(c);
         }
@@ -342,6 +409,7 @@ export class CharacterManager {
       }
       case "officeRenamed":
       case "interaction":
+      case "birthdayChanged":
         break;
     }
   }
@@ -479,6 +547,10 @@ export class CharacterManager {
       cleared: false,
     };
     this.recentEnds.push(entry);
+    if (c.hasDesk) {
+      this.endedDesks.push({ pod: c.pod, desk: c.desk, day: dayKey(now), at: now, sheet: c.sheet });
+      if (this.endedDesks.length > 60) this.endedDesks.shift();
+    }
     this.onMoment({ kind: "ended", x: c.x, y: c.y, name: this.nameOf(c.personId) });
     const age = sessionAgeMs(c.startedAt, this.model.clockSkew, now);
     if (age > SHIP_IT_AFTER_MS) {
@@ -632,8 +704,9 @@ export class CharacterManager {
     c.project = s.project;
     c.machine = s.machine;
     this.chars.set(sessionId, c);
-    this.scene.objects.addChild(c.sprite, c.mug);
-    this.scene.fx.addChild(c.ring, c.marker, c.icon, c.bubble, c.flame);
+    c.explodeArmed = (s.context ?? 0) < REARM_BELOW;
+    this.scene.objects.addChild(c.sprite, c.mug, c.skel);
+    this.scene.fx.addChild(c.ring, c.marker, c.icon, c.bubble, c.flame, c.web, c.splat);
     if (instant) {
       if (c.hasDesk) {
         this.sit(c);
@@ -696,9 +769,21 @@ export class CharacterManager {
       this.setMonitorFor(c, "off");
       this.resetChair(c);
     }
-    this.scene.objects.removeChild(c.sprite, c.mug);
-    this.scene.fx.removeChild(c.bubble, c.marker, c.icon, c.ring, c.flame);
-    for (const sp of [c.sprite, c.bubble, c.marker, c.mug, c.icon, c.ring]) sp.destroy();
+    this.scene.objects.removeChild(c.sprite, c.mug, c.skel);
+    this.scene.fx.removeChild(c.bubble, c.marker, c.icon, c.ring, c.flame, c.web, c.splat);
+    for (const sp of [
+      c.sprite,
+      c.bubble,
+      c.marker,
+      c.mug,
+      c.icon,
+      c.ring,
+      c.flame,
+      c.skel,
+      c.web,
+      c.splat,
+    ])
+      sp.destroy();
     this.chars.delete(c.sessionId);
     this.syncSlots();
   }
@@ -780,6 +865,8 @@ export class CharacterManager {
       this.walkTo(c, poi.tile, "poi", poi.spot);
     };
     const all = free(this.scene.map.pois);
+    // the food truck is outside: grab something to eat
+    if (this.rand() < 0.45 && this.goLunch(c)) return;
     // pizza on the table: everybody idle gathers in the meeting room
     if (this.pizzaActive() && this.rand() < 0.85) {
       const meet = all.filter((p) => p.area === "meeting" && p.id !== "whiteboard");
@@ -1014,6 +1101,307 @@ export class CharacterManager {
     this.effects.floater(smokeTexture(), c.x + (this.rand() - 0.5) * 6, head - 2, 1.8, 14, 1.5);
   }
 
+  // ---- drama ----------------------------------------------------------------------------
+  /** Explosions, skeletons, zombies and splats of one character (each frame). */
+  private drama(c: SessionCharacter, dt: number) {
+    const s = this.model.sessions.get(c.sessionId);
+    const offline = this.isOffline(c);
+    const chk = explodeCheck(c.explodeArmed, s?.context);
+    c.explodeArmed = chk.armed;
+    if (chk.explode) {
+      if (c.mode === "seated" && c.hasDesk && !offline) this.explode(c);
+      else c.explodeArmed = true;
+    }
+    // skeleton: fades in with the wait, back in one puff
+    const target = c.mode === "seated" && !offline ? skeletonAmount(this.waitedMs(c)) : 0;
+    if (target === 0 && c.skelK > 0.05) this.effects.puff(c.x, c.y - 14);
+    c.skelK = target;
+    c.skel.visible = c.skelK > 0 && c.sprite.visible;
+    if (c.skel.visible) {
+      c.skel.position.copyFrom(c.sprite.position);
+      c.skel.zIndex = c.sprite.zIndex + 0.01;
+      c.skel.alpha = c.skelK;
+    }
+    c.web.visible = c.skelK > 0.5 && c.hasDesk;
+    if (c.web.visible) {
+      const seat = this.seatOf(c.pod, c.desk);
+      c.web.position.set(Math.round(seat.x - 9), Math.round(seat.y - 16));
+      c.web.alpha = Math.min(1, (c.skelK - 0.5) * 4);
+    }
+    if (this.isZombie(c)) {
+      c.zombieT -= dt;
+      if (c.zombieT <= 0) {
+        c.zombieT = 15 + this.rand() * 20;
+        this.say(c, "BRAINNNS...");
+      }
+    }
+    if (c.splatT > 0) c.splatT -= dt;
+    c.splat.visible = c.splatT > 0 && c.sprite.visible;
+    if (c.splat.visible) {
+      const up = c.mode === "seated" ? 14 : 16;
+      c.splat.position.set(Math.round(c.x + 1), Math.round(c.y - up));
+      c.splat.alpha = Math.min(1, c.splatT / 30);
+    }
+  }
+
+  private idleMs(c: SessionCharacter): number {
+    const s = this.model.sessions.get(c.sessionId);
+    if (s?.activity !== "idle") return 0;
+    return (Date.now() - s.activitySince) * this.timeScale;
+  }
+
+  private isZombie(c: SessionCharacter): boolean {
+    return !this.isOffline(c) && this.idleMs(c) > ZOMBIE_AFTER_MS;
+  }
+
+  /** Context full: BOOM, a crater with a sign, and the agent walks back in fresh. */
+  private explode(c: SessionCharacter) {
+    const x = c.x;
+    const y = c.y;
+    const flash = new Sprite(glowTexture(30, C.white));
+    flash.anchor.set(0.5);
+    flash.position.set(Math.round(x), Math.round(y - 16));
+    this.scene.glows.addChild(flash);
+    this.effects.after(0.35, () => {
+      this.scene.glows.removeChild(flash);
+      flash.destroy();
+    });
+    this.effects.burst(x, y - 14, [C.orange, C.amber, C.red, C.night, C.lemon], {
+      count: 36,
+      speed: 90,
+      life: 1.6,
+      floor: y + 4,
+      rand: this.rand,
+    });
+    this.effects.puff(x, y - 10);
+    this.effects.after(0.2, () => this.effects.puff(x + 6, y - 18));
+    this.effects.floater(toastTexture("BOOM!"), x, y - 30, 1.6, 14);
+    const crater = new Sprite(craterTexture());
+    crater.anchor.set(0.5);
+    crater.position.set(Math.round(x), Math.round(y + 8));
+    crater.zIndex = y + 1.5;
+    crater.label = "actor";
+    const sign = new Sprite(signTexture("COMPACTED"));
+    sign.anchor.set(0.5, 1);
+    sign.position.set(Math.round(x + 18), Math.round(y + 14));
+    sign.zIndex = y + 14;
+    sign.label = "actor";
+    this.scene.objects.addChild(crater, sign);
+    this.craters.push({ crater, sign, t: 0 });
+    this.endChat(c);
+    this.releasePoi(c);
+    this.setMonitorFor(c, "off");
+    this.resetChair(c);
+    c.skelK = 0;
+    c.sprite.visible = false;
+    c.flame.visible = false;
+    c.bubbleT = 0;
+    c.bubble.visible = false;
+    const sp = this.scene.map.spawn;
+    c.x = sp.x * TILE + 16;
+    c.y = sp.y * TILE + 14;
+    c.path = [];
+    c.mode = "queued";
+    c.delay = 2.5;
+  }
+
+  private updateCraters(dt: number) {
+    for (let i = this.craters.length - 1; i >= 0; i--) {
+      const k = this.craters[i]!;
+      k.t += dt;
+      const a = Math.min(1, Math.max(0, (CRATER_S - k.t) / 2));
+      k.crater.alpha = a;
+      k.sign.alpha = a;
+      if (k.t < CRATER_S) continue;
+      this.scene.objects.removeChild(k.crater, k.sign);
+      k.crater.destroy();
+      k.sign.destroy();
+      this.craters.splice(i, 1);
+    }
+  }
+
+  /** ≥ 10 helpers: now and then they carry their boss once around the pod. */
+  private updateRebellions(dt: number) {
+    for (const id of this.rebels.keys()) if (!this.model.people.has(id)) this.rebels.delete(id);
+    for (const p of this.model.people.values()) {
+      const r = this.rebels.get(p.personId) ?? { cool: 5, t: 0, c: null, seat: { x: 0, y: 0 } };
+      this.rebels.set(p.personId, r);
+      const mine = this.charactersOf(p.personId);
+      if (r.c) {
+        const c = r.c;
+        r.t += dt;
+        const u = r.t / REBELLION_S;
+        if (c.removed || c.mode !== "carried" || u >= 1) {
+          if (!c.removed && c.mode === "carried") this.sit(c);
+          for (const o of mine) o.helpers.escort = null;
+          r.c = null;
+          r.cool = REBELLION_EVERY_S;
+          continue;
+        }
+        const a = u * Math.PI * 2;
+        c.x = r.seat.x + 30 * Math.sin(a);
+        c.y = r.seat.y + 14 * (1 - Math.cos(a));
+        c.facing = "down";
+        for (const o of mine) o.helpers.escort = { x: c.x, y: c.y };
+        continue;
+      }
+      const total = this.model.sessionsOf(p.personId).reduce((n, s) => n + s.subagents, 0);
+      if (total < REBELLION_HELPERS) {
+        r.cool = Math.min(r.cool, 5);
+        continue;
+      }
+      r.cool -= dt;
+      if (r.cool > 0) continue;
+      const c = mine.find(
+        (o) => o.mode === "seated" && o.hasDesk && !this.isOffline(o) && o.skelK === 0,
+      );
+      if (!c) {
+        r.cool = 5;
+        continue;
+      }
+      r.c = c;
+      r.t = 0;
+      r.seat = this.seatOf(c.pod, c.desk);
+      c.mode = "carried";
+      this.effects.puff(c.x, c.y - 6);
+      this.say(c, "WHOA!");
+    }
+  }
+
+  /** At night today's ended sessions haunt their free desks. */
+  private updateGhosts(dt: number, time: number) {
+    this.ghostCheck -= dt;
+    if (this.ghostCheck <= 0) {
+      this.ghostCheck = 2;
+      const day = dayKey(Date.now());
+      this.endedDesks = this.endedDesks.filter((g) => g.day === day);
+      const occupied = (pod: number, desk: number) =>
+        !this.scene.desk(pod, desk) ||
+        [...this.chars.values()].some((c) => c.pod === pod && c.desk === desk);
+      this.ghosts = isGhostHour(this.hour()) ? pickGhosts(this.endedDesks, occupied, day) : [];
+    }
+    while (this.ghostSprites.length < this.ghosts.length) {
+      const g = new Sprite();
+      g.anchor.set(0.5, 1);
+      g.label = "actor";
+      g.tint = 0xc0e8ff;
+      this.scene.objects.addChild(g);
+      this.ghostSprites.push(g);
+    }
+    while (this.ghostSprites.length > this.ghosts.length) {
+      const g = this.ghostSprites.pop()!;
+      this.scene.objects.removeChild(g);
+      g.destroy();
+    }
+    this.ghosts.forEach((g, i) => {
+      const sp = this.ghostSprites[i]!;
+      const frames = g.sheet.anims.sitType;
+      sp.texture = frames[Math.floor(time * 6 + i) % frames.length]!;
+      const seat = this.seatOf(g.pod, g.desk);
+      sp.position.set(Math.round(seat.x), Math.round(seat.y + Math.sin(time * 2 + i)));
+      sp.zIndex = seat.y;
+      sp.alpha = 0.28 + 0.08 * Math.sin(time * 2.3 + i);
+    });
+  }
+
+  private nearestWalkable(t: Point, radius: number): Point | null {
+    const map = this.scene.map;
+    for (let r = 0; r <= radius; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          if (map.isWalkable(t.x + dx, t.y + dy)) return { x: t.x + dx, y: t.y + dy };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Walk to (around) a pixel spot over walkable tiles; false when there is no way. */
+  private walkToSpot(c: SessionCharacter, spot: Point, goal: Goal, scatter: number): boolean {
+    const tile = this.nearestWalkable(
+      { x: Math.floor(spot.x / TILE), y: Math.floor(spot.y / TILE) },
+      6,
+    );
+    if (!tile) return false;
+    const from = { x: Math.floor(c.x / TILE), y: Math.floor((c.y - 4) / TILE) };
+    const tiles = findPath(this.scene.map, from, tile);
+    if (!tiles) return false;
+    this.releasePoi(c);
+    this.endChat(c);
+    const end = tileCenter(tile);
+    c.path = tiles.slice(1).map(tileCenter);
+    c.path.push({ x: end.x + (this.rand() - 0.5) * scatter, y: end.y });
+    c.goal = goal;
+    c.mode = "walking";
+    return true;
+  }
+
+  private goLunch(c: SessionCharacter): boolean {
+    const spot = this.lunchSpot();
+    return !!spot && this.walkToSpot(c, spot, "lunch", 14);
+  }
+
+  /** A tomato hit: red splat on the character for a while. */
+  tomato(c: SessionCharacter) {
+    c.splatT = SPLAT_S;
+    this.effects.puff(c.x, c.y - 16);
+  }
+
+  /** Count a paper/tomato hit; true once a person got 3 within a minute (they throw back). */
+  hitBy(personId: string, _kind: "paper" | "tomato"): boolean {
+    return this.hits.hit(personId, Date.now());
+  }
+
+  /** Some visible character of someone else (a throw-back target). */
+  randomOther(personId: string): SessionCharacter | null {
+    const cands = [...this.chars.values()].filter(
+      (c) =>
+        c.personId !== personId &&
+        !c.removed &&
+        c.sprite.visible &&
+        c.mode !== "queued" &&
+        c.mode !== "zapped",
+    );
+    return cands.length ? cands[Math.floor(this.rand() * cands.length)]! : null;
+  }
+
+  /** Seated, online sessions on fire (context ≥ 80%). */
+  burningCount(): number {
+    let n = 0;
+    for (const c of this.chars.values()) {
+      if (c.mode !== "seated" || this.isOffline(c)) continue;
+      if ((this.model.sessions.get(c.sessionId)?.context ?? 0) >= FIRE_AT) n++;
+    }
+    return n;
+  }
+
+  /** Fire alarm: everyone online runs out to `spot` and waits; null sends them back. */
+  evacuate(spot: Point | null) {
+    for (const c of [...this.chars.values()]) {
+      if (c.removed || this.isOffline(c)) continue;
+      if (spot) {
+        if (["zapped", "queued", "waving", "leaving"].includes(c.mode) || c.evac) continue;
+        if (c.mode === "carried") this.sit(c);
+        if (c.mode === "seated") this.resetChair(c);
+        if (this.walkToSpot(c, spot, "evac", 40)) c.evac = true;
+      } else if (c.evac) {
+        c.evac = false;
+        if (c.hasDesk) this.goToDesk(c);
+        else this.idleWander(c);
+      }
+    }
+  }
+
+  /** Centre of a person's pod desks (cake drone target). */
+  personSpot(personId: string): Point | null {
+    const p = this.model.people.get(personId);
+    if (!p) return null;
+    const n = Math.max(2, this.scene.slotDesks(p.pod));
+    const span = podDeskSpan(p.pod, n);
+    return { x: span.x + span.w / 2, y: this.seatOf(p.pod, 0).y };
+  }
+
   private isOffline(c: SessionCharacter): boolean {
     return this.model.sessions.get(c.sessionId)?.offline === true;
   }
@@ -1050,11 +1438,13 @@ export class CharacterManager {
     for (const c of [...this.chars.values()]) {
       this.step(c, dt, time);
       if (c.removed) continue;
+      this.drama(c, dt);
       if (c.mode !== "zapped") {
         const off = this.isOffline(c);
-        c.sprite.tint = off ? 0x5a6988 : 0xffffff;
-        c.sprite.alpha = off ? 0.6 : 1;
+        c.sprite.tint = off ? 0x5a6988 : this.isZombie(c) ? 0x8fdc7a : 0xffffff;
+        c.sprite.alpha = off ? 0.6 : 1 - c.skelK * 0.95;
       }
+      if (c.mode === "carried") c.sprite.y -= 10;
       this.heat(c, dt, time);
       if (Math.abs(c.x - door.x) < 26 && Math.abs(c.y - door.y) < 30) doorBusy = true;
       c.helpers.update(dt, time);
@@ -1062,6 +1452,9 @@ export class CharacterManager {
         this.scene.arcadeBusy.add(c.poi.tile.x);
     }
     this.updateRemains(dt, time);
+    this.updateRebellions(dt);
+    this.updateGhosts(dt, time);
+    this.updateCraters(dt);
     this.scene.doorWanted = doorBusy;
     this.updateSelection(time);
   }
@@ -1111,7 +1504,8 @@ export class CharacterManager {
         break;
       }
       case "walking": {
-        this.walkStep(c, dt);
+        const zombie = this.isZombie(c);
+        this.walkStep(c, zombie ? dt * 0.45 : dt);
         const walkAnim =
           c.facing === "left"
             ? "walkLeft"
@@ -1120,10 +1514,13 @@ export class CharacterManager {
               : c.facing === "up"
                 ? "walkUp"
                 : "walkDown";
-        this.setAnim(c, walkAnim, 8, time);
+        this.setAnim(c, walkAnim, zombie ? 4 : 8, time);
         if (c.path.length === 0) this.arrive(c);
         break;
       }
+      case "carried":
+        this.setAnim(c, "wave", 4, time);
+        break;
       case "seated": {
         this.seatedStep(c, activity, dt, time);
         break;
@@ -1135,6 +1532,7 @@ export class CharacterManager {
         else if (pose === "sitBack") this.setAnim(c, "sitIdle", 0.8, time);
         else if (pose === "play" && c.facing === "up") this.setAnim(c, "play", 5, time);
         else this.setAnim(c, standAnim(c.facing), 1.2, time);
+        if (c.evac) break;
         this.setMonitorFor(c, "idle");
         if (activity !== "idle") {
           this.goToDesk(c);
@@ -1166,6 +1564,7 @@ export class CharacterManager {
           if (c.poi?.id === "coffee") {
             // got the coffee: off with a steaming mug
             c.mugT = 60 + this.rand() * 60;
+            this.onCoffee(c.personId);
             this.idleWander(c);
           } else if (this.rand() < 0.6 || c.chatCooldown > 15) this.idleWander(c);
           else c.timer = 8 + this.rand() * 10;
@@ -1336,6 +1735,20 @@ export class CharacterManager {
       c.mode = "poi";
       c.facing = c.poi?.face ?? "down";
       c.timer = c.poi?.id === "coffee" ? 3 + this.rand() * 2 : (10 + this.rand() * 15) * this.dwell;
+    } else if (c.goal === "lunch") {
+      c.mode = "poi";
+      c.poi = null;
+      c.timer = 4 + this.rand() * 4;
+      const spot = this.lunchSpot();
+      c.facing = spot && spot.y < c.y ? "up" : "down";
+      c.icon.texture = chatIconTextures()[CHAT_ICONS.indexOf("pizza")]!;
+      c.icon.visible = true;
+      c.iconT = 3;
+    } else if (c.goal === "evac") {
+      c.mode = "poi";
+      c.poi = null;
+      c.timer = Number.POSITIVE_INFINITY;
+      c.facing = "down";
     } else if (c.goal === "exit") {
       c.mode = "leaving";
       this.destroy(c);

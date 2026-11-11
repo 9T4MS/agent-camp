@@ -126,6 +126,9 @@ the context window is (a percentage), when the
 session started, the connector version, and the **machine name** you chose (`machine_name`,
 defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like).
 
+Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
+(only "it's your birthday today" is ever shown, never the date).
+
 Received: when someone in the office waves at you or sends you a short message, the
 connector shows it as a macOS notification (at most one every 5 s; macOS may list it under
 "Script Editor"). Turn it off with `agent-office configure --notifications false`.
@@ -177,6 +180,7 @@ viewers, exercises all usable items and games, and saves desktop/mobile screensh
 | -------------------- | --------------------------------------------------------------------- |
 | `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer or send a short message (it pops up as a notification on their Mac), or throw a paper ball (office only). Click the cat to pet it. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
+| `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
 
@@ -197,8 +201,9 @@ bar.
 
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?season=winter` (or spring,
 summer, autumn), `?weather=snow` (sun, clouds, rain, snow; otherwise it changes every hour),
-`?nohud=1`, `?demo=busy` (no server needed). A car drives by every minute or so: click it
-for the stats.
+`?nohud=1`, `?demo=busy` (no server needed), `?event=kaiju` (also tornado, meteors, eclipse,
+raccoons, alarm, catboss, flood) and `?birthday=<personId>` to see the rare stuff now. A car
+drives by every minute or so: click it for the stats.
 
 Everything is behind the office password (the same one as the connector's): the first visit
 shows a login page and the browser stays logged in for 30 days; opening the office during the

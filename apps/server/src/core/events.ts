@@ -28,6 +28,7 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
       return `person.joined ${person} (${e.data.person.name})`;
     case "person.left":
     case "avatar.updated":
+    case "person.birthdayChanged":
       return `${e.type} ${person}`;
     case "session.started":
       return `session.started ${person} ${e.data.session.agent} ${e.data.session.project ?? "-"}`;
@@ -60,6 +61,7 @@ export const HISTORY_SKIP = new Set<ViewerEvent["type"]>([
   "session.activityChanged",
   "session.connectionChanged",
   "session.contextChanged",
+  "person.birthdayChanged",
 ]);
 
 export function historyRow(e: ViewerEvent, lookup: SessionLookup): HistoryRow | null {

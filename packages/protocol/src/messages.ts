@@ -82,6 +82,8 @@ export const PersonView = z.object({
   avatar: AvatarSpec,
   sessions: z.array(SessionView),
   joinedAt: EpochMs,
+  /** opt-in (connector `birthday = "MM-DD"`): it is their birthday in the office time zone */
+  birthday: z.boolean().optional(),
 });
 export type PersonView = z.infer<typeof PersonView>;
 
@@ -110,6 +112,11 @@ export const ConnectorHello = msg(
     platform: z.string().max(40).optional(),
     /** user-chosen machine label shown on the agent card; older connectors omit it */
     machine: MachineName.optional(),
+    /** opt-in "MM-DD"; only "is it today" is ever shown */
+    birthday: z
+      .string()
+      .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)
+      .optional(),
   }),
 );
 export const PresenceSnapshot = msg(
@@ -215,6 +222,10 @@ export const SessionContextChanged = msg(
   "session.contextChanged",
   z.object({ personId: PersonId, sessionId: SessionId, context: ContextShare.nullable() }),
 );
+export const PersonBirthdayChanged = msg(
+  "person.birthdayChanged",
+  z.object({ personId: PersonId, birthday: z.boolean() }),
+);
 export const SessionConnectionChanged = msg(
   "session.connectionChanged",
   z.object({ personId: PersonId, sessionId: SessionId, offline: z.boolean() }),
@@ -222,10 +233,18 @@ export const SessionConnectionChanged = msg(
 
 /**
  * wave/coffee/cheer/message  poke a person (also a notification on their Macs)
- * paper                      throw a paper ball at a person
+ * paper / tomato             throw a paper ball / a tomato at a person (office only)
  * pet                        pet the office cat
  */
-export const INTERACTIONS = ["wave", "coffee", "cheer", "message", "paper", "pet"] as const;
+export const INTERACTIONS = [
+  "wave",
+  "coffee",
+  "cheer",
+  "message",
+  "paper",
+  "tomato",
+  "pet",
+] as const;
 export const InteractionKind = z.enum(INTERACTIONS);
 export type InteractionKind = z.infer<typeof InteractionKind>;
 /** Short name a viewer signs pokes with; viewers are otherwise anonymous. */
@@ -257,6 +276,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   AvatarUpdated,
   SessionConnectionChanged,
   SessionContextChanged,
+  PersonBirthdayChanged,
   InteractionHappened,
 ]);
 export type ServerToViewer = z.infer<typeof ServerToViewer>;

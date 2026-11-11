@@ -12,6 +12,7 @@ import {
   machineName,
   newClientId,
   saveConfig,
+  validBirthday,
 } from "./config.ts";
 import { Daemon, type StatusFile } from "./daemon.ts";
 import { Detector } from "./detect/index.ts";
@@ -81,6 +82,7 @@ Commands:
       --machine-name LABEL  (default: short hostname; "" resets to it)
       --share-project-names true|false     --get KEY (print one value)
       --notifications true|false   show waves/messages from the office (default true)
+      --birthday MM-DD     opt-in: the office brings you a cake that day ("" removes it)
   status            connection state and live sessions
   logs              follow the daemon log
   install-service   register the launchd agent (macOS) so it runs at login
@@ -185,6 +187,7 @@ async function cmdRun(args: Args): Promise<number> {
     const d = description?.trim();
     if (d) h.selfDescription = d.slice(0, 200);
     if (machine) h.machine = machine;
+    if (config.birthday) h.birthday = config.birthday;
     return h;
   };
 
@@ -259,6 +262,14 @@ function cmdConfigure(args: Args): number {
   set("machine-name", "machine_name");
   const share = flags["share-project-names"];
   if (share !== undefined) next.share_project_names = !(share === "false" || share === "0");
+  const bday = flagStr(flags, "birthday");
+  if (bday !== undefined) {
+    if (bday.trim() && !validBirthday(bday)) {
+      console.error("birthday must look like MM-DD, e.g. 03-14");
+      return 2;
+    }
+    next.birthday = validBirthday(bday);
+  }
   const notify = flags.notifications;
   if (notify !== undefined) next.notifications = !(notify === "false" || notify === "0");
   if (next.name && next.name.trim().length > 40) {

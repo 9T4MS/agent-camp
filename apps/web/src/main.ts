@@ -161,6 +161,10 @@ async function boot() {
       inMeeting: () => chars.inArea("meeting"),
       longWaiters: () => chars.chefWaitSpots(),
       onPizza: () => chars.pizzaArrived(),
+      burning: () => chars.burningCount(),
+      evacuate: (spot) => chars.evacuate(spot),
+      personSpot: (personId) => chars.personSpot(personId),
+      catBoss: (spot) => cat.setBoss(spot),
     },
     {
       weather:
@@ -175,6 +179,10 @@ async function boot() {
     },
   );
   chars.pizzaActive = () => life.pizzaOnTable;
+  chars.hour = () => living.hour;
+  chars.lunchSpot = () => life.truckSpot();
+  chars.onCoffee = (personId) =>
+    life.coffeeDrunk(personId, model.people.get(personId)?.name ?? personId);
   const hud = new Hud(host, model, { kiosk });
   // the top bar is 36 px (46 in kiosk) plus the notch inset in an installed app
   const hudTop = host.querySelector<HTMLElement>(".hud-top");
@@ -185,7 +193,13 @@ async function boot() {
     () => app.screen,
     () => ({ width: scene.widthPx, height: scene.heightPx }),
     () => scene.map.areas,
-    { kiosk, holdAuto: zoomParam !== null && !kiosk, topInset },
+    {
+      kiosk,
+      holdAuto: zoomParam !== null && !kiosk,
+      topInset,
+      view: params.get("view") === "overview" ? "overview" : "tour",
+      overviewEvery: Math.max(20, Number(params.get("every")) || 120),
+    },
   );
   camera.attach(app.canvas);
   const minimap = new Minimap(hud.minimapHost, camera, chars);
@@ -253,6 +267,7 @@ async function boot() {
     cheer: "cheered on",
     message: "sent a message to",
     paper: "threw a paper ball at",
+    tomato: "threw a tomato at",
   };
   /** Play an interaction for everyone watching (it comes back from the server to all viewers). */
   function react(ch: Extract<ModelChange, { kind: "interaction" }>) {
@@ -262,14 +277,31 @@ async function boot() {
     }
     const targets = ch.personId ? chars.charactersOf(ch.personId) : [];
     const name = ch.personId ? (model.people.get(ch.personId)?.name ?? ch.personId) : "";
-    if (ch.interaction === "paper") {
+    if (ch.interaction === "paper" || ch.interaction === "tomato") {
+      const kind = ch.interaction;
       const c = targets[Math.floor(Math.random() * targets.length)];
       if (c) {
         const side = c.x > scene.widthPx / 2 ? -1 : 1;
-        effects.throwBall(c.x + side * 110, c.y - 60, c.x, c.y - 20, () => {
-          effects.puff(c.x, c.y - 20);
-          chars.say(c, "OUCH!");
-        });
+        const fx = c.x + side * 110;
+        if (kind === "tomato")
+          effects.throwTomato(fx, c.y - 60, c.x, c.y - 20, () => chars.tomato(c));
+        else
+          effects.throwBall(fx, c.y - 60, c.x, c.y - 20, () => {
+            effects.puff(c.x, c.y - 20);
+            chars.say(c, "OUCH!");
+          });
+        // paper ball war: the third hit within a minute gets thrown back at someone else
+        if (ch.personId && chars.hitBy(ch.personId, kind)) {
+          const victim = chars.randomOther(ch.personId);
+          if (victim)
+            effects.after(1.4, () => {
+              chars.say(c, "THAT'S IT!");
+              effects.throwBall(c.x, c.y - 20, victim.x, victim.y - 20, () => {
+                effects.puff(victim.x, victim.y - 20);
+                chars.say(victim, "HEY!");
+              });
+            });
+        }
       }
     } else {
       const text =
@@ -296,7 +328,12 @@ async function boot() {
         type: "interaction.happened",
         id: `demo-${Date.now()}`,
         ts: Date.now(),
-        data: { ...req, ...(req.kind !== "pet" && req.kind !== "paper" ? { delivered: 0 } : {}) },
+        data: {
+          ...req,
+          ...(req.kind !== "pet" && req.kind !== "paper" && req.kind !== "tomato"
+            ? { delivered: 0 }
+            : {}),
+        },
       });
       return { ok: true, message: "sent (demo: no Macs here)" };
     }
@@ -309,6 +346,7 @@ async function boot() {
       const body = (await r.json().catch(() => ({}))) as { delivered?: number; error?: string };
       if (r.status === 401) void loginIfLoggedOut();
       if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
+      if (req.kind === "tomato") return { ok: true, message: "splat!" };
       if (req.kind === "paper" || req.kind === "pet") return { ok: true, message: "bonk!" };
       return {
         ok: true,
@@ -414,6 +452,25 @@ async function boot() {
     const o = podOrigin(p.pod);
     camera.set({ x: span.x + span.w / 2, y: o.y * 16 + 30, zoom }, true);
     return true;
+  };
+  /** Overview close-ups: someone waiting longest, else the pod with the most busy agents. */
+  camera.hotSpot = () => {
+    let best: { personId: string; score: number } | null = null;
+    for (const p of model.people.values()) {
+      let score = 0;
+      for (const s of model.sessionsOf(p.personId)) {
+        if (s.offline) continue;
+        if (s.activity === "waiting") score += 10;
+        else if (s.activity !== "idle") score += 3;
+        score += s.subagents + ((s.context ?? 0) >= 0.8 ? 5 : 0);
+      }
+      if (score > 0 && (!best || score > best.score)) best = { personId: p.personId, score };
+    }
+    const p = best && model.people.get(best.personId);
+    if (!p) return null;
+    const n = Math.max(2, scene.slotDesks(p.pod));
+    const span = podDeskSpan(p.pod, n);
+    return { x: span.x + span.w / 2, y: podOrigin(p.pod).y * 16 + 30 };
   };
   const focusParam = params.get("focus");
   new PartyPanel(host, model, partyWorld, {

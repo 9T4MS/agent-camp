@@ -104,6 +104,10 @@ class FoodTruck {
     layer.addChild(this.sprite);
   }
 
+  get parked(): number | null {
+    return this.phase === "parked" ? this.x : null;
+  }
+
   /** where it stands (cars wait behind it) */
   get blocking(): number | null {
     return this.phase === "away" ? null : this.x;
@@ -371,6 +375,8 @@ class SkyLayer {
 
 // ---- the whole outside ----------------------------------------------------------------------
 export class Outdoors {
+  /** solar eclipse darkness 0..1 (forest eyes come out during it) */
+  eclipse = 0;
   private car: Car;
   private truck: FoodTruck;
   private forest: Forest;
@@ -411,6 +417,11 @@ export class Outdoors {
     this.truck.slow(day, hour);
   }
 
+  /** x of the parked food truck (open for lunch), else null */
+  truckParked(): number | null {
+    return this.truck.parked;
+  }
+
   update(dt: number, time: number, sky: SkyNow, hour: number, day: string) {
     const truckX = this.truck.blocking;
     this.car.update(dt, time, (x, dir) => {
@@ -420,7 +431,8 @@ export class Outdoors {
       return d > 70 ? 0 : Math.round(Math.min(1, (70 - d) / 30) * (LANE_DOWN - LANE_UP));
     });
     this.truck.update(dt, time);
-    this.forest.update(dt, time, werewolfHour(hour) && this.scene.night > 0.5, day);
+    const dark = this.scene.night > 0.5;
+    this.forest.update(dt, time, (werewolfHour(hour) || this.eclipse > 0.6) && dark, day);
     this.sky.update(sky, time);
   }
 }

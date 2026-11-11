@@ -44,6 +44,8 @@ export class HelperSwarm {
   private count = 0;
   /** seconds a helper spends at least between errands */
   errandEvery = 25;
+  /** while set, every helper drops its errand and crowds under this point (carrying someone) */
+  escort: Pt | null = null;
 
   constructor(
     private readonly objects: Container,
@@ -224,9 +226,27 @@ export class HelperSwarm {
     let maxX = -1;
     let at = { x: 0, y: 0 };
     const busy = this.bots.filter((b) => b.errand).length;
-    for (const b of this.bots) {
+    for (const [i, b] of this.bots.entries()) {
       let moving = false;
-      if (b.errand) {
+      if (this.escort) {
+        this.dropCarry(b);
+        const tx = this.escort.x + (i - (this.bots.length - 1) / 2) * 5;
+        const ty = this.escort.y + 1 + (i % 2);
+        const dx = tx - b.x;
+        const dy = ty - b.y;
+        const d = Math.hypot(dx, dy);
+        const step = 90 * dt;
+        if (d <= step) {
+          b.x = tx;
+          b.y = ty;
+        } else {
+          b.x += (dx / d) * step;
+          b.y += (dy / d) * step;
+        }
+        if (Math.abs(dx) > 0.3) b.sprite.scale.x = dx < 0 ? -1 : 1;
+        b.wait = 0.5;
+        moving = true;
+      } else if (b.errand) {
         moving = this.errandStep(b, dt);
       } else if (b.wait > 0) {
         b.wait -= dt;

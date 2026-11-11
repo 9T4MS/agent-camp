@@ -61,6 +61,15 @@ export function diff(prev: OfficeState, next: OfficeState, ts: number = Date.now
     } else if (!sameAvatar(p.avatar, n.avatar)) {
       avatars.push(envelope("avatar.updated", { personId: n.personId, avatar: n.avatar }, { ts }));
     }
+    if (p && !!p.birthday !== !!n.birthday) {
+      avatars.push(
+        envelope(
+          "person.birthdayChanged",
+          { personId: n.personId, birthday: !!n.birthday },
+          { ts },
+        ),
+      );
+    }
     const prevSessions = byId<SessionView, string>(p?.sessions ?? [], (s) => s.sessionId);
     for (const s of n.sessions) {
       const old = prevSessions.get(s.sessionId);
@@ -140,6 +149,13 @@ export function applyEvents(state: OfficeState, events: readonly ViewerEvent[]):
       case "avatar.updated": {
         const p = people.get(e.data.personId);
         if (p) p.avatar = e.data.avatar;
+        break;
+      }
+      case "person.birthdayChanged": {
+        const p = people.get(e.data.personId);
+        if (!p) break;
+        if (e.data.birthday) p.birthday = true;
+        else delete p.birthday;
         break;
       }
       case "session.started": {
