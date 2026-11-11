@@ -164,11 +164,15 @@ events (who, which agent, project folder name, subagent counts), never transcrip
 
 **Explicitly authored office messages are different:** their text, optional display-name
 signature, recipient names and best-effort delivery outcomes are stored in a separate shared
-office log for **7 days or the latest 1,000 messages, whichever is smaller**. Everyone with
+office log for **24 hours or the latest 100 messages, whichever is smaller**. Everyone with
 office access can read every message, including selected-recipient messages. Recipients
 control notifications, not read access; typed sender names are not verified identities.
 Message bodies are not stored in browser localStorage, the offline cache, activity CSV or
-new viewers’ timelapse images.
+new viewers’ timelapse images. The sending browser can delete a message: its body and
+retry payload are erased immediately, leaving only bounded retry metadata until expiry.
+Deletion ownership uses a private HttpOnly browser cookie (only its hash is stored), not
+the typed name or the look-editor identity. Keep that browser's cookies to retain deletion
+rights; clearing them loses those rights. Already queued Mac notifications cannot be recalled.
 
 ## Office games and extra look items
 
@@ -246,6 +250,15 @@ asks for confirmation; people are resolved when the server saves the message.
 - An uncertain send offers **Retry same message**, reusing its request ID without duplicate
   rows or desktop pings. Retry first checks current history; after either retention bound
   (age or message count) is reached, only an explicit new send is possible.
+- Use **Delete** on your messages to remove them from the shared log, including after reload.
+  Other office viewers do not get a delete control or permission to delete them.
+- The office accepts at most **200 messages per UTC day**, across all browsers/IPs and
+  history-only or legacy sends. The stored cap survives restarts; deleting a message does
+  not refund it. Retrying a retained request does not consume another slot. An interrupted
+  insertion can conservatively reserve a slot without creating a message.
+- Contiguous live arrivals use the socket only. History is fetched on connection/reconnect
+  or an actual sequence gap, not on every message or return to a healthy tab. Server pruning
+  runs only after inserts and in the coordinated alarm; reads filter expired rows without writes.
 - “Queued” means at least one connected Mac socket accepted a send, **not** that the
   notification was displayed/read. Opt-out, client throttling and macOS permissions still
   apply. Everyone + Mac notify has a 30 s office-wide cooldown; each person shares the

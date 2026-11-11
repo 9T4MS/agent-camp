@@ -243,6 +243,15 @@ Unbuilt ideas for the block: a kebab / Würstelstand at night, a bus stop people
 | A7  | Wake-up reconnect    | On `visibilitychange` (visible), `online` and `pageshow`: a waiting socket retries at once; an open one is pinged and replaced if silent for 4 s | Phones freeze background tabs; unlocking showed stale data until the backoff ran out. |
 | A8  | Phone header + tour  | ≤ 560 px: logo only, compact chips that scroll sideways; the auto-tour skips its "whole office" stop on portrait screens (stays on the desks) | The fit view is a thin strip in portrait. |
 
+## Explicit office messages
+
+| # | Topic | Decision | Why |
+| --- | --- | --- | --- |
+| N1 | Exception to status-only storage | Deliberately authored office messages may contain plain text; transcript ingestion remains status-only. Messages use a separate shared log, never activity history/CSV or world/timelapse textures. Keep bodies for at most 24 hours or the latest 100 message slots, whichever is smaller. Everyone with office access can read them; selected recipients affect notifications, not privacy. | Useful camp announcements without turning the office into a long-lived content archive. |
+| N2 | Sending-browser deletion | A private random HttpOnly cookie identifies the sending browser, with only its hash stored beside the message. That browser can delete after reload; typed names and the look-editor cookie grant no delete rights. Deletion erases body and retry payload, retaining only bounded metadata to prevent accidental retry resurrection. It cannot recall queued Mac alerts. | Allows sender deletion without adding verified accounts or requiring a connector code before messaging. |
+| N3 | Free-plan budget | Stored office-wide cap of 200 accepted/reserved messages per UTC day, shared across IPs and new/legacy/history-only sends; deletion does not refund it, idempotent retries do not spend again. Prune only on insert and alarm. Contiguous live sequences advance locally; fetch on a real gap or socket (re)connection, not healthy-tab visibility changes. | Bound writes across hibernation and avoid multiplying reads by viewers × messages. |
+| N4 | Alert reliability | Persist before fan-out; report queued/offline/cooldown/unknown rather than claiming OS display/read. Reuse existing connector payload, opt-out and throttle; no offline queue or replay on retry/restart. | Durable shared history and optional best-effort alerts, not a delivery system. |
+
 ## Custom looks (look editor, outfits, held items)
 
 | #   | Topic                | Decision | Why |

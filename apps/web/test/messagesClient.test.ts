@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { MESSAGE_RETENTION_MS, type MessagePage, type MessageRecord } from "@agent-office/protocol";
+import {
+  MESSAGE_MAX_ROWS,
+  MESSAGE_RETENTION_MS,
+  type MessagePage,
+  type MessageRecord,
+} from "@agent-office/protocol";
 import { MessageRequestError, MessagesClient } from "../src/net/messages.ts";
 import { MessageModel } from "../src/state/messageModel.ts";
 
@@ -20,7 +25,7 @@ const page = (seqs: number[], head: number, extra = {}): MessagePage => ({
   older: null,
   hasMore: false,
   gap: false,
-  retention: { maxAgeMs: MESSAGE_RETENTION_MS, maxRows: 1000, expiresAt: null },
+  retention: { maxAgeMs: MESSAGE_RETENTION_MS, maxRows: MESSAGE_MAX_ROWS, expiresAt: null },
   ...extra,
 });
 const deferred = <T>() => {
@@ -82,7 +87,7 @@ test("failed history keeps live rows, retry recovers, gap resets with truthful s
   await client.sync();
   expect(model.initialized).toBe(true);
   await client.sync();
-  expect(client.status).toBe("Older messages expired.");
+  expect(client.status).toBe("Older messages expired or were deleted.");
   expect(model.rows.map((m) => m.seq)).toEqual([7, 8]);
 });
 test("uncertain acknowledgement preserves retry identity; auth clears and blocks stale requests", async () => {
@@ -93,7 +98,8 @@ test("uncertain acknowledgement preserves retry identity; auth clears and blocks
   const client = new MessagesClient(model, {
     changed: () => {},
     authFailed: () => loggedOut++,
-    fetch: async (_url, init) => {
+    fetch: async (url, init) => {
+      if (url.endsWith("/owner")) return response({ ok: true });
       if (init?.body) bodies.push(String(init.body));
       calls++;
       if (calls === 1) throw new Error("lost response");
@@ -143,6 +149,48 @@ test("an initial-page/live race fetches the missing interval immediately", async
   expect(urls[1]).toContain("after=3");
   expect(model.rows.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5]);
   expect(model.cursor).toBe(5);
+});
+
+test("contiguous live messages cost zero history requests; only a real gap fetches", async () => {
+  const model = new MessageModel(null, () => 1_000_000);
+  const urls: string[] = [];
+  const client = new MessagesClient(model, {
+    changed: () => {},
+    authFailed: () => {},
+    fetch: async (url) => {
+      urls.push(url);
+      return response(urls.length === 1 ? page([1], 1) : page([4, 5], 5));
+    },
+  });
+  await client.sync();
+  client.receive(message(2));
+  client.receive(message(3));
+  client.receive(message(3));
+  expect(urls).toHaveLength(1);
+  expect(model.cursor).toBe(3);
+  client.receive(message(5));
+  await client.sync();
+  expect(urls[1]).toContain("after=3");
+  expect(model.cursor).toBe(5);
+});
+
+test("reconnect replaces stale rows and restores browser-owned delete controls", async () => {
+  const model = new MessageModel(null, () => 1_000_000);
+  let calls = 0;
+  const client = new MessagesClient(model, {
+    changed: () => {},
+    authFailed: () => {},
+    fetch: async () => {
+      calls++;
+      return response(calls === 1 ? page([1, 2], 2) : page([2], 2, { ownedIds: ["m-2"] }));
+    },
+  });
+  await client.sync();
+  await client.sync(true);
+  expect(model.rows.map((m) => m.id)).toEqual(["m-2"]);
+  expect(model.ownedIds.has("m-2")).toBe(true);
+  client.removed("m-2");
+  expect(model.rows).toEqual([]);
 });
 
 test("in-flight history cannot restore content after logout", async () => {

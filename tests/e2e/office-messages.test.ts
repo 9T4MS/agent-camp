@@ -120,6 +120,7 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       expect((await post(body, { ...AUTH, origin: "https://evil.test" })).status).toBe(403);
       const response = await post(body);
       expect(response.status).toBe(201);
+      const senderCookie = response.headers.get("set-cookie")!.split(";")[0]!;
       const saved = SendMessageResponse.parse(await response.json()).message;
       expect(saved.delivery.socketSends).toBe(3);
       await wait(() =>
@@ -161,6 +162,32 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       sockets.push(late.ws);
       await wait(() => late.messages.some((m) => m.type === "office.snapshot"));
       expect(late.messages.filter((m) => m.type === "message.sent")).toEqual([]); // history, not notification replay
+      const owned = MessagePage.parse(
+        await (
+          await fetch(`${server.base}/api/messages`, { headers: { ...AUTH, cookie: senderCookie } })
+        ).json(),
+      );
+      expect(owned.ownedIds).toEqual([saved.id]); // browser ownership survives server restart
+      const another = await socket(server.base, "/ws/viewer");
+      sockets.push(another.ws);
+      const remove = (cookie = "") =>
+        fetch(`${server.base}/api/messages/${saved.id}`, {
+          method: "DELETE",
+          headers: { ...AUTH, cookie, origin: server.base, "content-type": "application/json" },
+        });
+      expect((await remove()).status).toBe(403);
+      expect((await remove(senderCookie)).status).toBe(200);
+      await wait(() =>
+        [late, another].every((v) =>
+          v.messages.some((m) => m.type === "message.deleted" && m.data.messageId === saved.id),
+        ),
+      );
+      expect(
+        MessagePage.parse(
+          await (await fetch(`${server.base}/api/messages`, { headers: AUTH })).json(),
+        ).messages,
+      ).toEqual([]);
+      expect((await post(body)).status).toBe(410); // deleted request cannot resurrect the body
       const legacy = await fetch(`${server.base}/api/interact`, {
         method: "POST",
         headers: { ...AUTH, "content-type": "application/json", "cf-connecting-ip": "legacy" },

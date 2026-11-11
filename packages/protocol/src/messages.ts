@@ -270,12 +270,17 @@ export const InteractionHappened = msg(
 );
 
 export const MessageSent = msg("message.sent", z.object({ message: MessageRecord }));
+export const MessageDeleted = msg(
+  "message.deleted",
+  z.object({ messageId: z.string().min(1).max(64) }),
+);
 
 export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
 
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,
   MessageSent,
+  MessageDeleted,
   PartyUpdated,
   PersonJoined,
   PersonLeft,
@@ -300,7 +305,14 @@ export type MessageData<T extends MessageType> = MessageOf<T>["data"];
 /** What the server's diff() emits: everything but snapshots and transient interaction/party updates. */
 export type ViewerEvent = Exclude<
   ServerToViewer,
-  { type: "office.snapshot" | "interaction.happened" | "party.updated" | "message.sent" }
+  {
+    type:
+      | "office.snapshot"
+      | "interaction.happened"
+      | "party.updated"
+      | "message.sent"
+      | "message.deleted";
+  }
 >;
 
 export const CONNECTOR_TO_SERVER_TYPES = ConnectorToServer.options.map((o) => o.shape.type.value);

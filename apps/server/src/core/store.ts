@@ -11,8 +11,16 @@ import {
   type SnapshotMeta,
 } from "@agent-office/protocol";
 
-export type MessageSlice = { limit: number; before?: number; after?: number };
-export type StoredMessage = { payload: string; message: MessageRecord };
+export type MessageSlice = { limit: number; before?: number; after?: number; since?: number };
+export type StoredMessageRecord = MessageRecord & { ownerHash?: string };
+/** Deleted rows retain only deduplication metadata, never message bodies or payloads. */
+export type StoredMessage = {
+  id: string;
+  ts: number;
+  payload: string;
+  message: MessageRecord | null;
+  ownerHash?: string;
+};
 
 /**
  * A person's look. `selfDescription` is the person-level description the look was made
@@ -22,13 +30,16 @@ export type StoredAvatar = { avatar: AvatarSpec; key: string; selfDescription?: 
 
 export interface Store {
   findMessage(requestId: string): StoredMessage | null;
+  findMessageById(id: string): StoredMessage | null;
+  deleteMessage(id: string): void;
   insertMessage(
     requestId: string,
     payload: string,
     message: Omit<MessageRecord, "seq">,
+    ownerHash?: string,
   ): MessageRecord;
   updateMessage(message: MessageRecord): void;
-  messages(query: MessageSlice): MessageRecord[];
+  messages(query: MessageSlice): StoredMessageRecord[];
   messageHead(): number;
   nextMessageExpiry(): number | null;
   pruneMessages(now: number): void;
@@ -57,24 +68,46 @@ export class MemoryStore implements Store {
     const row = this.messageLog.get(requestId);
     return row ? structuredClone(row) : null;
   }
+  findMessageById(id: string): StoredMessage | null {
+    const row = [...this.messageLog.values()].find((r) => r.id === id);
+    return row ? structuredClone(row) : null;
+  }
+  deleteMessage(id: string): void {
+    for (const row of this.messageLog.values())
+      if (row.id === id) {
+        row.message = null;
+        row.payload = "";
+      }
+  }
   insertMessage(
     requestId: string,
     payload: string,
     message: Omit<MessageRecord, "seq">,
+    ownerHash?: string,
   ): MessageRecord {
     if (this.messageLog.has(requestId)) throw new Error("duplicate request");
     const record = { ...structuredClone(message), seq: ++this.messageSeq };
-    this.messageLog.set(requestId, { payload, message: record });
+    this.messageLog.set(requestId, {
+      id: record.id,
+      ts: record.ts,
+      payload,
+      message: record,
+      ...(ownerHash ? { ownerHash } : {}),
+    });
     return structuredClone(record);
   }
   updateMessage(message: MessageRecord): void {
     for (const row of this.messageLog.values()) {
-      if (row.message.id === message.id) row.message = structuredClone(message);
+      if (row.message?.id === message.id) row.message = structuredClone(message);
     }
   }
-  messages(query: MessageSlice): MessageRecord[] {
+  messages(query: MessageSlice): StoredMessageRecord[] {
     const rows = [...this.messageLog.values()]
-      .map((r) => r.message)
+      .flatMap((r) =>
+        r.message && r.ts > (query.since ?? -1)
+          ? [{ ...r.message, ...(r.ownerHash ? { ownerHash: r.ownerHash } : {}) }]
+          : [],
+      )
       .filter(
         (m) =>
           (query.before === undefined || m.seq < query.before) &&
@@ -88,12 +121,12 @@ export class MemoryStore implements Store {
     return this.messageSeq;
   }
   nextMessageExpiry(): number | null {
-    const times = [...this.messageLog.values()].map((row) => row.message.ts);
+    const times = [...this.messageLog.values()].map((row) => row.ts);
     return times.length ? Math.min(...times) + MESSAGE_RETENTION_MS : null;
   }
   pruneMessages(now: number): void {
     for (const [id, row] of this.messageLog) {
-      if (row.message.ts + MESSAGE_RETENTION_MS <= now || this.messageLog.size > MESSAGE_MAX_ROWS)
+      if (row.ts + MESSAGE_RETENTION_MS <= now || this.messageLog.size > MESSAGE_MAX_ROWS)
         this.messageLog.delete(id);
     }
   }
@@ -156,7 +189,7 @@ export const SCHEMA = [
   "CREATE INDEX IF NOT EXISTS history_ts ON history(ts)",
   `CREATE TABLE IF NOT EXISTS office_messages (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-    request_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, ts INTEGER NOT NULL, record TEXT NOT NULL)`,
+    request_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, ts INTEGER NOT NULL, record TEXT NOT NULL, owner_hash TEXT)`,
   "CREATE INDEX IF NOT EXISTS office_messages_ts ON office_messages(ts)",
   `CREATE TABLE IF NOT EXISTS avatars (
      person TEXT PRIMARY KEY, spec TEXT NOT NULL, key TEXT NOT NULL, updated INTEGER NOT NULL)`,
@@ -179,6 +212,8 @@ const optNum = (v: unknown) => (typeof v === "number" ? v : null);
 export class SqlStore implements Store {
   constructor(private run: SqlRun) {
     for (const s of SCHEMA) run(s);
+    if (!run("PRAGMA table_info(office_messages)").some((r) => r.name === "owner_hash"))
+      run("ALTER TABLE office_messages ADD COLUMN owner_hash TEXT");
     // migration: the person-level look description lives next to the avatar
     let hasDescr = false;
     try {
@@ -196,10 +231,29 @@ export class SqlStore implements Store {
   }
   findMessage(requestId: string): StoredMessage | null {
     const row = this.run(
-      "SELECT seq, payload, record FROM office_messages WHERE request_id = ?",
+      "SELECT id, ts, seq, payload, record, owner_hash FROM office_messages WHERE request_id = ?",
       requestId,
     )[0];
-    return row ? { payload: String(row.payload), message: this.readMessage(row) } : null;
+    return row ? this.storedMessage(row) : null;
+  }
+  findMessageById(id: string): StoredMessage | null {
+    const row = this.run(
+      "SELECT id, ts, seq, payload, record, owner_hash FROM office_messages WHERE id = ?",
+      id,
+    )[0];
+    return row ? this.storedMessage(row) : null;
+  }
+  private storedMessage(row: Record<string, unknown>): StoredMessage {
+    return {
+      id: String(row.id),
+      ts: Number(row.ts),
+      payload: String(row.payload),
+      message: row.record === "null" ? null : this.readMessage(row),
+      ...(row.owner_hash ? { ownerHash: String(row.owner_hash) } : {}),
+    };
+  }
+  deleteMessage(id: string): void {
+    this.run("UPDATE office_messages SET record = 'null', payload = '' WHERE id = ?", id);
   }
   private readMessage(row: Record<string, unknown>): MessageRecord {
     return { ...JSON.parse(String(row.record)), seq: Number(row.seq) };
@@ -208,31 +262,37 @@ export class SqlStore implements Store {
     requestId: string,
     payload: string,
     message: Omit<MessageRecord, "seq">,
+    ownerHash?: string,
   ): MessageRecord {
     const row = this.run(
-      "INSERT INTO office_messages (id, request_id, payload, ts, record) VALUES (?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO office_messages (id, request_id, payload, ts, record, owner_hash) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq",
       message.id,
       requestId,
       payload,
       message.ts,
       JSON.stringify(message),
+      ownerHash ?? null,
     )[0]!;
     return { ...message, seq: Number(row.seq) };
   }
   updateMessage(message: MessageRecord): void {
     this.run(
-      "UPDATE office_messages SET record = ? WHERE seq = ?",
+      "UPDATE office_messages SET record = ? WHERE seq = ? AND record <> 'null'",
       JSON.stringify(message),
       message.seq,
     );
   }
-  messages(query: MessageSlice): MessageRecord[] {
+  messages(query: MessageSlice): StoredMessageRecord[] {
     const after = query.after !== undefined;
     const rows = this.run(
-      `SELECT seq, record FROM office_messages WHERE seq ${after ? ">" : "<"} ? ORDER BY seq ${after ? "ASC" : "DESC"} LIMIT ?`,
+      `SELECT seq, record, owner_hash FROM office_messages WHERE record <> 'null' AND ts > ? AND seq ${after ? ">" : "<"} ? ORDER BY seq ${after ? "ASC" : "DESC"} LIMIT ?`,
+      query.since ?? -1,
       query.after ?? query.before ?? Number.MAX_SAFE_INTEGER,
       query.limit,
-    ).map((row) => this.readMessage(row));
+    ).map((row) => ({
+      ...this.readMessage(row),
+      ...(row.owner_hash ? { ownerHash: String(row.owner_hash) } : {}),
+    }));
     return after ? rows : rows.reverse();
   }
   messageHead(): number {
@@ -247,9 +307,9 @@ export class SqlStore implements Store {
     const head = this.messageHead();
     if (head > Number(this.kvGet("messages.head") ?? 0)) this.kvPut("messages.head", String(head));
     this.run(
-      "DELETE FROM office_messages WHERE ts <= ? OR seq IN (SELECT seq FROM office_messages ORDER BY seq DESC LIMIT -1 OFFSET ?)",
+      "DELETE FROM office_messages WHERE ts <= ? OR seq < COALESCE((SELECT seq FROM office_messages ORDER BY seq DESC LIMIT 1 OFFSET ?), 0)",
       now - MESSAGE_RETENTION_MS,
-      MESSAGE_MAX_ROWS,
+      MESSAGE_MAX_ROWS - 1,
     );
   }
   appendHistory(rows: readonly HistoryRow[]): void {

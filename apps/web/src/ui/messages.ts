@@ -74,6 +74,7 @@ export class MessagesPanel {
   private origin: HTMLElement | null = null;
   private busy = false;
   private loadingOlder = false;
+  private deleting = new Set<string>();
   private uncertain: { request: SendMessageRequest; at: number; head: number } | null = null;
   private lastRendered = "";
   private rosterKey = "";
@@ -87,6 +88,7 @@ export class MessagesPanel {
     readonly model: MessageModel,
     private actions: {
       send: (request: SendMessageRequest) => Promise<MessageRecord>;
+      delete: (id: string) => Promise<void>;
       sync: () => Promise<void>;
       older: () => Promise<void>;
       status: () => string;
@@ -376,7 +378,7 @@ export class MessagesPanel {
           ? m.audience === "everyone"
           : m.recipients.some((p) => `person:${p.personId}` === this.filter.value)),
     );
-    const key = JSON.stringify([this.filter.value, visible]);
+    const key = JSON.stringify([this.filter.value, visible, [...this.model.ownedIds]]);
     if (key !== this.lastRendered) {
       this.lastRendered = key;
       this.rows.replaceChildren();
@@ -408,6 +410,12 @@ export class MessagesPanel {
         const body = node("p", m.text);
         body.dir = "auto";
         article.append(byline, body);
+        if (this.model.ownedIds.has(m.id)) {
+          const remove = button("Delete", () => void this.deleteMessage(m.id));
+          remove.setAttribute("aria-label", "Delete your message");
+          remove.disabled = this.deleting.has(m.id);
+          article.append(remove);
+        }
         this.rows.append(article);
       }
     }
@@ -524,6 +532,29 @@ export class MessagesPanel {
           : "Send";
     this.newAttempt.hidden = !this.uncertain;
     this.newAttempt.disabled = this.busy;
+  }
+  private async deleteMessage(id: string): Promise<void> {
+    if (
+      this.deleting.has(id) ||
+      !confirm(
+        "Delete this message from shared office history? Already queued Mac notifications cannot be recalled.",
+      )
+    )
+      return;
+    this.deleting.add(id);
+    this.lastRendered = "";
+    this.refresh();
+    try {
+      await this.actions.delete(id);
+      this.announcement.textContent = "Message deleted from office history.";
+    } catch (error) {
+      this.sendStatus.textContent =
+        error instanceof Error ? error.message : "Deletion failed; try again.";
+    } finally {
+      this.deleting.delete(id);
+      this.lastRendered = "";
+      this.refresh();
+    }
   }
   private async send(): Promise<void> {
     if (this.submit.disabled) return;

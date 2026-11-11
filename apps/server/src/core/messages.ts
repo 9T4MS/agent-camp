@@ -1,6 +1,7 @@
 /** Durable authored history + best-effort live alerts. No notification replay/outbox. */
 import {
   envelope,
+  MESSAGE_DAILY_CAP,
   MESSAGE_MAX_ROWS,
   MESSAGE_RETENTION_MS,
   type MessagePage,
@@ -16,7 +17,7 @@ export const BROADCAST_NOTIFY_MS = 30_000;
 export const NOTIFY_PERSON_MS = 10_000;
 export type MessageResult =
   | { status: 200 | 201; message: MessageRecord }
-  | { status: 409 | 422 | 429 | 503; error: string; retryAfter?: number };
+  | { status: 409 | 410 | 422 | 429 | 503; error: string; retryAfter?: number };
 
 export class OfficeMessages {
   constructor(
@@ -53,17 +54,19 @@ export class OfficeMessages {
     return this.store.nextMessageExpiry();
   }
 
-  page(query: MessageQuery, now: number): MessagePage {
-    this.prune(now);
+  page(query: MessageQuery, now: number, ownerHash: string | null = null): MessagePage {
+    // Reads filter expired bodies but never mutate or run a count-pruning scan.
+    const since = now - MESSAGE_RETENTION_MS;
     const head = this.store.messageHead();
-    const first = this.store.messages({ after: 0, limit: 1 })[0];
-    const fetched = this.store.messages({ ...query, limit: query.limit + 1 });
+    const first = this.store.messages({ after: 0, limit: 1, since })[0];
+    const fetched = this.store.messages({ ...query, limit: query.limit + 1, since });
     const hasMore = fetched.length > query.limit;
     const messages =
       query.after === undefined ? fetched.slice(-query.limit) : fetched.slice(0, query.limit);
     const start = messages[0]?.seq;
     return {
-      messages,
+      messages: messages.map(({ ownerHash: _private, ...message }) => message),
+      ownedIds: messages.filter((m) => !!ownerHash && m.ownerHash === ownerHash).map((m) => m.id),
       head,
       older: start !== undefined && first && first.seq < start ? start : null,
       next: messages.at(-1)?.seq ?? query.after ?? head,
@@ -77,9 +80,21 @@ export class OfficeMessages {
     };
   }
 
-  send(request: SendMessageRequest, who: string, now: number): MessageResult {
+  delete(id: string, ownerHash: string | null, now: number): { status: number; error?: string } {
+    const row = this.store.findMessageById(id);
+    if (!row || row.ts + MESSAGE_RETENTION_MS <= now)
+      return { status: 404, error: "message not found" };
+    if (!ownerHash || row.ownerHash !== ownerHash)
+      return { status: 403, error: "Only the sending browser can delete this message." };
+    if (!row.message) return { status: 200 };
+    this.store.deleteMessage(id);
+    this.broadcast(JSON.stringify(envelope("message.deleted", { messageId: id }, { ts: now })));
+    return { status: 200 };
+  }
+
+  send(request: SendMessageRequest, who: string, now: number, ownerHash?: string): MessageResult {
     try {
-      return this.sendOnce(request, who, now);
+      return this.sendOnce(request, who, now, ownerHash);
     } catch {
       return {
         status: 503,
@@ -88,8 +103,12 @@ export class OfficeMessages {
     }
   }
 
-  private sendOnce(request: SendMessageRequest, who: string, now: number): MessageResult {
-    this.prune(now);
+  private sendOnce(
+    request: SendMessageRequest,
+    who: string,
+    now: number,
+    ownerHash?: string,
+  ): MessageResult {
     // Canonicalize selection order and optional blank signatures before comparing retries.
     const payload = JSON.stringify({
       audience:
@@ -104,7 +123,12 @@ export class OfficeMessages {
       notifyDesktop: request.notifyDesktop,
     });
     const previous = this.store.findMessage(request.requestId);
-    if (previous)
+    if (previous && (!previous.message || previous.ts + MESSAGE_RETENTION_MS <= now))
+      return {
+        status: 410,
+        error: "This message was deleted or expired. Send explicitly as a new message if needed.",
+      };
+    if (previous?.message)
       return previous.payload === payload
         ? { status: 200, message: previous.message }
         : { status: 409, error: "request ID already used for a different message" };
@@ -135,23 +159,43 @@ export class OfficeMessages {
     const wait = this.guard(who, now);
     if (wait !== null) return { status: 429, error: "slow down", retryAfter: wait };
 
+    const day = new Date(now).toISOString().slice(0, 10);
+    const saved = JSON.parse(this.store.kvGet("messages.daily") ?? "null") as {
+      day: string;
+      count: number;
+    } | null;
+    const count = saved?.day === day ? saved.count : 0;
+    if (count >= MESSAGE_DAILY_CAP)
+      return {
+        status: 429,
+        error: `The office reached its ${MESSAGE_DAILY_CAP}-message daily cap. Try tomorrow (UTC).`,
+        retryAfter: Math.ceil((Date.parse(`${day}T00:00:00Z`) + 86_400_000 - now) / 1000),
+      };
+    // Reserve before insertion: a crash cannot bypass the persisted office-wide write bound.
+    this.store.kvPut("messages.daily", JSON.stringify({ day, count: count + 1 }));
     // Persist unknown delivery first. Any interruption must remain a saved, non-replayed send.
-    const message = this.store.insertMessage(request.requestId, payload, {
-      id: ulid(now),
-      ts: now,
-      text: request.text,
-      ...(request.from ? { from: request.from } : {}),
-      audience: request.audience.kind,
-      recipients,
-      notifyDesktop: request.notifyDesktop,
-      delivery: {
-        socketSends: 0,
-        people: recipients.map(({ personId }) => ({
-          personId,
-          status: request.notifyDesktop ? "unknown" : "notRequested",
-        })),
+    const message = this.store.insertMessage(
+      request.requestId,
+      payload,
+      {
+        id: ulid(now),
+        ts: now,
+        text: request.text,
+        ...(request.from ? { from: request.from } : {}),
+        audience: request.audience.kind,
+        recipients,
+        notifyDesktop: request.notifyDesktop,
+        delivery: {
+          socketSends: 0,
+          people: recipients.map(({ personId }) => ({
+            personId,
+            status: request.notifyDesktop ? "unknown" : "notRequested",
+          })),
+        },
       },
-    });
+      ownerHash,
+    );
+    this.prune(now);
     if (request.notifyDesktop) {
       if (request.audience.kind === "everyone") {
         this.store.kvPut(
@@ -203,7 +247,6 @@ export class OfficeMessages {
         })),
       };
     }
-    this.prune(now);
     try {
       this.broadcast(JSON.stringify(envelope("message.sent", { message }, { ts: now })));
     } catch {

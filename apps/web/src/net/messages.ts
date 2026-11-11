@@ -1,5 +1,6 @@
 /** Validated HTTP message history, independent of the viewer's status snapshot. */
 import {
+  DeleteMessageResponse,
   MessagePage,
   type MessageRecord,
   type SendMessageRequest,
@@ -21,6 +22,8 @@ export class MessagesClient {
   private syncing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  private ownerReady = false;
+  private resetRequested = false;
   constructor(
     readonly model: MessageModel,
     private opts: {
@@ -30,18 +33,22 @@ export class MessagesClient {
       fetch?: (url: string, init?: RequestInit) => Promise<Response>;
     },
   ) {}
-  private async request(path: string, body?: SendMessageRequest): Promise<unknown> {
+  private async request(
+    path: string,
+    body?: SendMessageRequest,
+    method = body ? "POST" : "GET",
+  ): Promise<unknown> {
     const separator = path.includes("?") ? "&" : "?";
     const url = `${path}${this.opts.key ? `${separator}key=${encodeURIComponent(this.opts.key)}` : ""}`;
     let response: Response;
     try {
       response = await (this.opts.fetch ?? fetch)(url, {
         cache: "no-store",
-        ...(body
+        ...(method !== "GET"
           ? {
-              method: "POST",
+              method,
               headers: { "content-type": "application/json" },
-              body: JSON.stringify(body),
+              ...(body ? { body: JSON.stringify(body) } : {}),
             }
           : {}),
       });
@@ -76,8 +83,14 @@ export class MessagesClient {
     this.opts.changed();
     if (fresh && this.model.initialized && message.seq > this.model.cursor) void this.sync();
   }
-  sync(): Promise<void> {
+  removed(id: string): void {
+    if (this.stopped) return;
+    this.model.remove(id);
+    this.opts.changed();
+  }
+  sync(reset = false): Promise<void> {
     if (this.stopped) return Promise.resolve();
+    this.resetRequested ||= reset;
     if (this.syncing) {
       this.again = true;
       return this.syncing;
@@ -94,9 +107,12 @@ export class MessagesClient {
   private async synchronize(): Promise<void> {
     this.historyAvailable = false;
     try {
-      if (!this.model.initialized) {
+      const reset = this.resetRequested;
+      this.resetRequested = false;
+      if (!this.model.initialized || reset) {
         const page = MessagePage.parse(await this.request("/api/messages?limit=50"));
         if (this.stopped) return;
+        this.ownerReady = true;
         this.model.page(page, "initial");
         if ((this.model.rows.at(-1)?.seq ?? 0) > this.model.cursor) this.again = true;
       } else {
@@ -110,10 +126,12 @@ export class MessagesClient {
             if (this.stopped) return;
             this.model.page(recent, "initial");
             this.historyAvailable = true;
-            this.status = "Older messages expired.";
+            this.ownerReady = true;
+            this.status = "Older messages expired or were deleted.";
             this.opts.changed();
             return;
           }
+          this.ownerReady = true;
           this.model.page(page, "catchup");
           if (!page.hasMore) break;
         }
@@ -140,8 +158,22 @@ export class MessagesClient {
     }
     this.opts.changed();
   }
+  async delete(id: string): Promise<void> {
+    if (this.stopped) throw new MessageRequestError("Office login expired.");
+    DeleteMessageResponse.parse(
+      await this.request(`/api/messages/${encodeURIComponent(id)}`, undefined, "DELETE"),
+    );
+    if (!this.stopped) this.removed(id);
+  }
   async send(request: SendMessageRequest): Promise<MessageRecord> {
     if (this.stopped) throw new MessageRequestError("Office login expired.");
+    // Finish initial cookie setup before posting; a lost POST acknowledgement must not lose ownership.
+    if (this.syncing) await this.syncing;
+    if (this.stopped) throw new MessageRequestError("Office login expired.");
+    if (!this.ownerReady) {
+      DeleteMessageResponse.parse(await this.request("/api/messages/owner"));
+      this.ownerReady = true;
+    }
     const value = await this.request("/api/messages", request);
     const parsed = SendMessageResponse.safeParse(value);
     if (!parsed.success)
@@ -150,11 +182,13 @@ export class MessagesClient {
         true,
       );
     if (this.stopped) throw new MessageRequestError("Office login expired.");
+    this.model.ownedIds.add(parsed.data.message.id);
     this.receive(parsed.data.message);
     return parsed.data.message;
   }
   clear(): void {
     this.stopped = true;
+    this.ownerReady = false;
     this.historyAvailable = false;
     this.model.clear();
     this.status = "";

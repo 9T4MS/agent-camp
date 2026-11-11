@@ -22,6 +22,7 @@ import { isAuthorized, ME_TTL_MS, makeMeToken, meCookie, meFromRequest } from ".
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
+import { messageOwner } from "./message-owner.ts";
 import { OfficeMessages } from "./messages.ts";
 import { Party, readPartyBody } from "./party.ts";
 import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
@@ -169,7 +170,6 @@ export class OfficeApp {
   /** Rebuild state after a restart / hibernation wake. */
   restore(sockets: { socketId: string; binding: Binding | null }[]): void {
     this.hub.restore(this.now(), sockets);
-    this.messages.prune(this.now());
     this.scheduleAlarm();
   }
 
@@ -295,18 +295,26 @@ export class OfficeApp {
       return claim[2] ? this.verifyClaim(req, personId) : this.sendClaimCode(req, personId);
     }
 
-    if (path === "/api/messages") {
+    if (path === "/api/messages" || path.startsWith("/api/messages/")) {
       if (!(await isAuthorized(req, this.env, this.now())))
         return json({ error: "unauthorized" }, { status: 401 });
-      if (method === "GET") {
+      if (path === "/api/messages/owner" && method === "GET") {
+        const owner = await messageOwner(req);
+        return json({ ok: true }, { headers: owner.cookie ? { "set-cookie": owner.cookie } : {} });
+      }
+      const deletion = /^\/api\/messages\/([A-Za-z0-9_-]{1,64})$/.exec(path);
+      if (path !== "/api/messages" && !deletion)
+        return json({ error: "not found" }, { status: 404 });
+      if (path === "/api/messages" && method === "GET") {
         const parsed = MessageQuery.safeParse(Object.fromEntries(url.searchParams));
         if (!parsed.success)
           return json({ error: "invalid message cursor or limit" }, { status: 400 });
-        const page = this.messages.page(parsed.data, this.now());
-        this.scheduleAlarm();
-        return json(page);
+        const owner = await messageOwner(req);
+        const page = this.messages.page(parsed.data, this.now(), owner.hash);
+        return json(page, { headers: owner.cookie ? { "set-cookie": owner.cookie } : {} });
       }
-      if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
+      if ((deletion && method !== "DELETE") || (!deletion && method !== "POST"))
+        return json({ error: "method not allowed" }, { status: 405 });
       if (
         (req.headers.get("origin") && req.headers.get("origin") !== url.origin) ||
         req.headers.get("sec-fetch-site") === "cross-site"
@@ -314,6 +322,13 @@ export class OfficeApp {
         return json({ error: "same-origin requests only" }, { status: 403 });
       if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json")
         return json({ error: "expected application/json" }, { status: 415 });
+      if (deletion) {
+        const owner = await messageOwner(req, false);
+        const result = this.messages.delete(deletion[1]!, owner.hash, this.now());
+        return json(result.error ? { error: result.error } : { ok: true }, {
+          status: result.status,
+        });
+      }
       const body = await readPartyBody(req, 16_384);
       if (body.status)
         return json(
@@ -324,15 +339,20 @@ export class OfficeApp {
       if (!parsed.success)
         return json({ error: "invalid message, audience or request ID" }, { status: 400 });
       const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
-      const result = this.messages.send(parsed.data, who, this.now());
+      const owner = await messageOwner(req);
+      const result = this.messages.send(parsed.data, who, this.now(), owner.hash!);
       this.scheduleAlarm();
+      const headers: Record<string, string> = owner.cookie ? { "set-cookie": owner.cookie } : {};
       return "message" in result
-        ? json({ ok: true, message: result.message }, { status: result.status })
+        ? json({ ok: true, message: result.message }, { status: result.status, headers })
         : json(
             { error: result.error },
             {
               status: result.status,
-              headers: result.retryAfter ? { "retry-after": String(result.retryAfter) } : {},
+              headers: {
+                ...headers,
+                ...(result.retryAfter ? { "retry-after": String(result.retryAfter) } : {}),
+              },
             },
           );
     }
@@ -655,6 +675,7 @@ export class OfficeApp {
         req.headers.get("sec-fetch-site") === "cross-site"
       )
         return json({ error: "same-origin requests only" }, { status: 403 });
+      const owner = await messageOwner(req);
       const result = this.messages.send(
         {
           requestId: crypto.randomUUID(),
@@ -665,6 +686,7 @@ export class OfficeApp {
         },
         who,
         now,
+        owner.hash!,
       );
       this.scheduleAlarm();
       if (!("message" in result))
@@ -689,7 +711,9 @@ export class OfficeApp {
           ),
         ),
       );
-      return json({ ok: true, delivered } satisfies InteractResponse);
+      return json({ ok: true, delivered } satisfies InteractResponse, {
+        headers: owner.cookie ? { "set-cookie": owner.cookie } : {},
+      });
     }
     const wait = this.interactionWait(who, now);
     if (wait !== null)

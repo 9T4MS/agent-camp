@@ -277,6 +277,14 @@ async function boot() {
   /** runs after every message (e.g. a ?focus= waiting for its person to show up) */
   let afterIngest = () => {};
   const ingest = (msg: ServerToViewer) => {
+    if (msg.type === "message.deleted") {
+      if (messagesPanel) {
+        if (messagesClient) messagesClient.removed(msg.data.messageId);
+        else messageModel.remove(msg.data.messageId);
+        messagesPanel.refresh();
+      }
+      return;
+    }
     if (msg.type === "message.sent") {
       // Kiosk/nohud never retain or render message content, including live socket events.
       if (messagesPanel) {
@@ -349,6 +357,7 @@ async function boot() {
           socketSends: 0,
         },
       };
+      messageModel.ownedIds.add(message.id);
       messageModel.receive(message);
       messageModel.page({ ...emptyPage, messages: [message], head: seq, next: seq }, "catchup");
       messagesPanel?.refresh();
@@ -357,6 +366,12 @@ async function boot() {
     messagesPanel = new MessagesPanel(host, model, messageModel, {
       demo: !!demo,
       send: messagesClient ? (request) => messagesClient!.send(request) : demoSend,
+      delete: messagesClient
+        ? (id) => messagesClient!.delete(id)
+        : async (id) => {
+            messageModel.remove(id);
+            messagesPanel?.refresh();
+          },
       sync: () => messagesClient?.sync() ?? Promise.resolve(),
       older: () => messagesClient?.older() ?? Promise.resolve(),
       status: () => messagesClient?.status ?? "",
@@ -372,11 +387,6 @@ async function boot() {
       messageModel.clear();
       messagesPanel?.clear();
     };
-    const recover = () => {
-      if (document.visibilityState === "visible") void messagesClient?.sync();
-    };
-    document.addEventListener("visibilitychange", recover);
-    window.addEventListener("online", recover);
   }
 
   chars.onMoment = (m) => {
@@ -721,7 +731,7 @@ async function boot() {
         hud.setStatus(s);
         if (s === "open") {
           checkBuild?.();
-          void messagesClient?.sync();
+          void messagesClient?.sync(true);
         } else if (messagesClient) {
           messagesClient.status = "Reconnecting — saved messages remain readable.";
           messagesPanel?.refresh();

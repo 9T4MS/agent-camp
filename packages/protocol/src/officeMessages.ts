@@ -1,8 +1,9 @@
 /** Deliberately authored office content, never transcript/status history. */
 import { z } from "zod";
 
-export const MESSAGE_RETENTION_MS = 7 * 86_400_000;
-export const MESSAGE_MAX_ROWS = 1_000;
+export const MESSAGE_RETENTION_MS = 86_400_000;
+export const MESSAGE_MAX_ROWS = 100;
+export const MESSAGE_DAILY_CAP = 200;
 export const MESSAGE_MAX_RECIPIENTS = 50;
 /** Limits count UTF-16 code units, just like textarea.maxLength and connector text. */
 export const MessageText = z
@@ -55,8 +56,11 @@ export const MessageRecord = z.object({
 });
 export type MessageRecord = z.infer<typeof MessageRecord>;
 export const SendMessageResponse = z.object({ ok: z.literal(true), message: MessageRecord });
+export const DeleteMessageResponse = z.object({ ok: z.literal(true) });
 export const MessagePage = z.object({
   messages: z.array(MessageRecord).max(100),
+  /** IDs deletable by this sending browser; never included in office-wide events. */
+  ownedIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   head: Sequence,
   older: Sequence.nullable(),
   next: Sequence,

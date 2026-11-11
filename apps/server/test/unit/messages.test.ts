@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   avatarFromSeed,
   envelope,
+  MESSAGE_DAILY_CAP,
+  MESSAGE_MAX_ROWS,
   MESSAGE_RETENTION_MS,
   MessagePage,
   type MessageRecord,
@@ -29,26 +31,45 @@ for (const [name, make] of [
   ["sqlite", () => sql()],
 ] as const) {
   describe(`messages: ${name}`, () => {
+    test("deletion erases content/payload but retains bounded retry tombstones and private ownership", () => {
+      const store = make();
+      const inserted = store.insertMessage("request", "PRIVATE_PAYLOAD", record(1), "owner-hash");
+      store.deleteMessage(inserted.id);
+      expect(store.messages({ limit: 100 })).toEqual([]);
+      expect(store.findMessage("request")?.message).toBeNull();
+      expect(store.findMessage("request")?.payload).toBe("");
+      expect(store.findMessageById(inserted.id)?.ownerHash).toBe("owner-hash");
+      store.updateMessage(inserted); // a late delivery update must not restore a deleted body
+      expect(store.findMessage("request")?.message).toBeNull();
+      store.pruneMessages(1_000_000 + MESSAGE_RETENTION_MS);
+      expect(store.findMessage("request")).toBeNull();
+      expect(store.messageHead()).toBe(1);
+    });
     test("bounded retention, both cursor directions, request lookup and monotonic empty watermark", () => {
       const store = make();
-      for (let n = 1; n <= 1002; n++)
+      for (let n = 1; n <= MESSAGE_MAX_ROWS + 2; n++)
         store.insertMessage(`request-${n}`, `payload-${n}`, record(n));
       store.pruneMessages(1_000_000);
       expect(store.messages({ after: 0, limit: 2 }).map((m) => m.seq)).toEqual([3, 4]);
       expect(store.messages({ before: 6, limit: 2 }).map((m) => m.seq)).toEqual([4, 5]);
-      expect(store.messages({ limit: 2 }).map((m) => m.seq)).toEqual([1001, 1002]);
+      expect(store.messages({ limit: 2 }).map((m) => m.seq)).toEqual([
+        MESSAGE_MAX_ROWS + 1,
+        MESSAGE_MAX_ROWS + 2,
+      ]);
       expect(store.findMessage("request-1")).toBeNull();
       expect(store.findMessage("request-3")?.payload).toBe("payload-3");
-      const found = store.findMessage("request-3")!.message;
+      const found = store.findMessage("request-3")!.message!;
       found.text = "updated";
       store.updateMessage(found);
-      expect(store.findMessage("request-3")?.message.text).toBe("updated");
+      expect(store.findMessage("request-3")?.message?.text).toBe("updated");
       expect(store.nextMessageExpiry()).toBe(1_000_000 + MESSAGE_RETENTION_MS);
       store.pruneMessages(1_000_000 + MESSAGE_RETENTION_MS);
       expect(store.messages({ limit: 100 })).toEqual([]);
-      expect(store.messageHead()).toBe(1002);
+      expect(store.messageHead()).toBe(MESSAGE_MAX_ROWS + 2);
       expect(store.nextMessageExpiry()).toBeNull();
-      expect(store.insertMessage("new", "new", record(1003)).seq).toBe(1003);
+      expect(store.insertMessage("new", "new", record(MESSAGE_MAX_ROWS + 3)).seq).toBe(
+        MESSAGE_MAX_ROWS + 3,
+      );
     });
   });
 }
@@ -60,7 +81,7 @@ test("SQLite restart/migration preserves existing data and message request IDs",
   first.addSnapshot(1, new Uint8Array([1, 2]));
   first.insertMessage("request", "payload", record(1));
   const second = sql(db);
-  expect(second.findMessage("request")?.message.seq).toBe(1);
+  expect(second.findMessage("request")?.message?.seq).toBe(1);
   expect(second.getAvatar("a")?.key).toBe("k");
   expect(second.history()).toHaveLength(1);
   expect(second.getSnapshot(1)).toEqual(new Uint8Array([1, 2]));
@@ -242,6 +263,91 @@ describe("authored messages service", () => {
     expect(s.store.messageHead()).toBe(4);
     expect((await s.page("?after=1")).gap).toBe(true);
     expect(s.alarms.at(-1)).toBeNull();
+  });
+  test("office-wide daily cap survives restart, cannot be bypassed by IP, and resets at UTC midnight", async () => {
+    const s = setup();
+    let first: ReturnType<typeof s.body> | null = null;
+    let latest: ReturnType<typeof s.body> | null = null;
+    for (let i = 0; i < MESSAGE_DAILY_CAP; i++) {
+      const body = s.body();
+      first ??= body;
+      latest = body;
+      expect((await s.post(body, undefined, { "cf-connecting-ip": `ip-${i}` })).status).toBe(201);
+    }
+    const restarted = new OfficeApp(s.env, s.store, s.transport, { now: s.now, log: () => {} });
+    const post = (body: unknown) =>
+      restarted.handleHttp(
+        new Request("http://x/api/messages", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer pw",
+            "content-type": "application/json",
+            "cf-connecting-ip": "new-ip",
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    expect((await post(s.body()))?.status).toBe(429);
+    // A retained identical retry is free and still works at the cap.
+    expect((await post(latest))?.status).toBe(200);
+    const latestRequest = s.body();
+    // Old pruned request IDs cannot evade the cap either.
+    expect((await post(first))?.status).toBe(429);
+    s.advance(86_400_000);
+    expect((await post(latestRequest))?.status).toBe(201);
+    expect(JSON.parse(s.store.kvGet("messages.daily")!).count).toBe(1);
+  });
+  test("history reads and restore never prune/write; insert and alarm do", async () => {
+    const s = setup();
+    let prunes = 0;
+    const prune = s.store.pruneMessages.bind(s.store);
+    s.store.pruneMessages = (now) => {
+      prunes++;
+      prune(now);
+    };
+    s.app.restore([]);
+    await s.page();
+    expect(prunes).toBe(0);
+    await s.post(s.body());
+    expect(prunes).toBe(1);
+    s.advance(MESSAGE_RETENTION_MS);
+    expect((await s.page()).messages).toEqual([]);
+    expect(prunes).toBe(1);
+    s.app.restore([]);
+    expect(prunes).toBe(1);
+    s.app.alarm();
+    expect(prunes).toBe(2);
+  });
+  test("only the sending browser can delete, with no ownership secrets in history/events", async () => {
+    const s = setup();
+    const request = s.body({ from: "Unverified" });
+    const response = await s.post(request);
+    const cookie = response.headers.get("set-cookie")!.split(";")[0]!;
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    const { message } = SendMessageResponse.parse(await response.json());
+    const history = await s.app.handleHttp(
+      new Request("http://x/api/messages", { headers: { authorization: "Bearer pw", cookie } }),
+    );
+    expect(MessagePage.parse(await history!.json()).ownedIds).toEqual([message.id]);
+    const other = await s.page();
+    expect(other.ownedIds).toEqual([]);
+    expect(JSON.stringify(other)).not.toContain("ownerHash");
+    expect(s.sent.join("")).not.toContain("ownerHash");
+    const remove = (headers = {}) =>
+      s.app.handleHttp(
+        new Request(`http://x/api/messages/${message.id}`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer pw", "content-type": "application/json", ...headers },
+        }),
+      );
+    expect((await remove())?.status).toBe(403);
+    expect((await remove({ cookie, origin: "https://evil.test" }))?.status).toBe(403);
+    expect((await remove({ cookie }))?.status).toBe(200);
+    expect((await remove({ cookie }))?.status).toBe(200);
+    expect((await s.page()).messages).toEqual([]);
+    expect(s.store.findMessage(request.requestId)?.payload).toBe("");
+    expect((await s.post(request))?.status).toBe(410);
+    expect(s.sent.filter((event) => JSON.parse(event).type === "message.deleted")).toHaveLength(1);
   });
   test("storage failure before insertion sends nothing and returns a safe retryable error", async () => {
     const s = setup();

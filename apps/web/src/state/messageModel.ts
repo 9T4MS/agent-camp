@@ -1,5 +1,6 @@
 /** Authored messages are separate from world/session/statistics state. */
 import {
+  MESSAGE_DAILY_CAP,
   MESSAGE_MAX_ROWS,
   MESSAGE_RETENTION_MS,
   type MessagePage,
@@ -17,8 +18,10 @@ export function messageRetryExpired(
 
 export class MessageModel {
   private records = new Map<string, MessageRecord>();
+  readonly ownedIds = new Set<string>();
+  private deleted = new Map<string, number>();
   initialized = false;
-  /** Contiguous HTTP catch-up watermark, NEVER advanced by a live event or POST response. */
+  /** Advance only through known contiguous sequences; a higher live event cannot skip a gap. */
   cursor = 0;
   older: number | null = null;
   lastRead: number;
@@ -37,10 +40,23 @@ export class MessageModel {
     return this.rows.filter((m) => m.seq > this.lastRead).length;
   }
   receive(message: MessageRecord): boolean {
+    if (this.deleted.has(message.id)) return false;
     const fresh = !this.records.has(message.id);
     this.records.set(message.id, message);
+    this.advanceKnown();
     this.prune();
     return fresh;
+  }
+  private advanceKnown(): void {
+    if (!this.initialized) return;
+    const sequences = new Set(this.rows.map((m) => m.seq));
+    while (sequences.has(this.cursor + 1)) this.cursor++;
+  }
+  remove(id: string): void {
+    this.records.delete(id);
+    this.ownedIds.delete(id);
+    this.deleted.set(id, this.now());
+    this.prune();
   }
   page(page: MessagePage, mode: "initial" | "older" | "catchup"): void {
     if (mode === "initial") {
@@ -55,7 +71,10 @@ export class MessageModel {
     } else if (mode === "catchup") {
       this.cursor = page.hasMore ? page.next : page.head;
     } else this.older = page.older;
-    for (const message of page.messages) this.records.set(message.id, message);
+    for (const message of page.messages)
+      if (!this.deleted.has(message.id)) this.records.set(message.id, message);
+    for (const id of page.ownedIds ?? []) if (this.records.has(id)) this.ownedIds.add(id);
+    this.advanceKnown();
     this.prune();
   }
   markRead(visible: boolean, atBottom: boolean, unfiltered: boolean): void {
@@ -68,11 +87,18 @@ export class MessageModel {
   }
   prune(): void {
     const cutoff = this.now() - MESSAGE_RETENTION_MS;
-    for (const [id, m] of this.records) if (m.ts <= cutoff) this.records.delete(id);
+    for (const [id, m] of this.records)
+      if (m.ts <= cutoff || m.seq <= this.cursor - MESSAGE_MAX_ROWS) this.records.delete(id);
     for (const row of this.rows.slice(0, -MESSAGE_MAX_ROWS)) this.records.delete(row.id);
+    for (const id of this.ownedIds) if (!this.records.has(id)) this.ownedIds.delete(id);
+    for (const [id, at] of this.deleted) if (at <= cutoff) this.deleted.delete(id);
+    while (this.deleted.size > MESSAGE_DAILY_CAP * 2)
+      this.deleted.delete(this.deleted.keys().next().value!);
   }
   clear(): void {
     this.records.clear();
+    this.ownedIds.clear();
+    this.deleted.clear();
     this.initialized = false;
     this.cursor = 0;
     this.older = null;

@@ -732,11 +732,23 @@ async function sceneMessages() {
         () => document.querySelector(".messages-history-status")?.textContent === "",
       );
       assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      let historyReads = 0;
+      page.on("request", (request) => {
+        if (request.method() === "GET" && new URL(request.url()).pathname === "/api/messages")
+          historyReads++;
+      });
       await post(`New announcement for ${vp}`);
       await page.waitForFunction(() =>
         document.querySelector(".messages-launch")?.textContent?.includes("· 1"),
       );
       assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await sleep(150);
+      assert.equal(
+        historyReads,
+        0,
+        "contiguous live arrivals / healthy-tab returns must not fetch history",
+      );
       await launcher.click();
       assert.equal(
         await page.locator("select[aria-label='Notification recipients']").inputValue(),
@@ -786,6 +798,11 @@ async function sceneMessages() {
       );
       assert.equal(await page.locator(".messages-log img").count(), 0);
       assert.ok((await page.locator(".messages-log").textContent())?.includes("<img src=x"));
+      assert.equal(
+        historyReads,
+        0,
+        "HTTP acknowledgement + live echo must not trigger history reads",
+      );
       // Keep the draft across card refreshes; wheel events stay inside the overlay.
       await text.fill("Draft survives surface changes");
       await page.evaluate((id) => window.__office.openSession(id), sessionId);
@@ -853,6 +870,21 @@ async function sceneMessages() {
       await page.reload();
       await page.waitForFunction(() => window.__office?.ready);
       assert.equal(await page.locator(".messages-panel").isVisible(), false);
+      await launcher.click();
+      const deleteButton = page
+        .getByRole("button", { name: "Delete your message", exact: true })
+        .last();
+      await deleteButton.waitFor();
+      const deletedId = await deleteButton.locator("..").getAttribute("data-message-id");
+      assert.ok(deletedId);
+      page.once("dialog", (dialog) => void dialog.accept());
+      await deleteButton.click();
+      await page.locator(`article[data-message-id="${deletedId}"]`).waitFor({ state: "detached" });
+      const afterDelete = await (await page.request.get(`${o.http}/api/messages`)).json();
+      assert.equal(
+        afterDelete.messages.some((m: { id: string }) => m.id === deletedId),
+        false,
+      );
       assert.deepEqual(errors, []);
       await page.close();
     }
@@ -916,7 +948,7 @@ async function sceneMessages() {
       await mobile.close();
     }
     log(
-      "  message checks: history/unread, selection, plain text, retry/recovery, keyboard, draft, reload, touch, demo and kiosk/nohud passed",
+      "  message checks: zero live/tab history reads, browser-owned deletion after reload, history/unread, selection, plain text, retry/recovery, keyboard, draft, touch, demo and kiosk/nohud passed",
     );
   } finally {
     o.stop();

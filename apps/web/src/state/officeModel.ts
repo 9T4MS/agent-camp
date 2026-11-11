@@ -306,6 +306,7 @@ export class OfficeModel {
         break;
       }
       case "message.sent":
+      case "message.deleted":
         // Authored content is owned by MessageModel, never world/statistics state.
         break;
       case "interaction.happened": {
