@@ -13,6 +13,7 @@ import {
   type ViewerEvent,
 } from "@agent-office/protocol";
 import { z } from "zod";
+import { isAuthorized } from "./auth.ts";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
@@ -238,8 +239,8 @@ export class OfficeApp {
     if (path === "/api/interact" && method === "POST") return this.interact(req);
     if (path === "/api/party") {
       if (method === "GET") {
-        if (!viewerAllowed(url, this.env))
-          return json({ error: "viewer key required" }, { status: 401 });
+        if (!(await isAuthorized(req, this.env, this.now())))
+          return json({ error: "login required" }, { status: 401 });
         return json(this.party.state(this.now()));
       }
       if (method === "POST") {
@@ -250,13 +251,18 @@ export class OfficeApp {
             { error: body.status === 413 ? "too large" : "invalid JSON" },
             { status: body.status },
           );
-        const online = new Set(this.hub.state().people.map((p) => p.personId));
-        const result = this.party.mutate(body.value, online, this.now());
+        const now = this.now();
+        const online = new Set(
+          this.hub
+            .state()
+            .people.filter((p) => this.hub.liveSocketsOf(p.personId, now).length > 0)
+            .map((p) => p.personId),
+        );
+        const result = this.party.mutate(body.value, online, now);
         return json(result.body, { status: result.status });
       }
       return json({ error: "method not allowed" }, { status: 405 });
     }
-
 
     if (path === "/api/stats" && method === "GET") {
       const days = Number(url.searchParams.get("days") ?? 0);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_PARTY_LOOK, envelope, type PartyLook, PartyState } from "@agent-office/protocol";
 import { OfficeApp } from "../../src/core/app.ts";
+import { makeSessionToken, SESSION_COOKIE } from "../../src/core/auth.ts";
 import {
   PARTY_BODY_MAX_BYTES,
   PARTY_COOLDOWN_MS,
@@ -28,7 +29,8 @@ function setup(store = new MemoryStore(), env: Record<string, string> = {}) {
     );
   join("Anna");
   join("Bob");
-  const get = (query = "") => app.handleHttp(new Request(`http://office/api/party${query}`));
+  const get = (query = "", headers: Record<string, string> = { authorization: "Bearer pw" }) =>
+    app.handleHttp(new Request(`http://office/api/party${query}`, { headers }));
   const post = (body: unknown, auth: string | null = "Bearer pw") =>
     app.handleHttp(
       new Request("http://office/api/party", {
@@ -67,14 +69,61 @@ describe("party API", () => {
 
   test("GET respects viewer gate and cannot mutate", async () => {
     const { get, state, post } = setup(undefined, { VIEWER_KEY: "view" });
-    expect((await get())!.status).toBe(401);
-    expect((await get("?key=wrong"))!.status).toBe(401);
-    expect(await state(await get("?key=view&personId=anna&action=dance"))).toEqual({
+    expect((await get("", {}))!.status).toBe(401);
+    expect((await get("?key=wrong", {}))!.status).toBe(401);
+    expect(await state(await get("?key=view&personId=anna&action=dance", {}))).toEqual({
       profiles: {},
       events: [],
       scores: {},
     });
     expect((await post({ personId: "anna", look }))!.status).toBe(200);
+  });
+
+  test("GET accepts viewer sessions while mutations still require bearer credentials", async () => {
+    const { app, get } = setup();
+    const cookie = `${SESSION_COOKIE}=${await makeSessionToken("pw", 1_000_000)}`;
+    expect((await get("", { cookie }))!.status).toBe(200);
+    expect((await get("", { cookie: `${SESSION_COOKIE}=bad` }))!.status).toBe(401);
+    expect(
+      (await app.handleHttp(
+        new Request("http://office/api/party", {
+          method: "POST",
+          headers: { cookie },
+          body: JSON.stringify({ personId: "anna", look }),
+        }),
+      ))!.status,
+    ).toBe(401);
+  });
+
+  test("disconnected and stale actors or targets cannot play during presence grace", async () => {
+    const first = setup();
+    first.app.connectorClosed("Anna");
+    expect(first.app.hub.state().people.some((p) => p.personId === "anna")).toBe(true);
+    expect((await first.post({ personId: "anna", action: "dance" }))!.status).toBe(404);
+    expect((await first.post({ personId: "bob", action: "tag", targetId: "anna" }))!.status).toBe(
+      404,
+    );
+    const second = setup();
+    second.advance(76_000);
+    expect((await second.post({ personId: "anna", action: "dance" }))!.status).toBe(404);
+  });
+
+  test("cooldowns survive recreation and expire on the server clock", async () => {
+    const first = setup();
+    expect(
+      (await first.post({ personId: "anna", action: "high-five", targetId: "bob" }))!.status,
+    ).toBe(200);
+    const restarted = setup(first.store);
+    expect(
+      (await restarted.post({ personId: "anna", action: "high-five", targetId: "bob" }))!.status,
+    ).toBe(429);
+    restarted.advance(PARTY_COOLDOWN_MS - 1);
+    expect((await restarted.post({ personId: "anna", action: "dance" }))!.status).toBe(429);
+    restarted.advance(1);
+    expect(
+      (await restarted.post({ personId: "anna", action: "high-five", targetId: "bob" }))!.status,
+    ).toBe(200);
+    expect((await restarted.state(await restarted.get())).scores).toEqual({ anna: 2, bob: 2 });
   });
 
   test("validates full wardrobe, payload shape and online actor/target", async () => {

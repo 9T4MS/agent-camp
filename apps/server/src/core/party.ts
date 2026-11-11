@@ -6,6 +6,7 @@ import {
   PartyMutation,
   PartyState,
 } from "@agent-office/protocol";
+import { z } from "zod";
 import type { Store } from "./store.ts";
 
 export const PARTY_BODY_MAX_BYTES = 8 * 1024;
@@ -14,6 +15,10 @@ export const PARTY_EVENT_TTL_MS = 15_000;
 const STORAGE_KEY = "party.v1";
 const MAX_PROFILES = 1000;
 const MAX_SCORE = 1_000_000;
+// Optional for compatibility with wardrobes saved before cooldowns were durable.
+const StoredParty = PartyState.extend({
+  cooldowns: z.record(z.string(), z.number().int().nonnegative()).default({}),
+});
 
 type PartyResult = { status: number; body: PartyState | { error: string } };
 
@@ -27,10 +32,11 @@ export class Party {
     const raw = store.kvGet(STORAGE_KEY);
     if (!raw) return;
     try {
-      const parsed = PartyState.safeParse(JSON.parse(raw));
+      const parsed = StoredParty.safeParse(JSON.parse(raw));
       if (parsed.success) {
         this.profiles = Object.assign(Object.create(null), parsed.data.profiles);
         this.scores = Object.assign(Object.create(null), parsed.data.scores);
+        this.lastAction = new Map(Object.entries(parsed.data.cooldowns));
       }
     } catch {
       // A malformed optional party record must not stop office presence.
@@ -102,7 +108,12 @@ export class Party {
     }
     this.store.kvPut(
       STORAGE_KEY,
-      JSON.stringify({ profiles: this.profiles, scores: this.scores, events: [] }),
+      JSON.stringify({
+        profiles: this.profiles,
+        scores: this.scores,
+        events: [],
+        cooldowns: Object.fromEntries(this.lastAction),
+      }),
     );
     return { status: 200, body: this.state(now) };
   }
