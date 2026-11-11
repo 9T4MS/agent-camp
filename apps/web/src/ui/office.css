@@ -85,12 +85,16 @@
   font-size: 16px;
   color: var(--lemon);
   z-index: 6;
-  transition: transform 0.35s steps(6);
+  transition:
+    transform 0.35s steps(6),
+    visibility 0.35s;
   pointer-events: none;
   white-space: nowrap;
+  visibility: hidden;
 }
 .hud-banner.show {
   transform: translate(-50%, 0);
+  visibility: visible;
 }
 .hud-banner .sub {
   color: var(--cream);

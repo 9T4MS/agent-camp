@@ -136,6 +136,7 @@ export class OfficeScene {
     s.anchor.set(0.5);
     s.position.set(Math.round(x), Math.round(y));
     s.alpha = 0;
+    s.visible = false;
     this.glows.addChild(s);
     this.lampGlows.push({ sprite: s, base, kind });
   }
@@ -203,12 +204,13 @@ export class OfficeScene {
       monitor.zIndex = desk.zIndex + 0.5;
       const seat = seatPoint(pod, d);
       const chair = new Sprite(chairTexture());
-      chair.position.set(seat.x - 9, seat.y - 6);
+      chair.position.set(seat.x - 8, seat.y - 4);
       chair.zIndex = seat.y + 1;
       const glow = new Sprite(glowTexture(14, C.leaf));
       glow.anchor.set(0.5);
       glow.position.set(t.x * TILE + 16, t.y * TILE + 2);
       glow.alpha = 0;
+      glow.visible = false;
       this.glows.addChild(glow);
       this.objects.addChild(desk, monitor, chair);
       this.desks.set(`${pod}:${d}`, { pod, desk: d, chair, monitor, glow, state: "off", seat });
@@ -287,11 +289,12 @@ export class OfficeScene {
   setDaylight(night: number, sky: "day" | "dusk" | "night", tint: string, alpha: number) {
     this.overlay.tint = hexNum(tint);
     this.overlay.alpha = alpha;
+    this.overlay.visible = alpha > 0.01;
     for (const p of this.panes) p.sprite.texture = windowPane(sky, p.rect.w, p.rect.h);
     for (const g of this.lampGlows) {
       g.sprite.alpha = g.kind === "lamp" ? g.base * night : sky === "day" ? 0.12 : 0;
+      g.sprite.visible = g.sprite.alpha > 0.01;
     }
-    for (const d of this.desks.values()) d.glow.visible = true;
     this.night = night;
   }
   night = 0;
@@ -309,13 +312,14 @@ export class OfficeScene {
     const blink = Math.floor(time * 2);
     for (const d of this.desks.values()) {
       if (d.state === "off") {
-        d.glow.alpha = 0;
+        d.glow.visible = false;
         continue;
       }
       const frames = MONITOR[d.state];
       const tex = monitorTextures()[frames[(blink + d.desk) % frames.length]!]!;
       if (d.monitor.texture !== tex) d.monitor.texture = tex;
       d.glow.alpha = d.state === "run" ? 0.55 + 0.15 * Math.sin(time * 4 + d.desk) : 0.35 * this.night;
+      d.glow.visible = d.glow.alpha > 0.01;
     }
     // coffee steam
     for (const p of this.steam) {

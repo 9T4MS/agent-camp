@@ -118,20 +118,20 @@ export function monitorTextures(): Texture[] {
 }
 
 let chairTex: Texture | null = null;
-/** 16x14 office chair seen from behind (+1 px pad). */
+/** 14x11 office chair seen from behind (+1 px pad): low backrest so the jacket shows. */
 export function chairTexture(): Texture {
   if (chairTex) return chairTex;
-  const pc = new PixelCanvas(18, 16);
+  const pc = new PixelCanvas(16, 13);
   pc.at(1, 1);
-  pc.round(2, 0, 12, 7, C.dusk);
-  pc.hline(3, 0, 10, C.slate);
-  pc.set(3, 1, C.slate);
-  pc.rect(1, 7, 14, 2, C.ink);
-  pc.rect(7, 9, 2, 2, C.ink);
-  pc.hline(3, 11, 10, C.ink);
-  pc.set(3, 12, C.slate);
-  pc.set(12, 12, C.slate);
-  pc.set(7, 12, C.slate);
+  pc.round(1, 0, 12, 5, C.dusk);
+  pc.hline(2, 0, 10, C.slate);
+  pc.set(1, 1, C.slate);
+  pc.rect(0, 4, 14, 2, C.ink);
+  pc.rect(6, 6, 2, 2, C.ink);
+  pc.hline(2, 8, 10, C.ink);
+  pc.set(2, 9, C.slate);
+  pc.set(11, 9, C.slate);
+  pc.set(6, 9, C.slate);
   pc.at(0, 0);
   pc.outline();
   chairTex = Texture.from(pc.toCanvas());
