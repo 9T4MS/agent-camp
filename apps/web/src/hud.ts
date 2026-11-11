@@ -12,6 +12,7 @@ import {
   AGENT_PALETTES,
   type AgentKind,
   type AvatarSpec,
+  catalogAvatar,
   DESK_MESS_LEVELS,
   DESK_PROPS,
   FACIAL_HAIR,
@@ -690,7 +691,9 @@ export class Hud {
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.setAttribute("aria-label", `${p.name}'s look`);
-    const draft: AvatarSpec = structuredClone(p.avatar);
+    // catalog ids only: a saved custom look is drawn from them (a detailed GenUI look is not
+    // kept), so the preview shows exactly what Save gives
+    const draft: AvatarSpec = structuredClone(catalogAvatar(p.avatar));
     const agent = this.model.sessionsOf(p.personId)[0]?.agent ?? "claude";
 
     // desk props are three slots of their own; empty ones are dropped when saving
@@ -823,7 +826,7 @@ export class Hud {
       say(r.message, r.ok);
       if (r.ok && r.avatar && !avatar) {
         // back to automatic: show the look the server picked
-        Object.assign(draft, r.avatar);
+        Object.assign(draft, structuredClone(catalogAvatar(r.avatar)));
         for (const i of slotIdx) slots[i] = draft.deskProps[i] ?? "none";
         paintAll();
       }

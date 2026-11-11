@@ -53,10 +53,17 @@ curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/instal
 ```
 
 It asks five things: the **server URL**, the **password**, your **name**, an optional
-**description** of yourself ("curly hair, round glasses") that shapes your avatar, and a
-**name for this machine** (defaults to its short hostname). Done: the connector runs in the
-background (launchd), starts at login and updates itself. Re-run the same line any time to
-change answers.
+**description** of your look that shapes your avatar (a few words like "curly hair, round
+glasses", or a detailed paragraph), and a **name for this machine** (defaults to its short
+hostname). Done: the connector runs in the background (launchd), starts at login and updates
+itself. Re-run the same line any time to change answers.
+
+A long description is easier in a file: `agent-office configure --description-file ~/look.md`
+(or `AO_DESCRIPTION_FILE=~/look.md` for the installer), then
+`launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector` so the office redraws you.
+Don't hand-edit a multi-line description into `config.toml` as a TOML `"""…"""` string:
+the connector reads only single-line values there, so use `configure --description-file`
+(it stores line breaks escaped).
 
 ```sh
 agent-office status      # connected? which sessions does it see?
@@ -75,7 +82,9 @@ you a server URL and a password. Do this:
 2. Ask the human, in one message, and wait for the answers:
    - **Display name** shown in the office (first name is fine). If they already run Agent
      Office on another machine, it must be the **same name** there so both count as one person.
-   - **Look** (optional): one line describing them, e.g. "curly hair, round glasses, hoodie".
+   - **Look** (optional): a few words ("curly hair, round glasses, hoodie") or a detailed
+     paragraph (hair, glasses, each piece of clothing with colours, shoes, pose; up to ~8000
+     characters). See [How do I look?](#how-do-i-look).
    - **Machine name** (optional): a label for this computer, default `hostname -s`
      (e.g. "laptop", "devbox").
    - **Share project folder names?** (default yes). Only the folder's base name is ever sent.
@@ -88,6 +97,14 @@ you a server URL and a password. Do this:
    The binary lands in `~/.local/bin/agent-office` and a launchd agent
    (`dev.agentoffice.connector`) starts it now and at every login. This needs network access
    and `launchctl`; if your sandbox blocks them, ask the human to approve or to run the command.
+   For a look longer than a line (or with quotes or line breaks), write it to
+   `~/.config/agent-office/look.md` and pass
+   `AO_DESCRIPTION_FILE="$HOME/.config/agent-office/look.md"` instead of `AO_DESCRIPTION`.
+   To change the look later:
+   ```sh
+   ~/.local/bin/agent-office configure --description-file ~/.config/agent-office/look.md
+   launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector
+   ```
 4. If they said **no** to project folder names:
    ```sh
    ~/.local/bin/agent-office configure --share-project-names false
@@ -118,11 +135,19 @@ shows up on the agent card so you can tell the sessions apart.
 
 ### How do I look?
 
-The server picks your look. With AI off it comes from a hash of your name; with AI on it is
-chosen from your one-line description, but only from a fixed catalog of hair, glasses,
-clothes and props, so everyone stays in the same pixel style. Your jacket colour shows
-which agent a session runs (Claude, Codex, Pi). Every extra session is a sibling of you
-with tiny variations, and your pod has one desk per running session (at least 2, up to 6).
+The server picks your look. With AI off it comes from a hash of your name. With AI on it is
+drawn from your description: a few words work, but a detailed one (up to ~8000 characters)
+gets you a detailed character: hair cut and colour, glasses and their frame, each layer of
+clothing with its collar, buttons, pockets, pattern and embroidery, socks, shoes, even an
+expression and a pose. Exact colours (`#1f3d2b`, "forest green") are used as given. All of it
+is painted by the same renderer at the same pixel size, so everyone stays in one style.
+
+Which agent a session runs (Claude, Codex, Pi) shows in its colour: if you don't name a
+jacket colour, your jacket takes the agent's colour as before; if you do, you keep your
+jacket and get a badge on the chest (and a patch across the shoulders from behind) in the
+agent's colour instead. Every extra
+session is a sibling of you with tiny variations, and your pod has one desk per running
+session (at least 2, up to 6).
 
 Want a say? Click your name plate. The first time, tap **It's me: send a code**: a 6-digit
 code pops up as a notification on your Mac (via the connector, so its notifications must be
@@ -145,8 +170,11 @@ Sent: agent kind (Claude/Codex/Pi), a salted hash of the session id, the project
 name** (turn off with `share_project_names = false` in `~/.config/agent-office/config.toml`),
 an activity verb (typing/reading/thinking/running/waiting/idle), the subagent count, how full
 the context window is (a percentage), when the
-session started, the connector version, and the **machine name** you chose (`machine_name`,
-defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like).
+session started, the connector version, the **machine name** you chose (`machine_name`,
+defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like), and your
+**look description** (up to 8000 characters, if you set one). The server keeps the
+description to draw your avatar (with AI on it goes to the configured AI provider) and never
+shows it to viewers; they only see the finished avatar.
 
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).
@@ -301,7 +329,9 @@ bun run screenshots   # builds web, real server + simulator, Playwright -> scree
 ```
 
 `bun run screenshots` needs Chromium for Playwright (`bunx playwright install chromium`
-once). It writes laptop (1440×900) and iPad (1180×820) shots plus `03-busy.gif`.
+once). It writes laptop (1440×900) and iPad (1180×820) shots plus `03-busy.gif`. Art
+review for characters: `/?gallery=look&look=tracht` (the hand-authored detailed look, also
+`?demo=one&look=tracht`).
 
 ## Deploy / setup
 
@@ -341,6 +371,17 @@ secret `ANTHROPIC_API_KEY`, or `GENUI_PROVIDER=jev` + secret `AI_GATEWAY_API_KEY
 Gateway); `GENUI_PROVIDER` is a plain *Text* variable. Everything works without them (AI off).
 Deploys keep what you add there; only the variables listed in `apps/server/wrangler.toml` are
 reset to its values.
+With AI on, a described person costs one call per description change (default model
+`claude-haiku-4-5`, roughly $0.02-0.04 per call); `GENUI_MAX_CALLS_PER_DAY` (default 50)
+bounds the day. People without a description never cause a call. For more faithful looks set
+the *Text* variable `GENUI_MODEL=claude-opus-5-5` (roughly $0.10-0.15 and 30-90 s per call at
+the default `GENUI_EFFORT=low`). A deploy that bumps the look revision regenerates every
+described person once, within the same daily cap.
+
+**Order when a change touches both sides:** release the connector before the server is
+deployed. The server serves `install.sh`, which downloads the newest released binary; if the
+server ships first, a fresh install can get an older connector that ignores
+`--description-file` and cuts the description to 200 characters.
 
 **Other ways to deploy**
 

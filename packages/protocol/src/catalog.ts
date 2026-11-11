@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { hashString, pick, seededRandom } from "./hash.ts";
+import { CharacterLook } from "./look.ts";
 
 type Entry<Id extends string> = { readonly id: Id; readonly label: string };
 type ColorEntry<Id extends string> = Entry<Id> & {
@@ -199,7 +200,8 @@ export type DeskMess = z.infer<typeof DeskMess>;
 export const MAX_DESK_PROPS = 3;
 
 // ---- avatar spec --------------------------------------------------------------------------
-export const AvatarSpec = z.object({
+/** The catalog part of an avatar (always present; what the low-res office and old clients use). */
+export const AvatarCatalogSpec = z.object({
   hairStyle: HairStyle,
   hairColor: HairColor,
   skinTone: SkinTone,
@@ -219,6 +221,16 @@ export const AvatarSpec = z.object({
     .max(MAX_DESK_PROPS)
     .refine((a) => new Set(a).size === a.length, "deskProps must be unique"),
   deskMess: DeskMess,
+});
+export type AvatarCatalogSpec = z.infer<typeof AvatarCatalogSpec>;
+
+export const AvatarSpec = AvatarCatalogSpec.extend({
+  /**
+   * Optional detailed look (look.ts). Without it the renderer derives one from the catalog
+   * fields (`lookFromCatalog`). An invalid look parses as `undefined` instead of failing the
+   * whole message, so one bad avatar never drops an office.snapshot.
+   */
+  look: CharacterLook.optional().catch(undefined),
 });
 export type AvatarSpec = z.infer<typeof AvatarSpec>;
 
@@ -250,7 +262,9 @@ export const ViewerAvatar = z.object({
       ),
     ),
   deskMess: DeskMess.catch(0),
+  look: CharacterLook.optional().catch(undefined),
 });
+export type ViewerAvatar = z.infer<typeof ViewerAvatar>;
 
 /** Everything a GenUI provider may choose from, as plain id lists (handy for prompts). */
 export const AVATAR_CATALOG = {

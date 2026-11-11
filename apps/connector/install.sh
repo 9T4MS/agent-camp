@@ -4,11 +4,13 @@
 #   curl -fsSL https://<your-office>/install.sh | sh
 #
 # Downloads the connector binary for this Mac from the latest GitHub release, asks for the
-# server URL, shared password, display name, an optional look description and a machine
-# label, writes
+# server URL, shared password, display name, an optional look description (a few words or a
+# detailed paragraph) and a machine label, writes
 # ~/.config/agent-office/config.toml and registers a launchd agent so it runs at login.
 #
 # Non-interactive:  AO_SERVER=... AO_PASSWORD=... AO_NAME=... [AO_DESCRIPTION=...] [AO_MACHINE=...] sh install.sh
+# Long look description (up to ~8000 characters, several paragraphs): put it in a file and set
+#                   AO_DESCRIPTION_FILE=/path/to/look.md (wins over AO_DESCRIPTION).
 # Other overrides:  AGENT_OFFICE_UPDATE_BASE (download base URL), AGENT_OFFICE_INSTALL_DIR
 #                   (default ~/.local/bin), AO_NONINTERACTIVE=1 (never prompt).
 set -eu
@@ -150,11 +152,25 @@ else
 fi
 [ -n "$NAME" ] || die "no display name (set AO_NAME or run in a terminal)"
 
-# optional look description for the avatar
-if [ -n "${AO_DESCRIPTION+x}" ]; then
+# optional look description for the avatar: a few words or a whole paragraph
+LOOK_PROMPT="Describe your look (optional; a few words or a detailed paragraph)"
+SET_DESCRIPTION=1
+DESCRIPTION=""
+DESCRIPTION_FILE=""
+if [ -n "${AO_DESCRIPTION_FILE:-}" ]; then
+  [ -r "$AO_DESCRIPTION_FILE" ] || die "cannot read AO_DESCRIPTION_FILE: $AO_DESCRIPTION_FILE"
+  DESCRIPTION_FILE="$AO_DESCRIPTION_FILE"
+elif [ -n "${AO_DESCRIPTION+x}" ]; then
   DESCRIPTION="$AO_DESCRIPTION"
 else
-  DESCRIPTION="$(ask "Describe your look in one line (optional, e.g. curly hair, round glasses)" "$(existing self_description)")"
+  had="$(existing self_description)"
+  if [ "${#had}" -gt 60 ]; then
+    # too long to echo as a default: enter keeps it, anything typed replaces it
+    DESCRIPTION="$(ask "$LOOK_PROMPT [keep current, ${#had} chars]" "")"
+    [ -n "$DESCRIPTION" ] || SET_DESCRIPTION=0
+  else
+    DESCRIPTION="$(ask "$LOOK_PROMPT" "$had")"
+  fi
 fi
 
 # machine label on the agent card (same name on every machine = one person; this tells them apart)
@@ -167,7 +183,12 @@ else
 fi
 
 # ---- configure (agent-office writes the TOML itself, so no quoting bugs here) --------------
-set -- configure --server "$SERVER" --name "$NAME" --description "$DESCRIPTION" --machine-name "$MACHINE"
+set -- configure --server "$SERVER" --name "$NAME" --machine-name "$MACHINE"
+if [ -n "$DESCRIPTION_FILE" ]; then
+  set -- "$@" --description-file "$DESCRIPTION_FILE"
+elif [ "$SET_DESCRIPTION" = 1 ]; then
+  set -- "$@" "--description=$DESCRIPTION" # "=" form: a description may start with "--"
+fi
 if [ "$SET_PASSWORD" = 1 ]; then set -- "$@" --password "$PASSWORD"; fi
 "$BIN" "$@" >/dev/null || die "could not write the config"
 say "  config written to ~/.config/agent-office/config.toml"

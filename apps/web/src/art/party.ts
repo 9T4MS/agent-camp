@@ -1,6 +1,6 @@
 /** Vehicle art complements the single AvatarSpec paper doll; no separate wardrobe state. */
 import type { AgentKind, AvatarSpec } from "@agent-office/protocol";
-import { lookFor, paintSheet } from "./characters.ts";
+import { CHAR_H, CHAR_RES, CHAR_W, lookFor, paintSheet } from "./characters.ts";
 import { accentHex } from "./costumes.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
@@ -43,12 +43,22 @@ export function vehiclePixels(avatar: AvatarSpec): PixelCanvas {
 export function vehicleCanvas(avatar: AvatarSpec): HTMLCanvasElement {
   return vehiclePixels(avatar).toCanvas();
 }
-/** One full avatar, including the optional vehicle, for a race runner or preview. */
+/**
+ * One full avatar, including the optional vehicle, for a race runner or preview. The character
+ * is the HD frame (2 texels per world px), so the portrait is 128×128 texels for a 64×64 world
+ * px box; the 1× vehicle layer is doubled under it.
+ */
 export function avatarPortrait(avatar: AvatarSpec, agent: AgentKind = "codex"): HTMLCanvasElement {
-  const p = new PixelCanvas(64, 64);
+  const p = new PixelCanvas(64 * CHAR_RES, 64 * CHAR_RES);
   const sheet = paintSheet(lookFor(avatar, agent, null));
-  p.copyFrom(sheet, 0, 0, 16, 24, 24, 24);
+  p.copyFrom(sheet, 0, 0, CHAR_W * CHAR_RES, CHAR_H * CHAR_RES, 24 * CHAR_RES, 24 * CHAR_RES);
   const vehicle = vehiclePixels(avatar);
-  p.copyFrom(vehicle, 0, 0, 64, 64, 0, 0);
+  for (let y = 0; y < vehicle.height; y++)
+    for (let x = 0; x < vehicle.width; x++) {
+      const v = vehicle.data[y * vehicle.width + x]!;
+      if (v >>> 24 === 0) continue;
+      for (let dy = 0; dy < CHAR_RES; dy++)
+        for (let dx = 0; dx < CHAR_RES; dx++) p.put(x * CHAR_RES + dx, y * CHAR_RES + dy, v);
+    }
   return p.toCanvas();
 }

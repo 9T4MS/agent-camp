@@ -26,6 +26,11 @@ export class PixelCanvas {
   /** drawing offset, so frame painters can use local coordinates */
   ox = 0;
   oy = 0;
+  /**
+   * Optional clip rectangle (absolute coords, inclusive-exclusive): set/clear outside it are
+   * dropped. Sheet painters set it to the current frame so nothing bleeds into a neighbour.
+   */
+  clip: { x0: number; y0: number; x1: number; y1: number } | null = null;
   constructor(
     readonly width: number,
     readonly height: number,
@@ -39,17 +44,31 @@ export class PixelCanvas {
     return this;
   }
 
+  private outside(px: number, py: number): boolean {
+    if (px < 0 || py < 0 || px >= this.width || py >= this.height) return true;
+    const c = this.clip;
+    return !!c && (px < c.x0 || py < c.y0 || px >= c.x1 || py >= c.y1);
+  }
+
   set(x: number, y: number, hex: string, alpha = 255): void {
     const px = (x + this.ox) | 0;
     const py = (y + this.oy) | 0;
-    if (px < 0 || py < 0 || px >= this.width || py >= this.height) return;
+    if (this.outside(px, py)) return;
     this.data[py * this.width + px] = packColor(hex, alpha);
+  }
+
+  /** Write an already packed RGBA value (offset + clip apply). */
+  put(x: number, y: number, packed: number): void {
+    const px = (x + this.ox) | 0;
+    const py = (y + this.oy) | 0;
+    if (this.outside(px, py)) return;
+    this.data[py * this.width + px] = packed;
   }
 
   clear(x: number, y: number): void {
     const px = (x + this.ox) | 0;
     const py = (y + this.oy) | 0;
-    if (px < 0 || py < 0 || px >= this.width || py >= this.height) return;
+    if (this.outside(px, py)) return;
     this.data[py * this.width + px] = 0;
   }
 

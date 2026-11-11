@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseArgs } from "../src/cli.ts";
+import { MAX_SELF_DESCRIPTION, SHORT_SELF_DESCRIPTION } from "@agent-office/protocol";
+import { helloDescription, parseArgs } from "../src/cli.ts";
 import {
   defaultMachineName,
   loadConfig,
@@ -124,5 +125,83 @@ describe("cli args", () => {
     });
     expect(parseArgs([]).command).toBe("help");
     expect(parseArgs(["configure", "--description", ""]).flags.description).toBe("");
+  });
+});
+
+describe("look description", () => {
+  const LONG = "Slim, slicked-back brown hair, tortoiseshell panto glasses. ".repeat(20).trim();
+
+  test("hello sends the 200-char head, plus the full text when longer", () => {
+    expect(helloDescription(undefined)).toEqual({});
+    expect(helloDescription("   ")).toEqual({});
+    expect(helloDescription(" round glasses ")).toEqual({ selfDescription: "round glasses" });
+    const exact = "x".repeat(SHORT_SELF_DESCRIPTION);
+    expect(helloDescription(exact)).toEqual({ selfDescription: exact });
+    expect(LONG.length).toBeGreaterThan(SHORT_SELF_DESCRIPTION);
+    expect(helloDescription(LONG)).toEqual({
+      selfDescription: LONG.slice(0, SHORT_SELF_DESCRIPTION),
+      lookDescription: LONG,
+    });
+    const huge = "y".repeat(MAX_SELF_DESCRIPTION + 50);
+    expect(helloDescription(huge).lookDescription).toHaveLength(MAX_SELF_DESCRIPTION);
+  });
+
+  test("configure --description / --description-file (file and stdin), 8000-char cap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
+    try {
+      const main = join(import.meta.dir, "..", "src", "main.ts");
+      const env = { ...process.env, AGENT_OFFICE_CONFIG_DIR: dir };
+      const run = async (args: string[], stdin?: string) => {
+        const p = Bun.spawn([process.execPath, main, ...args], {
+          env,
+          stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [out, err] = await Promise.all([
+          new Response(p.stdout).text(),
+          new Response(p.stderr).text(),
+        ]);
+        return { code: await p.exited, out, err };
+      };
+      const stored = () => loadConfig(join(dir, "config.toml")).config.self_description;
+
+      // a long single-line description is no longer cut at 200
+      expect((await run(["configure", "--description", LONG])).code).toBe(0);
+      expect(stored()).toBe(LONG);
+
+      // multi-paragraph file; the file wins over --description
+      const file = join(dir, "look.md");
+      const text = `# My look\n\nSlicked-back hair.\n\n- white sneakers with navy heels\n${LONG}\n`;
+      writeFileSync(file, text);
+      const r = await run(["configure", "--description", "ignored", "--description-file", file]);
+      expect(r.code).toBe(0);
+      expect(stored()).toBe(text.trim());
+      expect((await run(["configure", "--get", "self_description"])).out.trim()).toBe(text.trim());
+
+      // stdin
+      expect((await run(["configure", "--description-file", "-"], "  from stdin\n")).code).toBe(0);
+      expect(stored()).toBe("from stdin");
+
+      // over the cap: truncated with a note on stderr
+      const huge = "z".repeat(MAX_SELF_DESCRIPTION + 10);
+      writeFileSync(file, huge);
+      const big = await run(["configure", "--description-file", file]);
+      expect(big.code).toBe(0);
+      expect(big.err).toContain(String(MAX_SELF_DESCRIPTION));
+      expect(stored()).toHaveLength(MAX_SELF_DESCRIPTION);
+
+      // missing file: error, config untouched
+      const missing = await run(["configure", "--description-file", join(dir, "nope.md")]);
+      expect(missing.code).toBe(1);
+      expect(missing.err).toContain("nope.md");
+      expect(stored()).toHaveLength(MAX_SELF_DESCRIPTION);
+
+      // empty clears it
+      expect((await run(["configure", "--description", ""])).code).toBe(0);
+      expect(stored()).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

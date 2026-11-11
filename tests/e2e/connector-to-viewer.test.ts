@@ -177,8 +177,9 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
     if (home) rmSync(home, { recursive: true, force: true });
   });
 
-  test("connector sessions reach the viewer, then end on SIGTERM", async () => {
-    connector = Bun.spawn(
+  /** The real connector against the fixture home; `configDir` keeps its clientId apart. */
+  function spawnConnector(name: string, configDir: string, extra: string[] = []) {
+    return Bun.spawn(
       [
         BUN,
         "run",
@@ -189,18 +190,19 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
         "--password",
         PASSWORD,
         "--name",
-        NAME,
+        name,
         "--machine-name",
         "e2e-box",
         "--home",
         join(home, "home"),
         "--assume-processes",
+        ...extra,
       ],
       {
         env: {
           ...process.env,
           HOME: home,
-          AGENT_OFFICE_CONFIG_DIR: join(home, "config"),
+          AGENT_OFFICE_CONFIG_DIR: join(home, configDir),
           AGENT_OFFICE_NO_UPDATE: "1",
         },
         stdin: "ignore",
@@ -208,6 +210,10 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
         stderr: "inherit",
       },
     );
+  }
+
+  test("connector sessions reach the viewer, then end on SIGTERM", async () => {
+    connector = spawnConnector(NAME, "config");
 
     // person.joined, then one session.started per fixture session
     const joined = await viewer.until("person.joined", (m) =>
@@ -276,5 +282,37 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
     const everything = [...viewer.raw, ...stateBodies].join("\n");
     expect(everything.length).toBeGreaterThan(0);
     expect(everything).not.toContain(SECRET);
+  }, 25_000);
+
+  test("a detailed look description (> 200 chars) is accepted", async () => {
+    const name = `${NAME} Look`;
+    const personId = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const description =
+      "Slicked-back brown hair, tortoiseshell panto glasses, a charcoal Janker with a green " +
+      "stand-up collar and horn buttons over a grey-lilac damask vest and a white shirt, " +
+      "worn tan lederhosen with vine embroidery, white ankle socks and white sneakers with " +
+      "navy heel tabs. Grinning, one hand in his pocket.";
+    expect(description.length).toBeGreaterThan(200);
+    connector = spawnConnector(name, "config-look", ["--description", description]);
+    // an oversized hello would be rejected and close the socket: no person.joined, no sessions
+    await viewer.until("person.joined (detailed look)", (m) =>
+      m.find(
+        (x) =>
+          x.type === "person.joined" &&
+          (x.data.person as { personId: string }).personId === personId,
+      ),
+    );
+    await viewer.until("session.started (detailed look)", (m) =>
+      m.some((x) => x.type === "session.started" && x.data.personId === personId),
+    );
+    await apiState();
+    connector.kill("SIGTERM");
+    expect(await connector.exited).toBe(0);
+    connector = null;
+    // privacy: the description shapes the look but is never sent to viewers, not even a part
+    const everything = [...viewer.raw, ...stateBodies].join("\n");
+    expect(everything).toContain(personId);
+    for (const part of [description, description.slice(0, 200), "tortoiseshell panto glasses"])
+      expect(everything).not.toContain(part);
   }, 25_000);
 });

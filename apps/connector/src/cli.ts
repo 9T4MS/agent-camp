@@ -4,7 +4,13 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { envelope, type MessageData, PresenceSnapshot } from "@agent-office/protocol";
+import {
+  envelope,
+  MAX_SELF_DESCRIPTION,
+  type MessageData,
+  PresenceSnapshot,
+  SHORT_SELF_DESCRIPTION,
+} from "@agent-office/protocol";
 import {
   CONFIG_KEYS,
   type Config,
@@ -78,7 +84,9 @@ Commands:
       --assume-processes  treat every agent as running (tests; also AGENT_OFFICE_ASSUME_PROCESSES=1)
       --once              print one presence.snapshot JSON to stdout and exit
   configure         write ~/.config/agent-office/config.toml
-      --server URL --password PW --name NAME --description TEXT
+      --server URL --password PW --name NAME
+      --description TEXT  how you look, a few words or a detailed paragraph (up to 8000 chars)
+      --description-file PATH|-  read the description from a file or stdin (wins over --description)
       --machine-name LABEL  (default: short hostname; "" resets to it)
       --share-project-names true|false     --get KEY (print one value)
       --notifications true|false   show waves/messages from the office (default true)
@@ -90,9 +98,14 @@ Commands:
   version           print the version
   help              this text
 
+Long look descriptions are easiest kept in a file:
+  agent-office configure --description-file ~/look.md
+then restart the service so the office redraws you:
+  launchctl kickstart -k gui/$(id -u)/${LAUNCHD_LABEL}
+
 Only status metadata is sent: agent kind, hashed session id, project folder name
 (disable with share_project_names = false), activity, subagent count, context use %, start time,
-and the machine label you chose (machine_name).`;
+the machine label you chose (machine_name) and your look description.`;
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
@@ -104,7 +117,7 @@ export async function main(argv: string[]): Promise<number> {
     case "run":
       return cmdRun(args);
     case "configure":
-      return cmdConfigure(args);
+      return await cmdConfigure(args);
     case "status":
       return cmdStatus();
     case "logs":
@@ -128,6 +141,22 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 // ---- run ----------------------------------------------------------------------------------
+/**
+ * Look description fields for connector.hello: every server accepts the 200-char head
+ * (`selfDescription`); newer servers use the full text (`lookDescription`, only when longer).
+ */
+export function helloDescription(
+  description: string | undefined,
+): Pick<MessageData<"connector.hello">, "selfDescription" | "lookDescription"> {
+  const d = description?.trim();
+  if (!d) return {};
+  const out: Pick<MessageData<"connector.hello">, "selfDescription" | "lookDescription"> = {
+    selfDescription: d.slice(0, SHORT_SELF_DESCRIPTION),
+  };
+  if (d.length > SHORT_SELF_DESCRIPTION) out.lookDescription = d.slice(0, MAX_SELF_DESCRIPTION);
+  return out;
+}
+
 async function cmdRun(args: Args): Promise<number> {
   const { flags } = args;
   const env = process.env;
@@ -184,8 +213,7 @@ async function cmdRun(args: Args): Promise<number> {
       connectorVersion: VERSION,
       platform: platformId(),
     };
-    const d = description?.trim();
-    if (d) h.selfDescription = d.slice(0, 200);
+    Object.assign(h, helloDescription(description));
     if (machine) h.machine = machine;
     if (config.birthday) h.birthday = config.birthday;
     return h;
@@ -233,7 +261,17 @@ async function cmdRun(args: Args): Promise<number> {
 }
 
 // ---- configure ----------------------------------------------------------------------------
-function cmdConfigure(args: Args): number {
+/** `--description-file PATH|-`: the file's (or stdin's) text, or an error message. */
+async function readDescriptionFile(path: string): Promise<{ text: string } | { error: string }> {
+  try {
+    const text = path === "-" ? await Bun.stdin.text() : readFileSync(path, "utf8");
+    return { text };
+  } catch (e) {
+    return { error: `cannot read description file ${path}: ${(e as Error).message}` };
+  }
+}
+
+async function cmdConfigure(args: Args): Promise<number> {
   const { flags } = args;
   const path = configPath();
   const { config } = loadConfig(path);
@@ -260,6 +298,16 @@ function cmdConfigure(args: Args): number {
   set("name", "name");
   set("description", "self_description");
   set("machine-name", "machine_name");
+  const descFile = flagStr(flags, "description-file");
+  if (descFile !== undefined) {
+    const r = await readDescriptionFile(descFile);
+    if ("error" in r) {
+      console.error(r.error);
+      return 1;
+    }
+    const text = r.text.trim();
+    next.self_description = text === "" ? undefined : text;
+  }
   const share = flags["share-project-names"];
   if (share !== undefined) next.share_project_names = !(share === "false" || share === "0");
   const bday = flagStr(flags, "birthday");
@@ -280,8 +328,12 @@ function cmdConfigure(args: Args): number {
     console.error("machine name must be at most 40 characters");
     return 2;
   }
-  if (next.self_description && next.self_description.length > 200) {
-    next.self_description = next.self_description.slice(0, 200);
+  if (next.self_description && next.self_description.length > MAX_SELF_DESCRIPTION) {
+    console.error(
+      `note: description is ${next.self_description.length} characters; ` +
+        `keeping the first ${MAX_SELF_DESCRIPTION}`,
+    );
+    next.self_description = next.self_description.slice(0, MAX_SELF_DESCRIPTION);
   }
   saveConfig(path, next);
   console.log(

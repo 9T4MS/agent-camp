@@ -8,9 +8,11 @@ import {
   type AgentKind,
   ConnectorToServer,
   envelope,
+  MAX_SELF_DESCRIPTION,
   type MessageOf,
   personIdFromName,
   type SessionInfo,
+  SHORT_SELF_DESCRIPTION,
 } from "@agent-office/protocol";
 
 export type LaptopDef = {
@@ -179,6 +181,23 @@ export function validateOutgoing<M>(msg: M): M {
   return msg;
 }
 
+/**
+ * Same split as the real connector (apps/connector `helloDescription`): the first 200 chars as
+ * `selfDescription` (older servers), the full text up to 8000 chars as `lookDescription` when
+ * it is longer than that.
+ */
+export function helloDescription(
+  description: string | undefined,
+): Pick<MessageOf<"connector.hello">["data"], "selfDescription" | "lookDescription"> {
+  const d = description?.trim();
+  if (!d) return {};
+  if (d.length <= SHORT_SELF_DESCRIPTION) return { selfDescription: d };
+  return {
+    selfDescription: d.slice(0, SHORT_SELF_DESCRIPTION),
+    lookDescription: d.slice(0, MAX_SELF_DESCRIPTION),
+  };
+}
+
 export function helloMessage(
   laptop: LaptopDef,
   password: string,
@@ -191,7 +210,7 @@ export function helloMessage(
     connectorVersion: SIM_CONNECTOR_VERSION,
     platform: "sim",
   };
-  if (laptop.description) data.selfDescription = laptop.description;
+  Object.assign(data, helloDescription(laptop.description));
   if (laptop.machine) data.machine = laptop.machine;
   return validateOutgoing(envelope("connector.hello", data, ts === undefined ? {} : { ts }));
 }

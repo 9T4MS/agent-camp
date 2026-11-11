@@ -45,6 +45,15 @@ describe("scenario generators", () => {
     expect(s?.activity).toBe("typing");
   });
 
+  test("Anna's hello carries a detailed look: 200-char head + full lookDescription", () => {
+    const r = dryRun({ scenario: "one", maxSteps: 20 });
+    const hello = r.messages.find((m) => m.type === "connector.hello");
+    if (hello?.type !== "connector.hello") throw new Error("no hello");
+    const look = hello.data.lookDescription ?? "";
+    expect(look.length).toBeGreaterThan(200);
+    expect(hello.data.selfDescription).toBe(look.slice(0, 200));
+  });
+
   test("busy = 6 people, mixed agents, 8 subagents somewhere, one waiting, two laptops", () => {
     const r = dryRun({ scenario: "busy", maxSteps: 60 });
     expect(r.world.expectedPeople().size).toBe(6);
