@@ -94,7 +94,7 @@
   object-fit: contain;
   image-rendering: pixelated;
 }
-.party-portrait span {
+.party-panel .party-portrait span {
   font: 10px var(--font-pixel);
   color: var(--cyan);
   text-align: center;

@@ -56,6 +56,7 @@ export class PartyPanel {
   private readonly fields: HTMLSelectElement[] = [];
   private readonly actions: HTMLButtonElement[] = [];
   private pollPending = false;
+  private mutationVersion = 0;
 
   constructor(
     host: HTMLElement,
@@ -220,7 +221,7 @@ export class PartyPanel {
     const rules = document.createElement("p");
     rules.className = "party-rules";
     rules.textContent =
-      "Save before playing. Use your equipped item; pick a buddy for tag or high-fives (+1 each). Equip a ride to race: a server dice roll adds 1–6 points. Short cooldown between actions.";
+      "Save before playing. Tag earns you +1; high-fives give both buddies +1. Equip a ride to race: a server dice roll adds 1–6 points. Use your equipped item for effects. Short cooldown between actions.";
     this.notice.className = "party-notice";
     this.notice.setAttribute("role", "status");
     this.notice.setAttribute("aria-live", "polite");
@@ -355,6 +356,7 @@ export class PartyPanel {
   private async poll() {
     if (this.pollPending || this.busy) return;
     this.pollPending = true;
+    const version = this.mutationVersion;
     try {
       const q = this.options.key ? `?key=${encodeURIComponent(this.options.key)}` : "";
       const response = await fetch(`/api/party${q}`);
@@ -365,7 +367,7 @@ export class PartyPanel {
             : "Party connection unavailable.",
         );
       const state = PartyState.parse(await response.json());
-      if (!this.busy) this.apply(state);
+      if (!this.busy && version === this.mutationVersion) this.apply(state);
     } catch (err) {
       this.notice.textContent =
         err instanceof Error ? err.message : "Party connection unavailable.";
@@ -377,6 +379,7 @@ export class PartyPanel {
   private async send(mutation: PartyMutation) {
     if (this.busy || !this.person) return;
     this.busy = true;
+    this.mutationVersion++;
     this.notice.textContent = "";
     this.updateButtons();
     try {
