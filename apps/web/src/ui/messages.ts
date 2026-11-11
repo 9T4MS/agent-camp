@@ -3,9 +3,9 @@ import {
   MESSAGE_MAX_RECIPIENTS,
   type MessageRecord,
   SendMessageRequest,
+  type SendMessageResponse,
 } from "@agent-office/protocol";
-import { MessageRequestError } from "../net/messages.ts";
-import { type MessageModel, messageRetryExpired } from "../state/messageModel.ts";
+import type { MessageModel } from "../state/messageModel.ts";
 import type { OfficeModel } from "../state/officeModel.ts";
 import "./messages.css";
 
@@ -67,7 +67,6 @@ export class MessagesPanel {
   private count = node("span");
   private pickerButton: HTMLButtonElement;
   private submit: HTMLButtonElement;
-  private newAttempt: HTMLButtonElement;
   private olderButton: HTMLButtonElement;
   private jump: HTMLButtonElement;
   private recipientNames = new Map<string, string>();
@@ -75,7 +74,6 @@ export class MessagesPanel {
   private busy = false;
   private loadingOlder = false;
   private deleting = new Set<string>();
-  private uncertain: { request: SendMessageRequest; at: number; head: number } | null = null;
   private lastRendered = "";
   private rosterKey = "";
   private filterKey = "";
@@ -87,12 +85,11 @@ export class MessagesPanel {
     private office: OfficeModel,
     readonly model: MessageModel,
     private actions: {
-      send: (request: SendMessageRequest) => Promise<MessageRecord>;
+      send: (request: SendMessageRequest) => Promise<SendMessageResponse>;
       delete: (id: string) => Promise<void>;
       sync: () => Promise<void>;
       older: () => Promise<void>;
       status: () => string;
-      historyAvailable: () => boolean;
       demo: boolean;
     },
   ) {
@@ -205,21 +202,9 @@ export class MessagesPanel {
     this.submit = node("button", "Send");
     this.submit.className = "pixel-btn";
     this.submit.type = "submit";
-    this.newAttempt = button("Edit as a new message", () => {
-      if (
-        !confirm(
-          "The previous message may already be saved. Editing and sending again can create a second message. Continue?",
-        )
-      )
-        return;
-      this.uncertain = null;
-      this.sendStatus.textContent = "Editing as a new message.";
-      this.updateSubmit();
-    });
-    this.newAttempt.hidden = true;
     const footer = node("div");
     footer.className = "messages-send-row";
-    footer.append(this.newAttempt, this.submit);
+    footer.append(this.submit);
     this.sendStatus.setAttribute("role", "status");
     this.sendStatus.className = "messages-send-status";
     this.form.append(this.fields, privacy, footer, this.sendStatus);
@@ -293,7 +278,7 @@ export class MessagesPanel {
   }
   /** Fullscreen release auto-reload must not discard a draft even after focus moves away. */
   get hasDraft(): boolean {
-    return this.text.value.length > 0 || this.busy || !!this.uncertain;
+    return this.text.value.length > 0 || this.busy;
   }
   open(focus = true): void {
     this.origin =
@@ -319,7 +304,7 @@ export class MessagesPanel {
       ).focus();
   }
   compose(personId?: string): void {
-    if (!this.uncertain && !this.busy && personId) {
+    if (!this.busy && personId) {
       const hasDraft = this.text.value.length > 0;
       this.audience.value = "selected";
       if (!hasDraft) this.recipientNames.clear();
@@ -336,7 +321,6 @@ export class MessagesPanel {
     this.text.value = "";
     this.from.value = "";
     this.recipientNames.clear();
-    this.uncertain = null;
     this.sendStatus.textContent = "";
     this.announcement.textContent = "";
     this.collapse(false);
@@ -517,25 +501,15 @@ export class MessagesPanel {
       (this.recipientNames.size > 0 &&
         this.recipientNames.size <= MESSAGE_MAX_RECIPIENTS &&
         [...this.recipientNames.keys()].every((id) => this.office.people.has(id)));
-    this.fields.disabled = this.busy || !!this.uncertain;
-    const expired =
-      !!this.uncertain &&
-      messageRetryExpired(this.uncertain.at, this.uncertain.head, Date.now(), this.model.cursor);
-    this.submit.disabled =
-      this.busy || (this.uncertain ? expired : !this.text.value.trim() || !validRecipients);
+    this.fields.disabled = this.busy;
+    this.submit.disabled = this.busy || !this.text.value.trim() || !validRecipients;
     this.count.textContent = `${this.text.value.length}/200`;
     const count = selected ? this.recipientNames.size : this.office.people.size;
     this.submit.textContent = this.busy
       ? "Sending…"
-      : this.uncertain
-        ? expired
-          ? "Retry expired"
-          : "Retry same message"
-        : this.notify.checked
-          ? `Send + notify ${count} ${count === 1 ? "person" : "people"}`
-          : "Send";
-    this.newAttempt.hidden = !this.uncertain;
-    this.newAttempt.disabled = this.busy;
+      : this.notify.checked
+        ? `Send + notify ${count} ${count === 1 ? "person" : "people"}`
+        : "Send";
   }
   private async deleteMessage(id: string): Promise<void> {
     if (
@@ -562,25 +536,21 @@ export class MessagesPanel {
   }
   private async send(): Promise<void> {
     if (this.submit.disabled) return;
-    const parsed = SendMessageRequest.safeParse(
-      this.uncertain?.request ?? {
-        requestId: crypto.randomUUID(),
-        audience:
-          this.audience.value === "everyone"
-            ? { kind: "everyone" }
-            : { kind: "selected", personIds: [...this.recipientNames.keys()] },
-        text: this.text.value,
-        from: this.from.value.trim(),
-        notifyDesktop: this.notify.checked,
-      },
-    );
+    const parsed = SendMessageRequest.safeParse({
+      audience:
+        this.audience.value === "everyone"
+          ? { kind: "everyone" }
+          : { kind: "selected", personIds: [...this.recipientNames.keys()] },
+      text: this.text.value,
+      from: this.from.value.trim(),
+      notifyDesktop: this.notify.checked,
+    });
     if (!parsed.success) {
       this.sendStatus.textContent = "Check the text and selected recipients.";
       return;
     }
     const request = parsed.data;
     if (
-      !this.uncertain &&
       request.audience.kind === "everyone" &&
       request.notifyDesktop &&
       !confirm(
@@ -591,39 +561,15 @@ export class MessagesPanel {
     this.busy = true;
     this.sendStatus.textContent = "Saving…";
     this.updateSubmit();
-    const attemptedAt = this.uncertain?.at ?? Date.now();
-    const attemptedHead = this.uncertain?.head ?? this.model.cursor;
     try {
-      if (this.uncertain) {
-        await this.actions.sync();
-        if (!this.actions.historyAvailable())
-          throw new MessageRequestError(
-            "History unavailable. Recover history before retrying, or explicitly edit as a new message.",
-            true,
-          );
-        if (messageRetryExpired(attemptedAt, attemptedHead, Date.now(), this.model.cursor))
-          throw new MessageRequestError(
-            "The retry window expired. Explicitly edit as a new message if you still want to send it.",
-            true,
-          );
-      }
-      const message = await this.actions.send(request);
+      const { queued } = await this.actions.send(request);
       this.text.value = "";
-      this.uncertain = null;
-      const queued = message.delivery.people.filter((p) => p.status === "queued").length;
-      const offline = message.delivery.people.filter((p) => p.status === "offline").length;
-      const cooldown = message.delivery.people.filter((p) => p.status === "cooldown").length;
-      const unknown = message.delivery.people.filter((p) => p.status === "unknown").length;
       this.sendStatus.textContent = this.actions.demo
         ? "Saved in this demo — no Macs notified."
-        : !message.notifyDesktop
+        : !request.notifyDesktop
           ? "Saved to office history."
-          : `Saved. Queued to ${queued} people’s connected Macs; ${offline} offline, ${cooldown} cooling down, ${unknown} unknown. Not a display/read receipt.`;
+          : `Saved. Queued to ${queued} connected Mac socket${queued === 1 ? "" : "s"}. Not a display/read receipt.`;
     } catch (error) {
-      this.uncertain =
-        error instanceof MessageRequestError && error.uncertain
-          ? { request, at: attemptedAt, head: attemptedHead }
-          : null;
       this.sendStatus.textContent =
         error instanceof Error ? error.message : "Send failed. Draft retained.";
     } finally {

@@ -762,7 +762,6 @@ async function sceneMessages() {
         "cf-connecting-ip": `shots-${++serial}`,
       },
       body: JSON.stringify({
-        requestId: crypto.randomUUID(),
         audience: { kind: "everyone" },
         text,
         notifyDesktop: false,
@@ -861,27 +860,27 @@ async function sceneMessages() {
       assert.equal(await page.locator(".messages-notify input").isChecked(), false);
       if (vp === "laptop") {
         await sleep(2100); // the existing shared viewer-IP send guard
-        // Save on the server, then lose the acknowledgement: retry must not create a second row.
-        let requestId = "";
+        // Save, lose the acknowledgement, and verify the UI warns without automatically resending.
+        let attempts = 0;
         await page.route("**/api/messages", async (route) => {
           if (route.request().method() !== "POST") {
             await route.continue();
             return;
           }
-          requestId = route.request().postDataJSON().requestId;
+          attempts++;
           await route.fetch();
           await route.abort();
         });
         await text.press("Control+Enter");
-        await page.getByRole("button", { name: "Retry same message", exact: true }).waitFor();
-        assert.equal(await text.isDisabled(), true);
-        await page.unroute("**/api/messages");
-        await page.getByRole("button", { name: "Retry same message", exact: true }).click();
-        await page.waitForFunction(
-          () =>
-            document.querySelector(".messages-send-status")?.textContent ===
-            "Saved to office history.",
+        await page.waitForFunction(() =>
+          document
+            .querySelector(".messages-send-status")
+            ?.textContent?.includes("may already be saved"),
         );
+        assert.equal(await text.isDisabled(), false);
+        await page.unroute("**/api/messages");
+        await sleep(150);
+        assert.equal(attempts, 1);
         const history = await (await page.request.get(`${o.http}/api/messages`)).json();
         assert.equal(
           history.messages.filter(
@@ -889,7 +888,15 @@ async function sceneMessages() {
           ).length,
           1,
         );
-        assert.ok(requestId);
+        assert.equal(await text.inputValue(), "Draft survives surface changes");
+        await sleep(2100);
+        await text.fill("Who wants to pair after lunch?"); // A deliberate new message, not a retry.
+        await text.press("Control+Enter");
+        await page.waitForFunction(
+          () =>
+            document.querySelector(".messages-send-status")?.textContent ===
+            "Saved to office history.",
+        );
         await text.fill("Draft survives surface changes");
         // Restore history after a network break, with no extra alerts or duplicated rows.
         await page.context().setOffline(true);
@@ -998,7 +1005,7 @@ async function sceneMessages() {
       await mobile.close();
     }
     log(
-      "  message checks: zero live/tab history reads, browser-owned deletion after reload, history/unread, selection, plain text, retry/recovery, keyboard, draft, touch, demo and kiosk/nohud passed",
+      "  message checks: zero live/tab history reads, browser-owned deletion after reload, history/unread, selection, plain text, lost-ack warning without resend, recovery, keyboard, draft, touch, demo and kiosk/nohud passed",
     );
   } finally {
     o.stop();

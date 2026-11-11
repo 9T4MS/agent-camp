@@ -26,23 +26,12 @@ export const MessageAudience = z.discriminatedUnion("kind", [
   }),
 ]);
 export const SendMessageRequest = z.strictObject({
-  requestId: z.uuid(),
   audience: MessageAudience,
   text: MessageText,
   from: z.string().trim().max(40).optional(),
   notifyDesktop: z.boolean(),
 });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
-export const MessageDelivery = z.object({
-  people: z.array(
-    z.object({
-      personId: PersonId,
-      status: z.enum(["queued", "offline", "cooldown", "notRequested", "unknown"]),
-    }),
-  ),
-  socketSends: z.number().int().nonnegative(),
-});
-export type MessageDelivery = z.infer<typeof MessageDelivery>;
 export const MessageRecord = z.object({
   id: z.string().min(1).max(64),
   seq: Sequence.positive(),
@@ -52,10 +41,15 @@ export const MessageRecord = z.object({
   audience: z.enum(["everyone", "selected"]),
   recipients: z.array(z.object({ personId: PersonId, name: z.string().min(1).max(40) })),
   notifyDesktop: z.boolean(),
-  delivery: MessageDelivery,
 });
 export type MessageRecord = z.infer<typeof MessageRecord>;
-export const SendMessageResponse = z.object({ ok: z.literal(true), message: MessageRecord });
+export const SendMessageResponse = z.object({
+  ok: z.literal(true),
+  message: MessageRecord,
+  /** Accepted connector socket sends, not people or OS display receipts. Never persisted. */
+  queued: z.number().int().nonnegative(),
+});
+export type SendMessageResponse = z.infer<typeof SendMessageResponse>;
 export const DeleteMessageResponse = z.object({ ok: z.literal(true) });
 export const MessagePage = z.object({
   messages: z.array(MessageRecord).max(100),

@@ -191,13 +191,15 @@ checks it never appears in any outgoing message. **Activity/statistics history**
 events (who, which agent, project folder name, subagent counts), never transcript content.
 
 **Explicitly authored office messages are different:** their text, optional display-name
-signature, recipient names and best-effort delivery outcomes are stored in a separate shared
-office log for **24 hours or the latest 100 messages, whichever is smaller**. Everyone with
+signature and recipient names are stored in a separate shared office log. Messages are
+readable for **24 hours or the latest 100 messages, whichever is smaller**. Expired bodies
+are purged in hourly batches (at most **25 hours** of physical storage). Everyone with
 office access can read every message, including selected-recipient messages. Recipients
 control notifications, not read access; typed sender names are not verified identities.
-Message bodies are not stored in browser localStorage, the offline cache, activity CSV or
-new viewers’ timelapse images. The sending browser can delete a message: its body and
-retry payload are erased immediately, leaving only bounded retry metadata until expiry.
+Office Messages bodies are not stored in browser localStorage, the offline cache, activity
+CSV or world/timelapse textures. The sending browser can delete a message: the entire row
+is erased immediately, without a delivery/retry ledger. The legacy short-message interaction
+remains transient as before (including its world bubble), not part of this shared log.
 Deletion ownership uses a private HttpOnly browser cookie (only its hash is stored), not
 the typed name or the look-editor identity. Keep that browser's cookies to retain deletion
 rights; clearing them loses those rights. Already queued Mac notifications cannot be recalled.
@@ -275,20 +277,22 @@ asks for confirmation; people are resolved when the server saves the message.
   not an account-level read receipt. Initial history is not an unread flood.
 - Load older history or filter broadcasts/by recipient. Reload/reconnect recovers retained
   messages; expired periods are labelled. Drafts stay only in this tab’s memory.
-- An uncertain send offers **Retry same message**, reusing its request ID without duplicate
-  rows or desktop pings. Retry first checks current history; after either retention bound
-  (age or message count) is reached, only an explicit new send is possible.
+- A lost/uncertain acknowledgement keeps the draft and warns that the message may already
+  be saved. **Check history before sending again.** There is no automatic resend or
+  duplicate-safe retry guarantee; an explicit second send can create a second message.
 - Use **Delete** on your messages to remove them from the shared log, including after reload.
   Other office viewers do not get a delete control or permission to delete them.
-- The office accepts at most **200 messages per UTC day**, across all browsers/IPs and
-  history-only or legacy sends. The stored cap survives restarts; deleting a message does
-  not refund it. Retrying a retained request does not consume another slot. An interrupted
-  insertion can conservatively reserve a slot without creating a message.
+- The office accepts at most **200 stored messages per UTC day**, across all browsers/IPs
+  and history-only or desktop-alert sends. The stored cap survives restarts; deleting does
+  not refund it. An interrupted insertion can conservatively reserve a slot without creating
+  a message. Legacy `/api/interact` messages remain transient, with their original limits.
 - Contiguous live arrivals use the socket only. History is fetched on connection/reconnect
   or an actual sequence gap, not on every message or return to a healthy tab. Server pruning
-  runs only after inserts and in the coordinated alarm; reads filter expired rows without writes.
-- “Queued” means at least one connected Mac socket accepted a send, **not** that the
-  notification was displayed/read. Opt-out, client throttling and macOS permissions still
+  runs only after inserts and in the hourly-batched coordinated alarm; reads filter expired
+  rows at 24h without writes. Notification cooldowns are saved once per notified message,
+  not once per recipient; quick-poke cooldowns keep their original in-memory behavior.
+- The “queued” count is accepted **connector socket sends**, not people, and does **not**
+  mean the notification was displayed/read. Opt-out, client throttling and macOS permissions still
   apply. Everyone + Mac notify has a 30 s office-wide cooldown; each person shares the
   existing 10 s notification cooldown with quick pokes. History-only sends ignore desktop
   cooldowns; the existing 2 s viewer-IP guard still applies.

@@ -311,7 +311,6 @@ export class OfficeModel {
         break;
       case "interaction.happened": {
         const d = msg.data;
-        if (d.kind === "message" && d.messageId) break;
         out.push({
           kind: "interaction",
           interaction: d.kind,

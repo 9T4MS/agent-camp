@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { InteractRequest, MessageQuery, SendMessageRequest } from "../src/index.ts";
 
 const valid = {
-  requestId: crypto.randomUUID(),
   text: " hello ",
   audience: { kind: "everyone" },
   notifyDesktop: false,

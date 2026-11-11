@@ -5,7 +5,7 @@ import {
   type MessagePage,
   type MessageRecord,
 } from "@agent-office/protocol";
-import { MessageModel, messageRetryExpired } from "../src/state/messageModel.ts";
+import { MessageModel } from "../src/state/messageModel.ts";
 
 export const message = (seq: number): MessageRecord => ({
   id: `message-${seq}`,
@@ -15,7 +15,6 @@ export const message = (seq: number): MessageRecord => ({
   audience: "everyone",
   recipients: [],
   notifyDesktop: false,
-  delivery: { people: [], socketSends: 0 },
 });
 export const page = (
   seqs: number[],
@@ -31,12 +30,6 @@ export const page = (
   retention: { maxAgeMs: MESSAGE_RETENTION_MS, maxRows: MESSAGE_MAX_ROWS, expiresAt: null },
   ...extra,
 });
-test("uncertain retries expire at either the 24-hour or 100-row retention bound", () => {
-  expect(messageRetryExpired(1000, 10, 2000, 10 + MESSAGE_MAX_ROWS - 1)).toBe(false);
-  expect(messageRetryExpired(1000, 10, 2000, 10 + MESSAGE_MAX_ROWS)).toBe(true);
-  expect(messageRetryExpired(1000, 10, 1000 + MESSAGE_RETENTION_MS, 11)).toBe(true);
-});
-
 test("contiguous live/POST echoes advance the cursor, but higher events cannot skip gaps", () => {
   const model = new MessageModel(null, () => 1_000_000);
   model.receive(message(6));
@@ -101,12 +94,12 @@ test("deletion wins over racing history, including a previously owned message", 
   expect(model.receive(message(2))).toBe(false);
 });
 
-test("deleted slots still bound how far back a live viewer retains bodies", () => {
+test("deletion does not discard other still-retained messages", () => {
   const model = new MessageModel(null, () => 1_000_000);
   model.page(page(Array.from({ length: MESSAGE_MAX_ROWS }, (_, i) => i + 1)), "initial");
   for (let i = 2; i <= MESSAGE_MAX_ROWS; i++) model.remove(`message-${i}`);
   model.receive(message(MESSAGE_MAX_ROWS + 1));
-  expect(model.rows.map((m) => m.seq)).toEqual([MESSAGE_MAX_ROWS + 1]);
+  expect(model.rows.map((m) => m.seq)).toEqual([1, MESSAGE_MAX_ROWS + 1]);
 });
 
 test("client window is bounded without virtualizing or storing message bodies locally", () => {

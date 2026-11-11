@@ -1,4 +1,4 @@
-/** Validated HTTP message history, independent of the viewer's status snapshot. */
+/** Socket-first shared history. Sending is deliberately not automatically retried. */
 import {
   DeleteMessageResponse,
   MessagePage,
@@ -8,17 +8,9 @@ import {
 } from "@agent-office/protocol";
 import type { MessageModel } from "../state/messageModel.ts";
 
-export class MessageRequestError extends Error {
-  constructor(
-    message: string,
-    readonly uncertain = false,
-  ) {
-    super(message);
-  }
-}
+export class MessageRequestError extends Error {}
 export class MessagesClient {
   status = "Loading history…";
-  historyAvailable = false;
   private syncing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
@@ -54,8 +46,9 @@ export class MessagesClient {
       });
     } catch {
       throw new MessageRequestError(
-        "Could not reach the office. Retry the same message safely.",
-        !!body,
+        body
+          ? "Could not confirm the send. It may already be saved; check history before sending again."
+          : "Could not reach the office.",
       );
     }
     if (response.status === 401) {
@@ -70,10 +63,7 @@ export class MessagesClient {
           ? value.error
           : `Request failed (${response.status})`;
       const retry = response.headers.get("retry-after");
-      throw new MessageRequestError(
-        `${error}${retry ? ` Try again in ${retry}s.` : ""}`,
-        !!body && response.status >= 500,
-      );
+      throw new MessageRequestError(`${error}${retry ? ` Try again in ${retry}s.` : ""}`);
     }
     return value;
   }
@@ -84,9 +74,10 @@ export class MessagesClient {
     if (fresh && this.model.initialized && message.seq > this.model.cursor) void this.sync();
   }
   removed(id: string): void {
-    if (this.stopped) return;
-    this.model.remove(id);
-    this.opts.changed();
+    if (!this.stopped) {
+      this.model.remove(id);
+      this.opts.changed();
+    }
   }
   sync(reset = false): Promise<void> {
     if (this.stopped) return Promise.resolve();
@@ -105,7 +96,6 @@ export class MessagesClient {
     return this.syncing;
   }
   private async synchronize(): Promise<void> {
-    this.historyAvailable = false;
     try {
       const reset = this.resetRequested;
       this.resetRequested = false;
@@ -125,7 +115,6 @@ export class MessagesClient {
             const recent = MessagePage.parse(await this.request("/api/messages?limit=50"));
             if (this.stopped) return;
             this.model.page(recent, "initial");
-            this.historyAvailable = true;
             this.ownerReady = true;
             this.status = "Older messages expired or were deleted.";
             this.opts.changed();
@@ -136,7 +125,6 @@ export class MessagesClient {
           if (!page.hasMore) break;
         }
       }
-      this.historyAvailable = true;
       this.status = "";
     } catch {
       if (!this.stopped)
@@ -165,31 +153,26 @@ export class MessagesClient {
     );
     if (!this.stopped) this.removed(id);
   }
-  async send(request: SendMessageRequest): Promise<MessageRecord> {
-    if (this.stopped) throw new MessageRequestError("Office login expired.");
-    // Finish initial cookie setup before posting; a lost POST acknowledgement must not lose ownership.
+  async send(request: SendMessageRequest): Promise<SendMessageResponse> {
     if (this.syncing) await this.syncing;
     if (this.stopped) throw new MessageRequestError("Office login expired.");
     if (!this.ownerReady) {
       DeleteMessageResponse.parse(await this.request("/api/messages/owner"));
       this.ownerReady = true;
     }
-    const value = await this.request("/api/messages", request);
-    const parsed = SendMessageResponse.safeParse(value);
+    const parsed = SendMessageResponse.safeParse(await this.request("/api/messages", request));
     if (!parsed.success)
       throw new MessageRequestError(
-        "Send acknowledgement unavailable. Retry the same message safely.",
-        true,
+        "Send acknowledgement unavailable. It may already be saved; check history before sending again.",
       );
     if (this.stopped) throw new MessageRequestError("Office login expired.");
     this.model.ownedIds.add(parsed.data.message.id);
     this.receive(parsed.data.message);
-    return parsed.data.message;
+    return parsed.data;
   }
   clear(): void {
     this.stopped = true;
     this.ownerReady = false;
-    this.historyAvailable = false;
     this.model.clear();
     this.status = "";
     this.opts.changed();

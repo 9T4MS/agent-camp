@@ -16,7 +16,6 @@ const message = (seq: number): MessageRecord => ({
   audience: "everyone",
   recipients: [],
   notifyDesktop: false,
-  delivery: { people: [], socketSends: 0 },
 });
 const page = (seqs: number[], head: number, extra = {}): MessagePage => ({
   messages: seqs.map(message),
@@ -90,7 +89,7 @@ test("failed history keeps live rows, retry recovers, gap resets with truthful s
   expect(client.status).toBe("Older messages expired or were deleted.");
   expect(model.rows.map((m) => m.seq)).toEqual([7, 8]);
 });
-test("uncertain acknowledgement preserves retry identity; auth clears and blocks stale requests", async () => {
+test("lost acknowledgement warns without automatic retry; auth clears and blocks stale requests", async () => {
   const model = new MessageModel(null, () => 1_000_000);
   const bodies: string[] = [];
   let calls = 0;
@@ -103,12 +102,11 @@ test("uncertain acknowledgement preserves retry identity; auth clears and blocks
       if (init?.body) bodies.push(String(init.body));
       calls++;
       if (calls === 1) throw new Error("lost response");
-      if (calls === 2) return response({ ok: true, message: message(1) });
+      if (calls === 2) return response({ ok: true, message: message(1), queued: 0 });
       return response({ error: "unauthorized" }, 401);
     },
   });
   const request = {
-    requestId: crypto.randomUUID(),
     audience: { kind: "everyone" as const },
     text: "hello",
     notifyDesktop: false,
@@ -117,10 +115,15 @@ test("uncertain acknowledgement preserves retry identity; auth clears and blocks
     await client.send(request);
     throw new Error("expected failure");
   } catch (error) {
-    expect(error instanceof MessageRequestError && error.uncertain).toBe(true);
+    expect(
+      error instanceof MessageRequestError && error.message.includes("may already be saved"),
+    ).toBe(true);
   }
-  await client.send(request);
+  await Bun.sleep(0);
+  expect(bodies).toHaveLength(1); // No automatic resend after an ambiguous failure.
+  await client.send(request); // Explicit caller action; no duplicate-safe retry guarantee.
   expect(bodies[0]).toBe(bodies[1]);
+  expect(JSON.parse(bodies[0]!)).not.toHaveProperty("requestId");
   await client.sync();
   expect(loggedOut).toBe(1);
   expect(model.rows).toEqual([]);

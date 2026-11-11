@@ -13,14 +13,7 @@ import {
 
 export type MessageSlice = { limit: number; before?: number; after?: number; since?: number };
 export type StoredMessageRecord = MessageRecord & { ownerHash?: string };
-/** Deleted rows retain only deduplication metadata, never message bodies or payloads. */
-export type StoredMessage = {
-  id: string;
-  ts: number;
-  payload: string;
-  message: MessageRecord | null;
-  ownerHash?: string;
-};
+export type StoredMessage = { message: MessageRecord; ownerHash?: string };
 
 /**
  * A person's look. `selfDescription` is the person-level description the look was made
@@ -29,16 +22,9 @@ export type StoredMessage = {
 export type StoredAvatar = { avatar: AvatarSpec; key: string; selfDescription?: string };
 
 export interface Store {
-  findMessage(requestId: string): StoredMessage | null;
   findMessageById(id: string): StoredMessage | null;
   deleteMessage(id: string): void;
-  insertMessage(
-    requestId: string,
-    payload: string,
-    message: Omit<MessageRecord, "seq">,
-    ownerHash?: string,
-  ): MessageRecord;
-  updateMessage(message: MessageRecord): void;
+  insertMessage(message: Omit<MessageRecord, "seq">, ownerHash?: string): MessageRecord;
   messages(query: MessageSlice): StoredMessageRecord[];
   messageHead(): number;
   nextMessageExpiry(): number | null;
@@ -64,47 +50,22 @@ export interface Store {
 export class MemoryStore implements Store {
   private messageSeq = 0;
   private messageLog = new Map<string, StoredMessage>();
-  findMessage(requestId: string): StoredMessage | null {
-    const row = this.messageLog.get(requestId);
-    return row ? structuredClone(row) : null;
-  }
   findMessageById(id: string): StoredMessage | null {
-    const row = [...this.messageLog.values()].find((r) => r.id === id);
+    const row = this.messageLog.get(id);
     return row ? structuredClone(row) : null;
   }
   deleteMessage(id: string): void {
-    for (const row of this.messageLog.values())
-      if (row.id === id) {
-        row.message = null;
-        row.payload = "";
-      }
+    this.messageLog.delete(id);
   }
-  insertMessage(
-    requestId: string,
-    payload: string,
-    message: Omit<MessageRecord, "seq">,
-    ownerHash?: string,
-  ): MessageRecord {
-    if (this.messageLog.has(requestId)) throw new Error("duplicate request");
+  insertMessage(message: Omit<MessageRecord, "seq">, ownerHash?: string): MessageRecord {
     const record = { ...structuredClone(message), seq: ++this.messageSeq };
-    this.messageLog.set(requestId, {
-      id: record.id,
-      ts: record.ts,
-      payload,
-      message: record,
-      ...(ownerHash ? { ownerHash } : {}),
-    });
+    this.messageLog.set(record.id, { message: record, ...(ownerHash ? { ownerHash } : {}) });
     return structuredClone(record);
-  }
-  updateMessage(message: MessageRecord): void {
-    for (const row of this.messageLog.values()) {
-      if (row.message?.id === message.id) row.message = structuredClone(message);
-    }
   }
   messages(query: MessageSlice): StoredMessageRecord[] {
     const rows = [...this.messageLog.values()]
       .flatMap((r) =>
-        r.message && r.ts > (query.since ?? -1)
+        r.message.ts > (query.since ?? -1)
           ? [{ ...r.message, ...(r.ownerHash ? { ownerHash: r.ownerHash } : {}) }]
           : [],
       )
@@ -121,12 +82,12 @@ export class MemoryStore implements Store {
     return this.messageSeq;
   }
   nextMessageExpiry(): number | null {
-    const times = [...this.messageLog.values()].map((row) => row.ts);
+    const times = [...this.messageLog.values()].map((row) => row.message.ts);
     return times.length ? Math.min(...times) + MESSAGE_RETENTION_MS : null;
   }
   pruneMessages(now: number): void {
     for (const [id, row] of this.messageLog) {
-      if (row.ts + MESSAGE_RETENTION_MS <= now || this.messageLog.size > MESSAGE_MAX_ROWS)
+      if (row.message.ts + MESSAGE_RETENTION_MS <= now || this.messageLog.size > MESSAGE_MAX_ROWS)
         this.messageLog.delete(id);
     }
   }
@@ -229,58 +190,38 @@ export class SqlStore implements Store {
       }
     }
   }
-  findMessage(requestId: string): StoredMessage | null {
-    const row = this.run(
-      "SELECT id, ts, seq, payload, record, owner_hash FROM office_messages WHERE request_id = ?",
-      requestId,
-    )[0];
-    return row ? this.storedMessage(row) : null;
-  }
   findMessageById(id: string): StoredMessage | null {
     const row = this.run(
-      "SELECT id, ts, seq, payload, record, owner_hash FROM office_messages WHERE id = ?",
+      "SELECT seq, record, owner_hash FROM office_messages WHERE id = ? AND record <> 'null'",
       id,
     )[0];
     return row ? this.storedMessage(row) : null;
   }
   private storedMessage(row: Record<string, unknown>): StoredMessage {
     return {
-      id: String(row.id),
-      ts: Number(row.ts),
-      payload: String(row.payload),
-      message: row.record === "null" ? null : this.readMessage(row),
+      message: this.readMessage(row),
       ...(row.owner_hash ? { ownerHash: String(row.owner_hash) } : {}),
     };
   }
   deleteMessage(id: string): void {
-    this.run("UPDATE office_messages SET record = 'null', payload = '' WHERE id = ?", id);
+    const head = this.messageHead();
+    if (head > Number(this.kvGet("messages.head") ?? 0)) this.kvPut("messages.head", String(head));
+    this.run("DELETE FROM office_messages WHERE id = ?", id);
   }
   private readMessage(row: Record<string, unknown>): MessageRecord {
     return { ...JSON.parse(String(row.record)), seq: Number(row.seq) };
   }
-  insertMessage(
-    requestId: string,
-    payload: string,
-    message: Omit<MessageRecord, "seq">,
-    ownerHash?: string,
-  ): MessageRecord {
+  insertMessage(message: Omit<MessageRecord, "seq">, ownerHash?: string): MessageRecord {
     const row = this.run(
       "INSERT INTO office_messages (id, request_id, payload, ts, record, owner_hash) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq",
       message.id,
-      requestId,
-      payload,
+      message.id, // Compatibility with the prototype schema; no client retry ledger.
+      "",
       message.ts,
       JSON.stringify(message),
       ownerHash ?? null,
     )[0]!;
     return { ...message, seq: Number(row.seq) };
-  }
-  updateMessage(message: MessageRecord): void {
-    this.run(
-      "UPDATE office_messages SET record = ? WHERE seq = ? AND record <> 'null'",
-      JSON.stringify(message),
-      message.seq,
-    );
   }
   messages(query: MessageSlice): StoredMessageRecord[] {
     const after = query.after !== undefined;

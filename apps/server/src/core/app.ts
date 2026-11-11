@@ -114,6 +114,7 @@ export class OfficeApp {
   readonly latest: LatestVersion;
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
+  private lastPoke = new Map<string, number>();
   readonly messages: OfficeMessages;
   readonly party: Party;
   private lastLook = new Map<string, number>();
@@ -160,6 +161,7 @@ export class OfficeApp {
       (socket, data) => transport.sendToConnector?.(socket, data) ?? false,
       (data) => transport.broadcast(data),
       (who, now) => this.interactionWait(who, now),
+      this.lastPoke,
     );
   }
 
@@ -344,7 +346,10 @@ export class OfficeApp {
       this.scheduleAlarm();
       const headers: Record<string, string> = owner.cookie ? { "set-cookie": owner.cookie } : {};
       return "message" in result
-        ? json({ ok: true, message: result.message }, { status: result.status, headers })
+        ? json(
+            { ok: true, message: result.message, queued: result.queued },
+            { status: result.status, headers },
+          )
         : json(
             { error: result.error },
             {
@@ -668,53 +673,6 @@ export class OfficeApp {
     const now = this.now();
 
     const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
-    if (r.kind === "message") {
-      const origin = req.headers.get("origin");
-      if (
-        (origin && origin !== new URL(req.url).origin) ||
-        req.headers.get("sec-fetch-site") === "cross-site"
-      )
-        return json({ error: "same-origin requests only" }, { status: 403 });
-      const owner = await messageOwner(req);
-      const result = this.messages.send(
-        {
-          requestId: crypto.randomUUID(),
-          audience: { kind: "selected", personIds: [r.personId!] },
-          text: r.text!,
-          ...(r.from ? { from: r.from } : {}),
-          notifyDesktop: true,
-        },
-        who,
-        now,
-        owner.hash!,
-      );
-      this.scheduleAlarm();
-      if (!("message" in result))
-        return json(
-          { error: result.error },
-          { status: result.status === 422 ? 404 : result.status },
-        );
-      const delivered = result.message.delivery.socketSends;
-      this.transport.broadcast(
-        JSON.stringify(
-          envelope(
-            "interaction.happened",
-            {
-              kind: "message",
-              personId: r.personId!,
-              text: r.text!,
-              messageId: result.message.id,
-              ...(r.from ? { from: r.from } : {}),
-              delivered,
-            },
-            { ts: now },
-          ),
-        ),
-      );
-      return json({ ok: true, delivered } satisfies InteractResponse, {
-        headers: owner.cookie ? { "set-cookie": owner.cookie } : {},
-      });
-    }
     const wait = this.interactionWait(who, now);
     if (wait !== null)
       return json(
@@ -727,14 +685,14 @@ export class OfficeApp {
 
     let delivered = 0;
     const kind = r.kind;
-    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer";
+    const pokes = kind === "wave" || kind === "coffee" || kind === "cheer" || kind === "message";
     const officeOnly = !pokes;
     if (r.personId && pokes) {
-      if (this.messages.pokeWait(r.personId, now))
+      if (now - (this.lastPoke.get(r.personId) ?? 0) < POKE_PER_PERSON_MS)
         return json({ error: "they were just poked, give them a moment" }, { status: 429 });
-      this.messages.markPoke(r.personId, now);
+      this.lastPoke.set(r.personId, now);
       const from = r.from || undefined;
-      const text = `${from ?? "Someone"} ${POKE_TEXT[kind]}`;
+      const text = kind === "message" ? r.text! : `${from ?? "Someone"} ${POKE_TEXT[kind]}`;
       const poke = JSON.stringify(
         envelope("connector.poked", { kind, text, ...(from ? { from } : {}) }),
       );
@@ -747,7 +705,7 @@ export class OfficeApp {
       kind: r.kind,
       ...(r.personId ? { personId: r.personId } : {}),
       ...(r.from ? { from: r.from } : {}),
-
+      ...(r.text && r.kind === "message" ? { text: r.text } : {}),
       ...(r.personId && !officeOnly ? { delivered } : {}),
     });
     this.transport.broadcast(JSON.stringify(event));

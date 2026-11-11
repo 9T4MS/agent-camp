@@ -264,8 +264,6 @@ export const InteractionHappened = msg(
     personId: PersonId.optional(),
     from: ViewerName.optional(),
     text: InteractionText.optional(),
-    /** Canonical persisted message; new viewers suppress this legacy bubble. */
-    messageId: z.string().min(1).max(64).optional(),
     /** how many connector sockets accepted the notification */
     delivered: z.number().int().nonnegative().optional(),
   }),

@@ -30,6 +30,7 @@ import {
   type PersonDayResponse,
   parseViewerMessage,
   type SendMessageRequest,
+  type SendMessageResponse,
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
@@ -367,14 +368,14 @@ async function boot() {
           location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
         },
       });
-    const demoSend = async (request: SendMessageRequest): Promise<MessageRecord> => {
+    const demoSend = async (request: SendMessageRequest): Promise<SendMessageResponse> => {
       const selected = request.audience.kind === "selected" ? request.audience.personIds : null;
       const recipients = [...model.people.values()]
         .filter((p) => !selected || selected.includes(p.personId))
         .map(({ personId, name }) => ({ personId, name }));
       const seq = (messageModel.rows.at(-1)?.seq ?? messageModel.cursor) + 1;
       const message: MessageRecord = {
-        id: request.requestId,
+        id: crypto.randomUUID(),
         seq,
         ts: Date.now(),
         text: request.text,
@@ -382,16 +383,12 @@ async function boot() {
         audience: request.audience.kind,
         recipients,
         notifyDesktop: request.notifyDesktop,
-        delivery: {
-          people: recipients.map(({ personId }) => ({ personId, status: "notRequested" })),
-          socketSends: 0,
-        },
       };
       messageModel.ownedIds.add(message.id);
       messageModel.receive(message);
       messageModel.page({ ...emptyPage, messages: [message], head: seq, next: seq }, "catchup");
       messagesPanel?.refresh();
-      return message;
+      return { ok: true, message, queued: 0 };
     };
     messagesPanel = new MessagesPanel(host, model, messageModel, {
       demo: !!demo,
@@ -405,7 +402,6 @@ async function boot() {
       sync: () => messagesClient?.sync() ?? Promise.resolve(),
       older: () => messagesClient?.older() ?? Promise.resolve(),
       status: () => messagesClient?.status ?? "",
-      historyAvailable: () => messagesClient?.historyAvailable ?? true,
     });
     messagesPanel.onOpen = () => {
       games?.close();
@@ -754,7 +750,6 @@ async function boot() {
         audience: "everyone",
         recipients: [],
         notifyDesktop: false,
-        delivery: { people: [], socketSends: 0 },
       };
       messageModel.receive(seed);
       messageModel.cursor = 1;

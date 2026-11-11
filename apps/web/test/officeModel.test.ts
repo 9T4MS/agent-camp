@@ -29,7 +29,7 @@ const snap = (people: PersonView[]) =>
   envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
 
 describe("OfficeModel", () => {
-  test("authored messages and tagged legacy bubbles never become world changes", () => {
+  test("Office Messages stay out of world changes; legacy message interactions remain transient", () => {
     const m = new OfficeModel(() => T0);
     const before = m.stats();
     expect(
@@ -43,7 +43,6 @@ describe("OfficeModel", () => {
             audience: "everyone",
             recipients: [],
             notifyDesktop: false,
-            delivery: { people: [], socketSends: 0 },
           },
         }),
       ),
@@ -54,10 +53,9 @@ describe("OfficeModel", () => {
           kind: "message",
           personId: "anna",
           text: "Legacy",
-          messageId: "saved-message",
         }),
       ),
-    ).toEqual([]);
+    ).toMatchObject([{ kind: "interaction", interaction: "message", text: "Legacy" }]);
     expect(
       m.apply(envelope("interaction.happened", { kind: "wave", personId: "anna" }))[0]?.kind,
     ).toBe("interaction");

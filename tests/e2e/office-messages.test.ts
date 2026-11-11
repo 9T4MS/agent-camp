@@ -88,7 +88,7 @@ async function socket(base: string, path: string, hello?: { name: string; client
 }
 
 describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2e)", () => {
-  test("shared history, intended-machine fanout, safe retries, auth and restart recovery", async () => {
+  test("shared history, intended-machine fanout, sender deletion, auth and restart recovery", async () => {
     const temp = mkdtempSync(join(tmpdir(), "ao-messages-"));
     let server = await start(join(temp, "office.sqlite"));
     const sockets: WebSocket[] = [];
@@ -104,7 +104,6 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       const second = await socket(server.base, "/ws/viewer");
       sockets.push(a.ws, a2.ws, b.ws, other.ws, first.ws, second.ws);
       const body = {
-        requestId: crypto.randomUUID(),
         text: "Explicitly authored e2e message",
         audience: { kind: "selected", personIds: ["anna", "ben"] },
         notifyDesktop: true,
@@ -121,14 +120,13 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       const response = await post(body);
       expect(response.status).toBe(201);
       const senderCookie = response.headers.get("set-cookie")!.split(";")[0]!;
-      const saved = SendMessageResponse.parse(await response.json()).message;
-      expect(saved.delivery.socketSends).toBe(3);
+      const { message: saved, queued } = SendMessageResponse.parse(await response.json());
+      expect(queued).toBe(3);
       await wait(() =>
         [first, second].every((v) => v.messages.some((m) => m.type === "message.sent")),
       );
       await wait(() => [a, a2, b].every((c) => c.raw.some((m) => m.includes("connector.poked"))));
       expect(other.raw.some((m) => m.includes("connector.poked"))).toBe(false);
-      expect((await post(body)).status).toBe(200);
       for (const viewer of [first, second])
         expect(viewer.messages.filter((m) => m.type === "message.sent")).toHaveLength(1);
       for (const connector of [a, a2, b])
@@ -157,7 +155,6 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
         await (await fetch(`${server.base}/api/messages?after=0`, { headers: AUTH })).json(),
       );
       expect(recovered.messages).toEqual([saved]);
-      expect((await post(body)).status).toBe(200);
       const late = await socket(server.base, "/ws/viewer");
       sockets.push(late.ws);
       await wait(() => late.messages.some((m) => m.type === "office.snapshot"));
@@ -187,11 +184,10 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
           await (await fetch(`${server.base}/api/messages`, { headers: AUTH })).json(),
         ).messages,
       ).toEqual([]);
-      expect((await post(body)).status).toBe(410); // deleted request cannot resurrect the body
       const legacy = await fetch(`${server.base}/api/interact`, {
         method: "POST",
         headers: { ...AUTH, "content-type": "application/json", "cf-connecting-ip": "legacy" },
-        body: JSON.stringify({ kind: "message", personId: "anna", text: "Legacy saved" }),
+        body: JSON.stringify({ kind: "message", personId: "anna", text: "Legacy transient" }),
       });
       expect(legacy.status).toBe(200);
       expect(await legacy.json()).toEqual({ ok: true, delivered: 0 });
@@ -199,7 +195,7 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
         MessagePage.parse(
           await (await fetch(`${server.base}/api/messages?after=1`, { headers: AUTH })).json(),
         ).messages.map((m) => m.text),
-      ).toEqual(["Legacy saved"]);
+      ).toEqual([]);
     } finally {
       for (const ws of sockets) ws.close();
       await server.stop();

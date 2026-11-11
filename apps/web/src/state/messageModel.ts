@@ -7,15 +7,6 @@ import {
   type MessageRecord,
 } from "@agent-office/protocol";
 
-export function messageRetryExpired(
-  at: number,
-  head: number,
-  now: number,
-  currentHead: number,
-): boolean {
-  return now - at >= MESSAGE_RETENTION_MS || currentHead - head >= MESSAGE_MAX_ROWS;
-}
-
 export class MessageModel {
   private records = new Map<string, MessageRecord>();
   readonly ownedIds = new Set<string>();
@@ -87,8 +78,7 @@ export class MessageModel {
   }
   prune(): void {
     const cutoff = this.now() - MESSAGE_RETENTION_MS;
-    for (const [id, m] of this.records)
-      if (m.ts <= cutoff || m.seq <= this.cursor - MESSAGE_MAX_ROWS) this.records.delete(id);
+    for (const [id, m] of this.records) if (m.ts <= cutoff) this.records.delete(id);
     for (const row of this.rows.slice(0, -MESSAGE_MAX_ROWS)) this.records.delete(row.id);
     for (const id of this.ownedIds) if (!this.records.has(id)) this.ownedIds.delete(id);
     for (const [id, at] of this.deleted) if (at <= cutoff) this.deleted.delete(id);

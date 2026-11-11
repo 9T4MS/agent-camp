@@ -12,8 +12,7 @@
       "text": "Lunch in five!",
       "audience": "everyone",
       "recipients": [],
-      "notifyDesktop": false,
-      "delivery": { "people": [], "socketSends": 0 }
+      "notifyDesktop": false
     }
   }
 }
