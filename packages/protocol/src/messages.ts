@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { ViewerAvatar } from "./catalog.ts";
 import { MAX_SELF_DESCRIPTION, PROTOCOL_VERSION, SHORT_SELF_DESCRIPTION } from "./constants.ts";
+import { GameStats, GameSummary, ViewerGamesState } from "./games/wire.ts";
 import { GiphyId } from "./giphy.ts";
 import { MessageRecord } from "./officeMessages.ts";
 import { ViewerPartyState } from "./party.ts";
@@ -240,6 +241,8 @@ export const OfficeSnapshot = msg(
   z.object({
     officeName: z.string(),
     party: ViewerPartyState.optional().catch(undefined),
+    /** turn-based games: open ones, the latest results and everybody's record */
+    games: ViewerGamesState.optional().catch(undefined),
     serverTime: EpochMs,
     people: z.array(PersonView),
     /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
@@ -382,6 +385,11 @@ export const MessageDeleted = msg(
 );
 
 export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
+/** A turn-based game changed (invite, move, result); `stats` come along when it ended. */
+export const GameUpdated = msg(
+  "game.updated",
+  z.object({ game: GameSummary, stats: z.record(z.string(), GameStats).optional() }),
+);
 
 /** The person's head GIF changed; `gif` omitted = removed. */
 export const GifUpdated = msg(
@@ -394,6 +402,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   MessageSent,
   MessageDeleted,
   PartyUpdated,
+  GameUpdated,
   PersonJoined,
   PersonLeft,
   SessionStarted,
@@ -424,6 +433,7 @@ export type ViewerEvent = Exclude<
       | "office.snapshot"
       | "interaction.happened"
       | "party.updated"
+      | "game.updated"
       | "message.sent"
       | "message.deleted";
   }
