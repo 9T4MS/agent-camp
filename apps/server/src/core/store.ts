@@ -88,8 +88,8 @@ export class MemoryStore implements Store {
     return this.messageSeq;
   }
   nextMessageExpiry(): number | null {
-    const first = this.messageLog.values().next().value;
-    return first ? first.message.ts + MESSAGE_RETENTION_MS : null;
+    const times = [...this.messageLog.values()].map((row) => row.message.ts);
+    return times.length ? Math.min(...times) + MESSAGE_RETENTION_MS : null;
   }
   pruneMessages(now: number): void {
     for (const [id, row] of this.messageLog) {

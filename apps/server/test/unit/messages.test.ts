@@ -243,6 +243,38 @@ describe("authored messages service", () => {
     expect((await s.page("?after=1")).gap).toBe(true);
     expect(s.alarms.at(-1)).toBeNull();
   });
+  test("storage failure before insertion sends nothing and returns a safe retryable error", async () => {
+    const s = setup();
+    s.hello("Anna", "a");
+    s.sent.length = 0;
+    s.store.insertMessage = () => {
+      throw new Error("storage unavailable");
+    };
+    const result = await s.post(s.body({ notifyDesktop: true }));
+    expect(result.status).toBe(503);
+    expect(await result.text()).not.toContain("storage unavailable");
+    expect(s.queued).toEqual([]);
+    expect(s.sent).toEqual([]);
+  });
+  test("chunked oversized bodies are rejected without storing or alerting", async () => {
+    const s = setup();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(17000)));
+        controller.close();
+      },
+    });
+    const result = await s.app.handleHttp(
+      new Request("http://x/api/messages", {
+        method: "POST",
+        headers: { authorization: "Bearer pw", "content-type": "application/json" },
+        body: stream,
+      }),
+    );
+    expect(result?.status).toBe(413);
+    expect(s.store.messageHead()).toBe(0);
+    expect(s.queued).toEqual([]);
+  });
   test("restart retries and interrupted delivery never replay notifications", async () => {
     const s = setup();
     s.hello("Anna", "a");

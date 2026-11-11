@@ -6,6 +6,15 @@ import {
   type MessageRecord,
 } from "@agent-office/protocol";
 
+export function messageRetryExpired(
+  at: number,
+  head: number,
+  now: number,
+  currentHead: number,
+): boolean {
+  return now - at >= MESSAGE_RETENTION_MS || currentHead - head >= MESSAGE_MAX_ROWS;
+}
+
 export class MessageModel {
   private records = new Map<string, MessageRecord>();
   initialized = false;

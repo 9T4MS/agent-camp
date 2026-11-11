@@ -17,6 +17,7 @@ export class MessageRequestError extends Error {
 }
 export class MessagesClient {
   status = "Loading history…";
+  historyAvailable = false;
   private syncing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
@@ -91,11 +92,13 @@ export class MessagesClient {
     return this.syncing;
   }
   private async synchronize(): Promise<void> {
+    this.historyAvailable = false;
     try {
       if (!this.model.initialized) {
         const page = MessagePage.parse(await this.request("/api/messages?limit=50"));
         if (this.stopped) return;
         this.model.page(page, "initial");
+        if ((this.model.rows.at(-1)?.seq ?? 0) > this.model.cursor) this.again = true;
       } else {
         for (;;) {
           const page = MessagePage.parse(
@@ -106,6 +109,7 @@ export class MessagesClient {
             const recent = MessagePage.parse(await this.request("/api/messages?limit=50"));
             if (this.stopped) return;
             this.model.page(recent, "initial");
+            this.historyAvailable = true;
             this.status = "Older messages expired.";
             this.opts.changed();
             return;
@@ -114,6 +118,7 @@ export class MessagesClient {
           if (!page.hasMore) break;
         }
       }
+      this.historyAvailable = true;
       this.status = "";
     } catch {
       if (!this.stopped)
@@ -150,6 +155,7 @@ export class MessagesClient {
   }
   clear(): void {
     this.stopped = true;
+    this.historyAvailable = false;
     this.model.clear();
     this.status = "";
     this.opts.changed();

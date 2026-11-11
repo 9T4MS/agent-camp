@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { MESSAGE_RETENTION_MS, type MessagePage, type MessageRecord } from "@agent-office/protocol";
-import { MessageModel } from "../src/state/messageModel.ts";
+import { MessageModel, messageRetryExpired } from "../src/state/messageModel.ts";
 
 export const message = (seq: number): MessageRecord => ({
   id: `message-${seq}`,
@@ -26,6 +26,12 @@ export const page = (
   retention: { maxAgeMs: MESSAGE_RETENTION_MS, maxRows: 1000, expiresAt: null },
   ...extra,
 });
+test("uncertain retries expire at either retention bound, not only after seven days", () => {
+  expect(messageRetryExpired(1000, 10, 2000, 1009)).toBe(false);
+  expect(messageRetryExpired(1000, 10, 2000, 1010)).toBe(true);
+  expect(messageRetryExpired(1000, 10, 1000 + MESSAGE_RETENTION_MS, 11)).toBe(true);
+});
+
 test("first load/live and POST echoes merge without advancing the catch-up cursor", () => {
   const model = new MessageModel(null, () => 1_000_000);
   model.receive(message(6));

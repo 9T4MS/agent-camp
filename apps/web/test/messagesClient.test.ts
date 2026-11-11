@@ -122,6 +122,29 @@ test("uncertain acknowledgement preserves retry identity; auth clears and blocks
   expect(model.rows).toEqual([]);
   await expect(client.send(request)).rejects.toThrow("login expired");
 });
+test("an initial-page/live race fetches the missing interval immediately", async () => {
+  const pending = deferred<Response>();
+  const model = new MessageModel(null, () => 1_000_000);
+  const urls: string[] = [];
+  const client = new MessagesClient(model, {
+    changed: () => {},
+    authFailed: () => {},
+    fetch: async (url) => {
+      urls.push(url);
+      if (urls.length === 1) return pending.promise;
+      return response(page([4, 5], 5));
+    },
+  });
+  const initial = client.sync();
+  client.receive(message(5));
+  pending.resolve(response(page([1, 2, 3], 3)));
+  await initial;
+  await Bun.sleep(0);
+  expect(urls[1]).toContain("after=3");
+  expect(model.rows.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5]);
+  expect(model.cursor).toBe(5);
+});
+
 test("in-flight history cannot restore content after logout", async () => {
   const pending = deferred<Response>();
   const model = new MessageModel(null, () => 1_000_000);

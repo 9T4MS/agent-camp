@@ -330,6 +330,7 @@ async function boot() {
       sync: () => messagesClient?.sync() ?? Promise.resolve(),
       older: () => messagesClient?.older() ?? Promise.resolve(),
       status: () => messagesClient?.status ?? "",
+      historyAvailable: () => messagesClient?.historyAvailable ?? true,
     });
     messagesPanel.onOpen = () => {
       games?.close();

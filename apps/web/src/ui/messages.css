@@ -13,7 +13,7 @@
   bottom: calc(76px + env(safe-area-inset-bottom) + var(--messages-bottom, 0px));
   z-index: 41;
   width: min(420px, calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right)));
-  height: min(640px, 70dvh);
+  height: min(640px, calc(100dvh - 140px));
   max-height: calc(var(--messages-vh, 100dvh) - 100px - env(safe-area-inset-top));
   display: flex;
   flex-direction: column;
@@ -40,6 +40,9 @@
 }
 .messages-panel header {
   justify-content: space-between;
+}
+.messages-history-tab {
+  display: none;
 }
 .messages-panel h2 {
   margin: 0;
@@ -225,6 +228,10 @@
   .messages-panel form {
     flex-basis: 250px;
   }
+  .messages-history-tab {
+    display: block;
+    margin-left: auto;
+  }
   .messages-panel label:not(.messages-notify) {
     flex-wrap: wrap;
   }
@@ -245,5 +252,15 @@
   }
   .messages-keyboard fieldset {
     min-height: 44px;
+  }
+  /* Give the composer the sheet while typing; History restores the log without losing drafts. */
+  .messages-panel:has(form:focus-within) .messages-log,
+  .messages-panel:has(form:focus-within) .messages-toolbar,
+  .messages-panel:has(form:focus-within) .messages-history-status,
+  .messages-panel:has(form:focus-within) .messages-jump {
+    display: none;
+  }
+  .messages-panel:has(form:focus-within) form {
+    flex: 1;
   }
 }

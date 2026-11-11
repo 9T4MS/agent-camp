@@ -16,7 +16,7 @@ export const BROADCAST_NOTIFY_MS = 30_000;
 export const NOTIFY_PERSON_MS = 10_000;
 export type MessageResult =
   | { status: 200 | 201; message: MessageRecord }
-  | { status: 409 | 422 | 429; error: string; retryAfter?: number };
+  | { status: 409 | 422 | 429 | 503; error: string; retryAfter?: number };
 
 export class OfficeMessages {
   constructor(
@@ -78,6 +78,17 @@ export class OfficeMessages {
   }
 
   send(request: SendMessageRequest, who: string, now: number): MessageResult {
+    try {
+      return this.sendOnce(request, who, now);
+    } catch {
+      return {
+        status: 503,
+        error: "Could not confirm the saved message. Retry with the same request ID.",
+      };
+    }
+  }
+
+  private sendOnce(request: SendMessageRequest, who: string, now: number): MessageResult {
     this.prune(now);
     // Canonicalize selection order and optional blank signatures before comparing retries.
     const payload = JSON.stringify({

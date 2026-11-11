@@ -1,12 +1,11 @@
 /** One persistent DOM composer/log; never render authored content into Pixi textures. */
 import {
   MESSAGE_MAX_RECIPIENTS,
-  MESSAGE_RETENTION_MS,
   type MessageRecord,
   SendMessageRequest,
 } from "@agent-office/protocol";
 import { MessageRequestError } from "../net/messages.ts";
-import type { MessageModel } from "../state/messageModel.ts";
+import { type MessageModel, messageRetryExpired } from "../state/messageModel.ts";
 import type { OfficeModel } from "../state/officeModel.ts";
 import "./messages.css";
 
@@ -75,7 +74,7 @@ export class MessagesPanel {
   private origin: HTMLElement | null = null;
   private busy = false;
   private loadingOlder = false;
-  private uncertain: { request: SendMessageRequest; at: number } | null = null;
+  private uncertain: { request: SendMessageRequest; at: number; head: number } | null = null;
   private lastRendered = "";
   private rosterKey = "";
   private filterKey = "";
@@ -91,6 +90,7 @@ export class MessagesPanel {
       sync: () => Promise<void>;
       older: () => Promise<void>;
       status: () => string;
+      historyAvailable: () => boolean;
       demo: boolean;
     },
   ) {
@@ -104,11 +104,15 @@ export class MessagesPanel {
     this.panel.setAttribute("aria-label", "Office messages");
     this.panel.tabIndex = -1;
     const heading = node("header");
+    const historyTab = button("History", () => this.panel.focus());
+    historyTab.classList.add("messages-history-tab");
+    historyTab.setAttribute("aria-label", "Show message history");
     heading.append(
       node("h2", "Office messages"),
       button("−", () => this.collapse()),
     );
     heading.lastElementChild!.setAttribute("aria-label", "Collapse messages");
+    heading.insertBefore(historyTab, heading.lastElementChild);
     this.filter.setAttribute("aria-label", "Filter office messages");
     this.filter.onchange = () => {
       this.lastRendered = "";
@@ -302,7 +306,11 @@ export class MessagesPanel {
     this.pickerButton.setAttribute("aria-expanded", "false");
     this.launcher.setAttribute("aria-expanded", "false");
     remember(EXPANDED_KEY, "false");
-    if (restoreFocus) (this.origin?.isConnected ? this.origin : this.launcher).focus();
+    if (restoreFocus)
+      (this.origin?.isConnected && this.origin.getClientRects().length
+        ? this.origin
+        : this.launcher
+      ).focus();
   }
   compose(personId?: string): void {
     if (!this.uncertain && !this.busy && personId) {
@@ -495,9 +503,12 @@ export class MessagesPanel {
     const validRecipients =
       !selected ||
       (this.recipientNames.size > 0 &&
+        this.recipientNames.size <= MESSAGE_MAX_RECIPIENTS &&
         [...this.recipientNames.keys()].every((id) => this.office.people.has(id)));
     this.fields.disabled = this.busy || !!this.uncertain;
-    const expired = !!this.uncertain && Date.now() - this.uncertain.at >= MESSAGE_RETENTION_MS;
+    const expired =
+      !!this.uncertain &&
+      messageRetryExpired(this.uncertain.at, this.uncertain.head, Date.now(), this.model.cursor);
     this.submit.disabled =
       this.busy || (this.uncertain ? expired : !this.text.value.trim() || !validRecipients);
     this.count.textContent = `${this.text.value.length}/200`;
@@ -546,7 +557,21 @@ export class MessagesPanel {
     this.sendStatus.textContent = "Saving…";
     this.updateSubmit();
     const attemptedAt = this.uncertain?.at ?? Date.now();
+    const attemptedHead = this.uncertain?.head ?? this.model.cursor;
     try {
+      if (this.uncertain) {
+        await this.actions.sync();
+        if (!this.actions.historyAvailable())
+          throw new MessageRequestError(
+            "History unavailable. Recover history before retrying, or explicitly edit as a new message.",
+            true,
+          );
+        if (messageRetryExpired(attemptedAt, attemptedHead, Date.now(), this.model.cursor))
+          throw new MessageRequestError(
+            "The retry window expired. Explicitly edit as a new message if you still want to send it.",
+            true,
+          );
+      }
       const message = await this.actions.send(request);
       this.text.value = "";
       this.uncertain = null;
@@ -560,8 +585,10 @@ export class MessagesPanel {
           ? "Saved to office history."
           : `Saved. Queued to ${queued} people’s connected Macs; ${offline} offline, ${cooldown} cooling down, ${unknown} unknown. Not a display/read receipt.`;
     } catch (error) {
-      if (error instanceof MessageRequestError && error.uncertain)
-        this.uncertain = { request, at: attemptedAt };
+      this.uncertain =
+        error instanceof MessageRequestError && error.uncertain
+          ? { request, at: attemptedAt, head: attemptedHead }
+          : null;
       this.sendStatus.textContent =
         error instanceof Error ? error.message : "Send failed. Draft retained.";
     } finally {

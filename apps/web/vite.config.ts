@@ -24,7 +24,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/ws": { target: SERVER, ws: true, changeOrigin: true },
-      "/api": { target: SERVER, changeOrigin: true },
+      // Preserve the viewer Host so API Origin checks also work through the dev proxy.
+      "/api": { target: SERVER, changeOrigin: false },
       "/healthz": { target: SERVER, changeOrigin: true },
       "/install.sh": { target: SERVER, changeOrigin: true },
       "/login": { target: SERVER, changeOrigin: true },
