@@ -305,8 +305,12 @@ export class OfficeModel {
         if (s) this.setContext(s, msg.data.context ?? undefined, out);
         break;
       }
+      case "message.sent":
+        // Authored content is owned by MessageModel, never world/statistics state.
+        break;
       case "interaction.happened": {
         const d = msg.data;
+        if (d.kind === "message" && d.messageId) break;
         out.push({
           kind: "interaction",
           interaction: d.kind,

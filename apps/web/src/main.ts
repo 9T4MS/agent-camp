@@ -18,9 +18,13 @@ import "./ui/office.css";
 import {
   type AvatarEditResponse,
   type AvatarSpec,
+  MESSAGE_MAX_ROWS,
+  MESSAGE_RETENTION_MS,
+  type MessageRecord,
   type PartyEvent,
   type PersonDayResponse,
   parseViewerMessage,
+  type SendMessageRequest,
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
@@ -34,11 +38,14 @@ import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
 import { keepAwake, reloadOnNewBuild } from "./kiosk.ts";
+import { MessagesClient } from "./net/messages.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
 import { registerServiceWorker } from "./pwa.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
+import { MessageModel } from "./state/messageModel.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
+import { MessagesPanel, storedMessageRead } from "./ui/messages.ts";
 import { Minimap } from "./ui/minimap.ts";
 import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
@@ -234,12 +241,27 @@ async function boot() {
 
   let snapshotSeen = false;
   let games: PartyPanel | null = null;
+  let messagesPanel: MessagesPanel | null = null;
+  let messagesClient: MessagesClient | null = null;
+  const messageModel = new MessageModel(storedMessageRead(), () => Date.now() + model.clockSkew);
   /** runs after every message (e.g. a ?focus= waiting for its person to show up) */
   let afterIngest = () => {};
   const ingest = (msg: ServerToViewer) => {
+    if (msg.type === "message.sent") {
+      // Kiosk/nohud never retain or render message content, including live socket events.
+      if (messagesPanel) {
+        const fresh = !messageModel.rows.some((m) => m.id === msg.data.message.id);
+        if (messagesClient) messagesClient.receive(msg.data.message);
+        else messageModel.receive(msg.data.message);
+        if (fresh) messagesPanel.announce(msg.data.message);
+        messagesPanel.refresh();
+      }
+      return;
+    }
     const changes = model.apply(msg);
     partyWorld.setState(model.party);
     games?.refresh();
+    messagesPanel?.refresh();
     ensureCapacity();
     for (const ch of changes) {
       chars.handle(ch);
@@ -256,6 +278,75 @@ async function boot() {
     living.poke();
     afterIngest();
   };
+
+  if (!kiosk && !nohud) {
+    const emptyPage = {
+      messages: [] as MessageRecord[],
+      head: 0,
+      older: null,
+      next: 0,
+      hasMore: false,
+      gap: false,
+      retention: { maxAgeMs: MESSAGE_RETENTION_MS, maxRows: MESSAGE_MAX_ROWS, expiresAt: null },
+    };
+    if (demo) messageModel.page(emptyPage, "initial");
+    else
+      messagesClient = new MessagesClient(messageModel, {
+        key,
+        changed: () => messagesPanel?.refresh(),
+        authFailed: () => {
+          messagesPanel?.clear();
+          location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+        },
+      });
+    const demoSend = async (request: SendMessageRequest): Promise<MessageRecord> => {
+      const selected = request.audience.kind === "selected" ? request.audience.personIds : null;
+      const recipients = [...model.people.values()]
+        .filter((p) => !selected || selected.includes(p.personId))
+        .map(({ personId, name }) => ({ personId, name }));
+      const seq = (messageModel.rows.at(-1)?.seq ?? messageModel.cursor) + 1;
+      const message: MessageRecord = {
+        id: request.requestId,
+        seq,
+        ts: Date.now(),
+        text: request.text,
+        ...(request.from ? { from: request.from } : {}),
+        audience: request.audience.kind,
+        recipients,
+        notifyDesktop: request.notifyDesktop,
+        delivery: {
+          people: recipients.map(({ personId }) => ({ personId, status: "notRequested" })),
+          socketSends: 0,
+        },
+      };
+      messageModel.receive(message);
+      messageModel.page({ ...emptyPage, messages: [message], head: seq, next: seq }, "catchup");
+      messagesPanel?.refresh();
+      return message;
+    };
+    messagesPanel = new MessagesPanel(host, model, messageModel, {
+      demo: !!demo,
+      send: messagesClient ? (request) => messagesClient!.send(request) : demoSend,
+      sync: () => messagesClient?.sync() ?? Promise.resolve(),
+      older: () => messagesClient?.older() ?? Promise.resolve(),
+      status: () => messagesClient?.status ?? "",
+    });
+    messagesPanel.onOpen = () => {
+      games?.close();
+      if (matchMedia("(max-width: 560px)").matches) hud.suspendPanel();
+    };
+    hud.onMessages = (personId) => messagesPanel?.compose(personId);
+    hud.onLogout = () => {
+      messagesClient?.clear();
+      messageModel.clear();
+      messagesPanel?.clear();
+    };
+    const recover = () => {
+      if (document.visibilityState === "visible") void messagesClient?.sync();
+    };
+    document.addEventListener("visibilitychange", recover);
+    window.addEventListener("online", recover);
+  }
 
   chars.onMoment = (m) => {
     if (m.kind === "joined") camera.notify(m.x, m.y, { zoom: 3, hold: 10, rush: true });
@@ -448,8 +539,10 @@ async function boot() {
     return true;
   };
   hud.onOpenSession = (id) => void openSession(id);
-  camera.holdWhile = () => hud.panelOpen;
+  camera.holdWhile = () => hud.panelOpen || (messagesPanel?.expanded ?? false);
   hud.onPanelChange = () => {
+    if (hud.panelOpen && matchMedia("(max-width: 560px)").matches && messagesPanel?.expanded)
+      messagesPanel.collapse(false);
     chars.selected = hud.openSessionId;
   };
   hud.fetchDay = async (personId): Promise<PersonDayResponse | null> => {
@@ -515,6 +608,23 @@ async function boot() {
       },
     );
     feed.start();
+    if (messagesPanel) {
+      const seed: MessageRecord = {
+        id: "demo-office-message",
+        seq: 1,
+        ts: Date.now(),
+        from: "Demo",
+        text: "Lunch in five! Everyone can read office messages here.",
+        audience: "everyone",
+        recipients: [],
+        notifyDesktop: false,
+        delivery: { people: [], socketSends: 0 },
+      };
+      messageModel.receive(seed);
+      messageModel.cursor = 1;
+      messageModel.lastRead = 1;
+      messagesPanel.refresh();
+    }
   } else {
     const checkBuild = kiosk ? reloadOnNewBuild() : null;
     connectViewer({
@@ -522,7 +632,13 @@ async function boot() {
       onMessage: ingest,
       onStatus: (s) => {
         hud.setStatus(s);
-        if (s === "open") checkBuild?.();
+        if (s === "open") {
+          checkBuild?.();
+          void messagesClient?.sync();
+        } else if (messagesClient) {
+          messagesClient.status = "Reconnecting — saved messages remain readable.";
+          messagesPanel?.refresh();
+        }
       },
     });
   }
@@ -604,6 +720,11 @@ async function boot() {
       });
     },
   });
+  games.onOpen = () => {
+    if (messagesPanel?.expanded) messagesPanel.collapse(false);
+    if (matchMedia("(max-width: 560px)").matches) hud.suspendPanel();
+  };
+  if (messagesPanel?.expanded) messagesPanel.onOpen();
   if (focusParam) {
     // with a live server the snapshot arrives later: focus as soon as the person exists
     const tryFocus = () => {

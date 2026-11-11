@@ -219,6 +219,9 @@ export class Hud {
   onPanelChange: () => void = () => {};
   /** send a poke / paper ball; null hides the poke buttons (kiosk, no server) */
   onPoke: ((req: PokeRequest) => Promise<PokeResult>) | null = null;
+  /** Open the one shared office composer (optionally preselect a person). */
+  onMessages: ((personId?: string) => void) | null = null;
+  onLogout: () => void = () => {};
   /** survives panel re-renders, so a half-typed message is not lost */
   private pokeBox: HTMLElement | null = null;
   private pokeFor: string | null = null;
@@ -326,10 +329,16 @@ export class Hud {
           : "";
     this.menu.setAttribute("role", "menu");
     this.menu.innerHTML = `
+      ${this.onMessages ? '<button type="button" class="pixel-btn open-messages" role="menuitem">Messages</button>' : ""}
       <a class="pixel-btn" role="menuitem" href="./stats${q}">Stats</a>
       <a class="pixel-btn" role="menuitem" href="./timelapse${q}">Timelapse</a>
       ${install}
       <form method="post" action="/api/logout"><button class="pixel-btn" type="submit" role="menuitem">Log out</button></form>`;
+    this.menu.querySelector(".open-messages")?.addEventListener("click", () => {
+      this.closeMenu();
+      this.onMessages?.();
+    });
+    this.menu.querySelector("form")?.addEventListener("submit", () => this.onLogout());
     this.menu.querySelector(".install")?.addEventListener("click", () => {
       this.closeMenu();
       void promptInstall();
@@ -437,6 +446,7 @@ export class Hud {
 
   openPanel(personId: string) {
     if (this.opts.kiosk) return;
+    this.panel.hidden = false;
     if (this.lookEditor?.personId !== personId) this.lookEditor = null;
     this.panelPerson = personId;
     this.panelSession = null;
@@ -448,6 +458,7 @@ export class Hud {
     if (this.opts.kiosk) return false;
     const s = this.model.sessions.get(sessionId);
     if (!s) return false;
+    this.panel.hidden = false;
     this.panelPerson = s.personId;
     this.panelSession = sessionId;
     this.loadDay(s.personId);
@@ -463,8 +474,14 @@ export class Hud {
     this.onPanelChange();
   }
 
+  /** Hide on a narrow screen without discarding the selected card or look draft. */
+  suspendPanel() {
+    this.panel.hidden = true;
+    this.onPanelChange();
+  }
+
   get panelOpen() {
-    return this.panelPerson !== null;
+    return this.panelPerson !== null && !this.panel.hidden;
   }
 
   /** Session whose agent card is open, if any. */
@@ -570,6 +587,7 @@ export class Hud {
   openLookEditor(personId: string) {
     const p = this.model.people.get(personId);
     if (!p || !this.onEditLook || this.opts.kiosk) return;
+    this.panel.hidden = false;
     this.panelPerson = personId;
     this.panelSession = null;
     this.lookEditor = { personId, box: this.buildLookEditor(p) };
@@ -701,15 +719,11 @@ export class Hud {
         (k) =>
           `<button type="button" class="pixel-btn" data-kind="${k.kind}" title="${k.title}">${k.label}</button>`,
       ).join("")}</div>
-      <form class="poke-msg">
-        <input name="text" maxlength="80" placeholder="Short message to their Mac" autocomplete="off">
-        <button class="pixel-btn" type="submit">Send</button>
-      </form>
+      ${this.onMessages ? '<button type="button" class="pixel-btn poke-message">Message</button>' : ""}
       <label class="poke-from">from <input name="from" maxlength="40" placeholder="your name"></label>
       <div class="poke-status" aria-live="polite"></div>`;
     const status = box.querySelector<HTMLElement>(".poke-status")!;
     const fromInput = box.querySelector<HTMLInputElement>("input[name=from]")!;
-    const textInput = box.querySelector<HTMLInputElement>("input[name=text]")!;
     fromInput.value = storedName();
     fromInput.addEventListener("change", () => {
       try {
@@ -731,16 +745,13 @@ export class Hud {
       });
       status.textContent = r.message;
       status.className = `poke-status ${r.ok ? "ok" : "err"}`;
-      if (r.ok && kind === "message") textInput.value = "";
     };
     for (const b of box.querySelectorAll<HTMLButtonElement>(".poke-btns button")) {
       b.addEventListener("click", () => void send(b.dataset.kind as InteractionKind));
     }
-    box.querySelector("form")!.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const text = textInput.value.trim();
-      if (text) void send("message", text);
-    });
+    box
+      .querySelector(".poke-message")
+      ?.addEventListener("click", () => this.onMessages?.(p.personId));
     // typing in the box must not trigger office keyboard shortcuts
     box.addEventListener("keydown", (e) => e.stopPropagation());
     return box;
