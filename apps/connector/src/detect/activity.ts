@@ -8,7 +8,8 @@
  *   reading  read/grep/glob/search tools
  *   running  bash/shell tools
  *   thinking assistant turn with no tool yet, a tool result waiting for the model, unknown tools
- *   waiting  turn finished (end_turn / task_complete / interrupted)
+ *   waiting  turn finished (end_turn / task_complete / interrupted), or a question to the human
+ *            is open (AskUserQuestion, Codex request_user_input, purrness_ask_question)
  *   idle     no transcript writes for IDLE_AFTER_MS while the process is alive
  */
 import { type Activity, IDLE_AFTER_MS } from "@agent-office/protocol";
@@ -72,9 +73,13 @@ const RUNNING = new Set([
   "write_stdin",
 ]);
 
+/** Tools that put a question to the human and wait for the answer (MCP prefixes allowed). */
+const ASKING = /(^|_)(ask_?user_?question|purrness_ask_question|request_?user_?input)$/;
+
 /** Tool name -> activity. Case-insensitive; unknown tools (incl. MCP tools) -> thinking. */
 export function toolActivity(name: string): Activity {
   const n = name.trim().toLowerCase();
+  if (ASKING.test(n)) return "waiting";
   if (TYPING.has(n)) return "typing";
   if (READING.has(n)) return "reading";
   if (RUNNING.has(n)) return "running";
