@@ -106,6 +106,8 @@ type OfficeApi = {
   injectEvent(msg: unknown): boolean;
   /** open a session's agent card (like clicking its character); false if unknown */
   openSession(sessionId: string): boolean;
+  /** open a person's panel (like clicking their nameplate) */
+  openPerson(personId: string): void;
   snapshotPng(): Promise<string | null>;
   characters(): number;
   /** office cats right now (not counting the ones walking out) */
@@ -314,6 +316,7 @@ async function boot() {
   let messagesPanel: MessagesPanel | null = null;
   let messagesClient: MessagesClient | null = null;
   const messageModel = new MessageModel(storedMessageRead(), () => Date.now() + model.clockSkew);
+  let demoMe = false;
   /** runs after every message (e.g. a ?focus= waiting for its person to show up) */
   let afterIngest = () => {};
   const ingest = (msg: ServerToViewer) => {
@@ -337,9 +340,15 @@ async function boot() {
       return;
     }
     const changes = model.apply(msg);
+    // the demo has no codes: start as the first person (the Me menu switches freely)
+    if (demo && !demoMe && model.people.size > 0) {
+      demoMe = true;
+      hud.me = model.people.keys().next().value ?? null;
+    }
     partyWorld.setState(model.party);
     games?.refresh();
     messagesPanel?.refresh();
+    hud.refreshMe();
     ensureCapacity();
     colony.sync(catCount(model.people.size));
     for (const ch of changes) {
@@ -684,18 +693,16 @@ async function boot() {
       return { ok: false, message: "could not reach the office" };
     }
   };
+  // one "me" everywhere: the games drawer plays as the person this browser is confirmed to be
+  hud.onMeChange = (me) => games?.setMe(me);
+  // ?key= viewers have no session cookie: without the key the server would not say who I am
+  const keyQuery = key ? `?key=${encodeURIComponent(key)}` : "";
   if (demo) hud.editAnyLook = true;
   else if (!kiosk) {
     hud.onClaim = {
       send: async (personId) => {
         const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim`, {});
-        return r.ok
-          ? {
-              ok: true,
-              message:
-                "code sent as a notification on your Mac (needs notifications on for the Agent Office connector). Nothing after 30 s? Send again.",
-            }
-          : r;
+        return r.ok ? { ok: true, message: "code sent" } : r;
       },
       verify: async (personId, code) => {
         const r = await postJson(`/api/people/${encodeURIComponent(personId)}/claim/verify`, {
@@ -704,10 +711,10 @@ async function boot() {
         return r.ok ? { ok: true, message: "that's you!" } : r;
       },
       forget: async () => {
-        await fetch("/api/me", { method: "DELETE" }).catch(() => {});
+        await fetch(`/api/me${keyQuery}`, { method: "DELETE" }).catch(() => {});
       },
     };
-    void fetch("/api/me")
+    void fetch(`/api/me${keyQuery}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ personId?: string | null }>) : null))
       .then((me) => {
         hud.me = me?.personId ?? null;
@@ -1018,11 +1025,15 @@ async function boot() {
     return [...pods].sort((a, b) => a - b).map(podCenter);
   };
   const focusParam = params.get("focus");
+  hud.onOpenMe = (id) => {
+    hud.openPanel(id);
+    void focusPerson(id);
+  };
   games = new PartyPanel(host, model, {
     demo: !!demo,
     key,
     focus: (id) => void focusPerson(id, 4),
-    customize: (id) => hud.openLookEditor(id),
+    claim: (after) => hud.openMeMenu({ why: "Confirm it's you to play.", after }),
     onDemo: (mutation) => {
       const avatar = model.people.get(mutation.personId)?.avatar;
       if (!avatar) return;
@@ -1070,6 +1081,7 @@ async function boot() {
     if (matchMedia("(max-width: 560px)").matches) hud.suspendPanel();
   };
   if (messagesPanel?.expanded) messagesPanel.onOpen();
+  games.setMe(hud.me);
   if (focusParam) {
     // with a live server the snapshot arrives later: focus as soon as the person exists
     const tryFocus = () => {
@@ -1184,6 +1196,7 @@ async function boot() {
       speed = Math.max(0, k);
     },
     openSession,
+    openPerson: (personId) => hud.openPanel(personId),
   };
   window.__office = api;
   await document.fonts?.ready;

@@ -4,7 +4,6 @@ import { loginIfLoggedOut } from "./net/viewer.ts";
 import type { OfficeModel } from "./state/officeModel.ts";
 import "./ui/party.css";
 
-const STORAGE_KEY = "agent-office.party.person";
 const button = (label: string, action: () => void) => {
   const b = document.createElement("button");
   b.type = "button";
@@ -19,13 +18,16 @@ export class PartyPanel {
   close(): void {
     this.drawer.hidden = true;
   }
+  /** who moves are sent as: `me` while they are in the office, otherwise nobody */
   private person = "";
+  private me: string | null = null;
   private busy = false;
   private until = 0;
   private rosterKey = "";
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly drawer = document.createElement("section");
-  private readonly player = document.createElement("select");
+  private readonly player = document.createElement("p");
+  private readonly confirm: HTMLButtonElement;
   private readonly target = document.createElement("select");
   private readonly equipment = document.createElement("p");
   private readonly notice = document.createElement("p");
@@ -40,22 +42,19 @@ export class PartyPanel {
       demo: boolean;
       key: string | null;
       focus: (id: string) => void;
-      customize: (id: string) => void;
+      /** a spectator wants to play: ask who they are (the Me menu), then come back */
+      claim: (then: () => void) => void;
       onDemo: (mutation: PartyMutation) => void;
     },
   ) {
-    try {
-      this.person = localStorage.getItem(STORAGE_KEY) ?? "";
-    } catch {
-      /* optional */
-    }
-    const launch = button("✦ Office games", () => {
+    const open = () => {
       this.onOpen();
       this.drawer.hidden = false;
       this.refresh();
-      this.options.focus(this.person);
+      if (this.person) this.options.focus(this.person);
       this.drawer.focus();
-    });
+    };
+    const launch = button("✦ Office games", open);
     launch.classList.add("party-launch");
     this.drawer.className = "party-panel pixel-box";
     this.drawer.hidden = true;
@@ -77,26 +76,17 @@ export class PartyPanel {
     const intro = document.createElement("p");
     intro.textContent = options.demo
       ? "LOCAL DEMO · scores stay in this tab"
-      : "Pick a player and send a move to everyone watching.";
+      : "Send a move to everyone watching.";
     this.player.id = "party-person";
-    this.player.onchange = () => {
-      this.person = this.player.value;
-      try {
-        localStorage.setItem(STORAGE_KEY, this.person);
-      } catch {
-        /* optional */
-      }
-      this.refreshTargets();
-      this.refresh();
-      this.options.focus(this.person);
-    };
+    this.player.className = "party-player";
+    // moves are yours: a spectator confirms who they are first (the Me menu, top right)
+    this.confirm = button("Who are you? Confirm to play", () => {
+      this.drawer.hidden = true;
+      this.options.claim(open);
+    });
+    this.confirm.classList.add("party-confirm");
     this.target.id = "party-target";
     this.target.onchange = () => this.updateButtons();
-    const customize = button("Customize look", () => {
-      this.drawer.hidden = true;
-      this.options.customize(this.person);
-    });
-    this.controls.push(customize);
     this.equipment.className = "party-equipment";
     const moves = document.createElement("div");
     moves.className = "party-actions";
@@ -130,7 +120,7 @@ export class PartyPanel {
     const rules = document.createElement("p");
     rules.className = "party-rules";
     rules.textContent =
-      "Choose items and a ride in Customize look. Tag earns you +1; high-fives give both buddies +1. A vehicle race rolls a server dice for 1–6 points. This office uses shared team access: pick your own character.";
+      "Choose items and a ride in Customize look (your portrait, top right). Tag earns you +1; high-fives give both buddies +1. A vehicle race rolls a server dice for 1–6 points.";
     this.notice.className = "party-notice";
     this.notice.setAttribute("role", "status");
     this.notice.setAttribute("aria-live", "polite");
@@ -141,9 +131,9 @@ export class PartyPanel {
     this.drawer.append(
       header,
       intro,
-      this.field("Playing as", this.player),
+      this.player,
+      this.confirm,
       this.equipment,
-      customize,
       this.field("Buddy", this.target),
       moves,
       rules,
@@ -177,22 +167,36 @@ export class PartyPanel {
     return this.model.sessionsOf(id).some((s) => !s.offline);
   }
 
+  /** The person this browser is confirmed to be (the Me chip); null = a spectator. */
+  setMe(me: string | null) {
+    if (me === this.me) return;
+    this.me = me;
+    this.rosterKey = "";
+    this.refresh();
+  }
+
   /** Called by office events. No polling, timers or API reads are needed. */
   refresh() {
     const people = [...this.model.people.values()].filter((p) => this.online(p.personId));
-    const roster = people.map((p) => `${p.personId}:${p.name}`).join("|");
+    const roster = `${this.me}>${people.map((p) => `${p.personId}:${p.name}`).join("|")}`;
     if (roster !== this.rosterKey) {
       this.rosterKey = roster;
-      this.player.replaceChildren();
-      for (const p of people) this.player.add(new Option(p.name, p.personId));
-      if (!people.some((p) => p.personId === this.person)) this.person = people[0]?.personId ?? "";
-      this.player.value = this.person;
+      // you play as yourself, and only while your Mac is in the office (the server checks)
+      this.person = people.some((p) => p.personId === this.me) ? (this.me ?? "") : "";
+      const name = this.me ? this.model.people.get(this.me)?.name : undefined;
+      this.player.textContent = this.person
+        ? `Playing as ${name}`
+        : this.me
+          ? `${name ?? "You"}: your Mac is not in the office right now.`
+          : "You are watching.";
+      this.confirm.hidden = !!this.me;
       this.refreshTargets();
     }
     const avatar = this.model.people.get(this.person)?.avatar;
+    this.equipment.hidden = !avatar;
     this.equipment.textContent = avatar
       ? `Left: ${avatar.leftHand} · Right: ${avatar.rightHand} · Ride: ${avatar.vehicle}`
-      : "Waiting for someone to join the office.";
+      : "";
     this.board.replaceChildren();
     const leaders = Object.entries(this.model.party.scores)
       .sort((a, b) => b[1] - a[1])
@@ -215,7 +219,6 @@ export class PartyPanel {
   }
 
   private updateButtons() {
-    this.player.disabled = this.busy;
     this.target.disabled = this.busy;
     const avatar = this.model.people.get(this.person)?.avatar;
     for (const b of this.controls) {

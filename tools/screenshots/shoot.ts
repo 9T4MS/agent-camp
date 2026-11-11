@@ -1197,6 +1197,7 @@ declare global {
         focusPerson(personId: string, zoom?: number): boolean;
       };
       snapshotPng(): Promise<string | null>;
+      openPerson(personId: string): void;
       injectEvent(msg: unknown): boolean;
       openSession(sessionId: string): boolean;
       setSpeed(k: number): void;
