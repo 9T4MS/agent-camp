@@ -112,6 +112,8 @@ import { findPath, findPathPx } from "./pathing.ts";
 
 const WALK_SPEED = 44;
 const BUBBLE_SECONDS = 2.6;
+/** seats sort by their bottom edge, 5 px below a sitter's feet */
+const SEAT_LIFT = 6;
 /** at most this many speech bubbles at once (one per pod) so busy floors stay readable */
 const MAX_BUBBLES = 6;
 
@@ -1116,7 +1118,8 @@ export class CharacterManager {
 
   private place(c: SessionCharacter) {
     c.sprite.position.set(Math.round(c.x), Math.round(c.y));
-    c.sprite.zIndex = c.y;
+    c.sprite.zIndex =
+      c.y + (c.mode === "poi" && c.poi?.spot && c.poi.pose === "sit" ? SEAT_LIFT : 0);
     // at the bar counter (stool, back to the camera) the glass stands on the counter beside them
     const onCounter =
       c.mugT > 0 && c.mode === "poi" && c.facing === "up" && !!c.poi && isBarStool(c.poi);
@@ -1131,7 +1134,7 @@ export class CharacterManager {
       const side = c.facing === "left" ? -6 : c.facing === "right" ? 6 : 6;
       const lift = c.anim === "sitFront" ? 4 : 0;
       c.mug.position.set(Math.round(c.x + side), Math.round(c.y - 6 - lift));
-      c.mug.zIndex = c.y + 0.5;
+      c.mug.zIndex = c.sprite.zIndex + 0.5;
       c.mug.texture = CARRY_TEXTURES[c.carry]()[Math.floor(this.clock * 2.5) % 2]!;
     }
   }
