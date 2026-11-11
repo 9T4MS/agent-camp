@@ -118,6 +118,30 @@ describe("negative parsing", () => {
       expect(parseConnectorMessage({ ...snap, data: { sessions: [s] } }).ok).toBe(false);
     }
   });
+  test("party state is optional for older snapshots and validates equipment and rolls", () => {
+    expect(parseViewerMessage(load("office.snapshot")).ok).toBe(true);
+    const message = load("party.updated") as {
+      data: { party: { events: Record<string, unknown>[]; scores: Record<string, number> } };
+    };
+    const event = message.data.party.events[0]!;
+    for (const bad of [
+      { ...event, item: "invented-item" },
+      { ...event, vehicle: "invented-vehicle" },
+      { ...event, roll: 7 },
+      { ...event, roll: 0 },
+      { ...event, at: -1 },
+    ])
+      expect(
+        parseViewerMessage({
+          ...message,
+          data: { party: { ...message.data.party, events: [bad] } },
+        }).ok,
+      ).toBe(false);
+    expect(
+      parseViewerMessage({ ...message, data: { party: { ...message.data.party, profiles: {} } } })
+        .ok,
+    ).toBe(false);
+  });
   test("invalid avatar in avatar.updated", () => {
     const m = load("avatar.updated") as { data: { avatar: Record<string, unknown> } };
     const avatar = { ...m.data.avatar, hairStyle: "afro-unicorn" };

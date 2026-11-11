@@ -11,6 +11,7 @@ import {
   InteractRequest,
   type InteractResponse,
   type MessageOf,
+  PartyState,
   type ServerToConnector,
   type ViewerEvent,
 } from "@agent-office/protocol";
@@ -189,7 +190,10 @@ export class OfficeApp {
     });
     const v = serverVersion(this.env);
     const version = v !== "dev" ? v : this.latest.current;
-    return { ...snap, data: { ...snap.data, today, ...(version ? { version } : {}) } };
+    return {
+      ...snap,
+      data: { ...snap.data, today, party: this.party.state(now), ...(version ? { version } : {}) },
+    };
   }
 
   alarm(): void {
@@ -243,30 +247,41 @@ export class OfficeApp {
 
     if (path === "/api/interact" && method === "POST") return this.interact(req);
     if (path === "/api/party") {
-      if (method === "GET") {
-        if (!(await isAuthorized(req, this.env, this.now())))
-          return json({ error: "login required" }, { status: 401 });
-        return json(this.party.state(this.now()));
-      }
-      if (method === "POST") {
-        if (!bearerOk(req, this.env)) return json({ error: "unauthorized" }, { status: 401 });
-        const body = await readPartyBody(req);
-        if (body.status)
-          return json(
-            { error: body.status === 413 ? "too large" : "invalid JSON" },
-            { status: body.status },
-          );
-        const now = this.now();
-        const online = new Set(
-          this.hub
-            .state()
-            .people.filter((p) => this.hub.liveSocketsOf(p.personId, now).length > 0)
-            .map((p) => p.personId),
+      if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
+      const now = this.now();
+      const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+      const retryAfter = this.party.requestAllowed(who, now);
+      if (retryAfter !== null)
+        return json(
+          { error: "slow down" },
+          { status: 429, headers: { "retry-after": String(retryAfter) } },
         );
-        const result = this.party.mutate(body.value, online, now);
-        return json(result.body, { status: result.status });
+      if (!(await isAuthorized(req, this.env, now)))
+        return json({ error: "unauthorized" }, { status: 401 });
+      const body = await readPartyBody(req);
+      if (body.status)
+        return json(
+          { error: body.status === 413 ? "too large" : "invalid JSON" },
+          { status: body.status },
+        );
+      const actionAt = this.now();
+      const online = new Map(
+        this.hub
+          .state()
+          .people.filter((p) => this.hub.liveSocketsOf(p.personId, actionAt).length > 0)
+          .map((p) => [p.personId, p.avatar] as const),
+      );
+      const result = this.party.mutate(body.value, online, actionAt);
+      if (result.status === 200) {
+        const party = PartyState.parse(result.body);
+        this.transport.broadcast(
+          JSON.stringify(envelope("party.updated", { party }, { ts: actionAt })),
+        );
       }
-      return json({ error: "method not allowed" }, { status: 405 });
+      return json(result.body, {
+        status: result.status,
+        ...(result.retryAfter ? { headers: { "retry-after": String(result.retryAfter) } } : {}),
+      });
     }
 
     const look = /^\/api\/people\/([^/]{1,64})\/avatar$/.exec(path);

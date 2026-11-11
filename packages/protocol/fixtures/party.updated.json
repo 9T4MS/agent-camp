@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "type": "party.updated",
+  "id": "01PARTY00000000000000000000",
+  "ts": 1793174400000,
+  "data": {
+    "party": {
+      "events": [
+        {
+          "id": "party-example",
+          "personId": "anna",
+          "action": "use",
+          "item": "lightsaber",
+          "vehicle": "none",
+          "at": 1793174400000
+        }
+      ],
+      "scores": { "anna": 3 }
+    }
+  }
+}

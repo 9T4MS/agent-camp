@@ -1,121 +1,152 @@
-/** Server-owned wardrobe, short-lived shared actions and persistent party scores. */
+/** Server-owned party actions and scores. Equipment belongs to the canonical avatar. */
 import {
-  DEFAULT_PARTY_LOOK,
+  type AvatarSpec,
   type PartyEvent,
-  type PartyLook,
   PartyMutation,
-  PartyState,
+  type PartyState,
 } from "@agent-office/protocol";
 import { z } from "zod";
 import type { Store } from "./store.ts";
 
 export const PARTY_BODY_MAX_BYTES = 8 * 1024;
 export const PARTY_COOLDOWN_MS = 1200;
+export const PARTY_REQUEST_INTERVAL_MS = 1200;
 export const PARTY_EVENT_TTL_MS = 15_000;
+export const PARTY_MAX_REQUESTERS = 512;
 const STORAGE_KEY = "party.v1";
-const MAX_PROFILES = 1000;
+const REQUESTS_KEY = "party.requests.v1";
+const MAX_PARTICIPANTS = 1000;
 const MAX_SCORE = 1_000_000;
-// Optional for compatibility with wardrobes saved before cooldowns were durable.
-const StoredParty = PartyState.extend({
-  cooldowns: z.record(z.string(), z.number().int().nonnegative()).default({}),
+const Times = z.record(z.string().max(128), z.number().int().nonnegative());
+// z.object strips the former parallel wardrobe when loading an older party record.
+const StoredParty = z.object({
+  scores: z
+    .record(z.string(), z.number().int().nonnegative())
+    .refine((r) => Object.keys(r).length <= MAX_PARTICIPANTS),
+  cooldowns: Times.default({}).refine((r) => Object.keys(r).length <= MAX_PARTICIPANTS),
 });
-
-type PartyResult = { status: number; body: PartyState | { error: string } };
+type PartyResult = { status: number; body: PartyState | { error: string }; retryAfter?: number };
 
 export class Party {
-  private profiles: Record<string, PartyLook> = Object.create(null);
   private scores: Record<string, number> = Object.create(null);
   private events: PartyEvent[] = [];
   private lastAction = new Map<string, number>();
+  private requests = new Map<string, number>();
 
   constructor(private store: Store) {
-    const raw = store.kvGet(STORAGE_KEY);
-    if (!raw) return;
     try {
-      const parsed = StoredParty.safeParse(JSON.parse(raw));
+      const raw = store.kvGet(STORAGE_KEY);
+      const parsed = StoredParty.safeParse(raw ? JSON.parse(raw) : null);
       if (parsed.success) {
-        this.profiles = Object.assign(Object.create(null), parsed.data.profiles);
         this.scores = Object.assign(Object.create(null), parsed.data.scores);
         this.lastAction = new Map(Object.entries(parsed.data.cooldowns));
+        // Drop obsolete cosmetic data from the old record on migration.
+        if (
+          raw &&
+          Object.keys(JSON.parse(raw)).some((key) => key !== "scores" && key !== "cooldowns")
+        )
+          this.persist();
       }
     } catch {
-      // A malformed optional party record must not stop office presence.
+      /* Optional party data must never stop office presence. */
     }
+    try {
+      const raw = store.kvGet(REQUESTS_KEY);
+      const parsed = Times.safeParse(raw ? JSON.parse(raw) : null);
+      if (parsed.success && Object.keys(parsed.data).length <= PARTY_MAX_REQUESTERS) {
+        this.requests = new Map(Object.entries(parsed.data));
+      }
+    } catch {
+      /* Corrupt optional request limiter starts empty. */
+    }
+  }
+
+  /** Apply before reading a body, including malformed/unauthorized POST attempts. */
+  requestAllowed(requester: string, now: number): number | null {
+    for (const [key, at] of this.requests)
+      if (now - at >= PARTY_REQUEST_INTERVAL_MS) this.requests.delete(key);
+    const key = requester.slice(0, 128);
+    const at = this.requests.get(key);
+    if (at !== undefined)
+      return Math.max(1, Math.ceil((at + PARTY_REQUEST_INTERVAL_MS - now) / 1000));
+    if (this.requests.size >= PARTY_MAX_REQUESTERS) {
+      const firstExpiry = Math.min(...this.requests.values()) + PARTY_REQUEST_INTERVAL_MS;
+      return Math.max(1, Math.ceil((firstExpiry - now) / 1000));
+    }
+    this.requests.set(key, now);
+    this.store.kvPut(REQUESTS_KEY, JSON.stringify(Object.fromEntries(this.requests)));
+    return null;
   }
 
   state(now: number): PartyState {
     this.events = this.events.filter((event) => now - event.at < PARTY_EVENT_TTL_MS).slice(-32);
-    for (const [personId, at] of this.lastAction) {
+    for (const [personId, at] of this.lastAction)
       if (now - at >= PARTY_COOLDOWN_MS) this.lastAction.delete(personId);
-    }
-    return {
-      profiles: { ...this.profiles },
-      scores: { ...this.scores },
-      events: [...this.events],
-    };
+    return { scores: { ...this.scores }, events: [...this.events] };
   }
 
-  mutate(input: unknown, online: ReadonlySet<string>, now: number): PartyResult {
+  mutate(input: unknown, online: ReadonlyMap<string, AvatarSpec>, now: number): PartyResult {
     const parsed = PartyMutation.safeParse(input);
     const error = (status: number, message: string): PartyResult => ({
       status,
       body: { error: message },
     });
-    if (!parsed.success) return error(400, "Invalid party look or action");
-    const { personId, look, action, targetId } = parsed.data;
-    if (!online.has(personId)) return error(404, "Choose someone currently in the office");
+    if (!parsed.success) return error(400, "Invalid party action");
+    const { personId, action, targetId, hand } = parsed.data;
+    const avatar = online.get(personId);
+    if (!avatar) return error(404, "Choose someone currently in the office");
     if (targetId && !online.has(targetId)) return error(404, "Target is no longer in the office");
-    if ((action === "tag" || action === "high-five") && (!targetId || targetId === personId)) {
+    if ((action === "tag" || action === "high-five") && (!targetId || targetId === personId))
       return error(400, "Choose another person for this action");
-    }
-    const current = look ?? this.profiles[personId] ?? DEFAULT_PARTY_LOOK;
-    if (action === "use" && current.item === "none") return error(400, "Equip an item first");
-    if (action === "race" && current.vehicle === "none") return error(400, "Equip a vehicle first");
-    // Clean old entries even when there is no viewer polling.
+    const item =
+      hand === "left"
+        ? avatar.leftHand
+        : hand === "right"
+          ? avatar.rightHand
+          : avatar.rightHand !== "none"
+            ? avatar.rightHand
+            : avatar.leftHand;
+    if (action === "use" && item === "none") return error(400, "Equip an item in that hand first");
+    if (action === "race" && avatar.vehicle === "none") return error(400, "Equip a vehicle first");
     this.state(now);
-    if (action && now - (this.lastAction.get(personId) ?? -Infinity) < PARTY_COOLDOWN_MS) {
-      return error(429, "Give your character a moment before the next action");
-    }
-    const tracked = new Set([...Object.keys(this.profiles), ...Object.keys(this.scores)]);
+    const last = this.lastAction.get(personId);
+    if (last !== undefined && now - last < PARTY_COOLDOWN_MS)
+      return {
+        ...error(429, "Give your character a moment before the next action"),
+        retryAfter: Math.max(1, Math.ceil((last + PARTY_COOLDOWN_MS - now) / 1000)),
+      };
+    const tracked = new Set([...Object.keys(this.scores), ...this.lastAction.keys()]);
     const added = [personId, ...(action === "high-five" && targetId ? [targetId] : [])].filter(
       (id) => !tracked.has(id),
     );
-    if (tracked.size + added.length > MAX_PROFILES) {
-      return error(409, "The office wardrobe is full");
+    if (tracked.size + added.length > MAX_PARTICIPANTS)
+      return error(409, "The office party is full");
+    this.lastAction.set(personId, now);
+    const event: PartyEvent = {
+      id: crypto.randomUUID(),
+      personId,
+      action,
+      item,
+      vehicle: avatar.vehicle,
+      at: now,
+      ...(targetId ? { targetId } : {}),
+    };
+    if (action === "race") event.roll = 1 + Math.floor(Math.random() * 6);
+    if (action === "race" || action === "tag" || action === "high-five") {
+      this.scores[personId] = Math.min(MAX_SCORE, (this.scores[personId] ?? 0) + (event.roll ?? 1));
+      if (action === "high-five" && targetId)
+        this.scores[targetId] = Math.min(MAX_SCORE, (this.scores[targetId] ?? 0) + 1);
     }
-    if (look) this.profiles[personId] = look;
-    if (action) {
-      this.lastAction.set(personId, now);
-      const event: PartyEvent = {
-        id: crypto.randomUUID(),
-        personId,
-        action,
-        item: current.item,
-        at: now,
-        ...(targetId ? { targetId } : {}),
-      };
-      if (action === "race") event.roll = 1 + Math.floor(Math.random() * 6);
-      if (action === "race" || action === "tag" || action === "high-five") {
-        this.scores[personId] = Math.min(
-          MAX_SCORE,
-          (this.scores[personId] ?? 0) + (event.roll ?? 1),
-        );
-        if (action === "high-five" && targetId) {
-          this.scores[targetId] = Math.min(MAX_SCORE, (this.scores[targetId] ?? 0) + 1);
-        }
-      }
-      this.events.push(event);
-    }
+    this.events.push(event);
+    this.persist();
+    return { status: 200, body: this.state(now) };
+  }
+
+  private persist(): void {
     this.store.kvPut(
       STORAGE_KEY,
-      JSON.stringify({
-        profiles: this.profiles,
-        scores: this.scores,
-        events: [],
-        cooldowns: Object.fromEntries(this.lastAction),
-      }),
+      JSON.stringify({ scores: this.scores, cooldowns: Object.fromEntries(this.lastAction) }),
     );
-    return { status: 200, body: this.state(now) };
   }
 }
 
