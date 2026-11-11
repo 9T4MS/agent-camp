@@ -11,7 +11,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { CLOSE_BAD_MESSAGE } from "@agent-office/protocol";
 import type { ServerWebSocket } from "bun";
-import { type AppEnv, OfficeApp, serverVersion, viewerAllowed } from "../core/app.ts";
+import { type AppEnv, OfficeApp, serverVersion } from "../core/app.ts";
+import { gate } from "../core/auth.ts";
 import { SqlStore } from "../core/store.ts";
 
 type WsData = { role: "connector" | "viewer"; socketId: string };
@@ -51,11 +52,16 @@ const store = new SqlStore(
 );
 
 const viewers = new Set<ServerWebSocket<WsData>>();
+const connectors = new Map<string, ServerWebSocket<WsData>>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 const app = new OfficeApp(env, store, {
   broadcast: (data) => {
     for (const ws of viewers) ws.send(data);
+  },
+  sendToConnector: (socketId, data) => {
+    const ws = connectors.get(socketId);
+    return !!ws && ws.send(data) > 0;
   },
   scheduleAlarm: (at) => {
     if (timer) clearTimeout(timer);
@@ -89,9 +95,9 @@ const server = Bun.serve<WsData>({
         headers: { "content-type": "text/x-shellscript; charset=utf-8" },
       });
     }
+    const blocked = await gate(req, env);
+    if (blocked) return blocked;
     if (path === "/ws/connector" || path === "/ws/viewer") {
-      if (path === "/ws/viewer" && !viewerAllowed(url, env))
-        return new Response("viewer key required", { status: 401 });
       const role = path === "/ws/connector" ? "connector" : "viewer";
       if (srv.upgrade(req, { data: { role, socketId: crypto.randomUUID() } })) return undefined;
       return new Response("expected websocket upgrade", { status: 426 });
@@ -105,7 +111,7 @@ const server = Bun.serve<WsData>({
       if (ws.data.role === "viewer") {
         viewers.add(ws);
         ws.send(app.viewerSnapshot());
-      }
+      } else connectors.set(ws.data.socketId, ws);
     },
     message(ws, message) {
       if (message === "ping") return void ws.send("pong");
@@ -117,7 +123,10 @@ const server = Bun.serve<WsData>({
     },
     close(ws) {
       if (ws.data.role === "viewer") viewers.delete(ws);
-      else app.connectorClosed(ws.data.socketId);
+      else {
+        connectors.delete(ws.data.socketId);
+        app.connectorClosed(ws.data.socketId);
+      }
     },
   },
 });

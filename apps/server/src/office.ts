@@ -45,6 +45,19 @@ export class Office extends DurableObject<Env> {
           }
         }
       },
+      sendToConnector: (socketId, data) => {
+        for (const ws of ctx.getWebSockets(CONNECTOR)) {
+          const a = ws.deserializeAttachment() as Attachment | null;
+          if (a?.socketId !== socketId) continue;
+          try {
+            ws.send(data);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      },
       scheduleAlarm: (at) => this.scheduleAlarm(at),
       waitUntil: (p) => ctx.waitUntil(p),
     });

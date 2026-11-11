@@ -125,6 +125,10 @@ an activity verb (typing/reading/thinking/running/waiting/idle), the subagent co
 session started, the connector version, and the **machine name** you chose (`machine_name`,
 defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like).
 
+Received: when someone in the office waves at you or sends you a short message, the
+connector shows it as a macOS notification (at most one every 5 s; macOS may list it under
+"Script Editor"). Turn it off with `agent-office configure --notifications false`.
+
 Never sent: prompts, responses, code, file contents or paths, commands, tool output, or
 anything else from a transcript. A unit test feeds a transcript containing a fake secret and
 checks it never appears in any outgoing message. History keeps only events (who, which agent,
@@ -134,13 +138,20 @@ project folder name, subagent counts), never content.
 
 | URL                  | What                                                                  |
 | -------------------- | --------------------------------------------------------------------- |
-| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. |
+| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer or send a short message (it pops up as a notification on their Mac), or throw a paper ball (office only). Click the cat to pet it. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
 
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?nohud=1`, `?demo=busy` (no
-server needed). If the server sets `VIEWER_KEY`, add `?key=…`.
+server needed).
+
+Everything is behind the office password (the same one as the connector's): the first visit
+shows a login page and the browser stays logged in for 30 days. If the server also sets
+`VIEWER_KEY`, `?key=…` links (handy for the kiosk iPad) skip the login.
+
+When a Mac goes to sleep or loses its network, its agents fade out with their screens off
+after about 45 s (one missed heartbeat), and leave the office after 3 minutes.
 
 ![Agent card](screenshots/11-agent-card-laptop.png)
 
@@ -216,8 +227,8 @@ password. Teammates run
 `curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/install.sh | sh`.
 Open `https://<worker-url>/?kiosk=1&recorder=1` on the office iPad.
 
-**4. Optional extras** (same Variables and Secrets page): `VIEWER_KEY` (secret; watching then
-needs `?key=…`), and AI avatars from descriptions with `GENUI_PROVIDER=anthropic` +
+**4. Optional extras** (same Variables and Secrets page): `VIEWER_KEY` (secret; a `?key=…`
+link that skips the login page), and AI avatars from descriptions with `GENUI_PROVIDER=anthropic` +
 secret `ANTHROPIC_API_KEY`, or `GENUI_PROVIDER=jev` + secret `AI_GATEWAY_API_KEY` (Vercel AI
 Gateway); `GENUI_PROVIDER` is a plain *Text* variable. Everything works without them (AI off).
 Deploys keep what you add there; only the variables listed in `apps/server/wrangler.toml` are

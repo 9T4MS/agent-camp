@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "session.connectionChanged",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "personId": "anna",
+    "sessionId": "c_1a2b3c:3f9a1c2e7b4d",
+    "offline": true
+  }
+}

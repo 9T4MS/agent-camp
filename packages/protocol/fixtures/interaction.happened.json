@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "interaction.happened",
+  "id": "01KD8QZ0000000000000000001",
+  "ts": 1793174401000,
+  "data": {
+    "kind": "paper",
+    "personId": "anna",
+    "from": "Martin"
+  }
+}

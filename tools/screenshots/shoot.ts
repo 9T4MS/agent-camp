@@ -119,6 +119,7 @@ async function context(vp: Viewport): Promise<BrowserContext> {
     deviceScaleFactor: 1,
     timezoneId: TIMEZONE,
     locale: "en-GB",
+    extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
   });
   return contexts[vp];
 }

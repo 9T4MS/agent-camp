@@ -10,6 +10,7 @@ import {
   type AgentKind,
   type AvatarSpec,
   avatarFromSeed,
+  type InteractionKind,
   type PersonView,
   type ServerToViewer,
   type SessionView,
@@ -36,6 +37,8 @@ export type SessionState = {
   activitySince: number;
   /** machine label from the connector, if it sent one */
   machine: string | undefined;
+  /** its connector stopped heartbeating (laptop asleep / offline) */
+  offline: boolean;
   /** most subagents seen at once for this session (since this viewer saw it) */
   peakSubagents: number;
   /** activity changes seen by this viewer (client clock), oldest first, pruned to ~1 h */
@@ -68,6 +71,15 @@ export type ModelChange =
       sessionId: string;
       count: number;
       previous: number;
+    }
+  | { kind: "connectionChanged"; personId: string; sessionId: string; offline: boolean }
+  | {
+      kind: "interaction";
+      interaction: InteractionKind;
+      personId: string | undefined;
+      from: string | undefined;
+      text: string | undefined;
+      delivered: number | undefined;
     };
 
 export type OfficeStats = {
@@ -252,6 +264,23 @@ export class OfficeModel {
         }
         break;
       }
+      case "session.connectionChanged": {
+        const s = this.sessions.get(msg.data.sessionId);
+        if (s) this.setOffline(s, msg.data.offline, out);
+        break;
+      }
+      case "interaction.happened": {
+        const d = msg.data;
+        out.push({
+          kind: "interaction",
+          interaction: d.kind,
+          personId: d.personId,
+          from: d.from,
+          text: d.text,
+          delivered: d.delivered,
+        });
+        break;
+      }
       case "avatar.updated": {
         const p = this.people.get(msg.data.personId);
         if (p) {
@@ -266,6 +295,12 @@ export class OfficeModel {
   }
 
   // ---- internals ------------------------------------------------------------------------
+  private setOffline(s: SessionState, offline: boolean, out: ModelChange[]) {
+    if (s.offline === offline) return;
+    s.offline = offline;
+    out.push({ kind: "connectionChanged", personId: s.personId, sessionId: s.sessionId, offline });
+  }
+
   private logActivity(s: SessionState) {
     const now = this.now();
     s.activityLog.push({ activity: s.activity, at: now });
@@ -358,6 +393,7 @@ export class OfficeModel {
         desk: this.freeDesk(personId),
         activitySince: this.now(),
         machine: sv.machine,
+        offline: !!sv.offline,
         peakSubagents: sv.subagents,
         activityLog: [{ activity: sv.activity, at: this.now() }],
       };
@@ -370,6 +406,7 @@ export class OfficeModel {
     s.agent = sv.agent;
     s.project = sv.project;
     s.machine = sv.machine;
+    this.setOffline(s, !!sv.offline, out);
     if (s.activity !== sv.activity) {
       const previous = s.activity;
       s.activity = sv.activity;

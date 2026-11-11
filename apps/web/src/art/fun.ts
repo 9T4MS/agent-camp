@@ -288,6 +288,20 @@ export const birdTextures = once(() => {
   return framesOf(pc, fw, fh, 4);
 });
 
+/** Crumpled paper ball (thrown at people from the agent card). */
+export const paperBallTexture = once(() => {
+  const pc = new PixelCanvas(7, 7);
+  pc.at(1, 1);
+  pc.round(0, 0, 5, 5, C.white);
+  pc.set(1, 1, C.silver);
+  pc.set(3, 2, C.silver);
+  pc.set(2, 3, C.silver);
+  pc.hline(1, 4, 3, C.silver);
+  pc.at(0, 0);
+  pc.outline();
+  return Texture.from(pc.toCanvas());
+});
+
 /** Tiny pink heart (cat purrs). */
 export const heartTexture = once(() => {
   const pc = new PixelCanvas(7, 6);

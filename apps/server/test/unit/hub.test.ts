@@ -4,6 +4,7 @@ import {
   CLOSE_BAD_MESSAGE,
   CLOSE_BAD_PASSWORD,
   CLOSE_TOO_OLD,
+  CONNECTOR_STALE_MS,
   CONNECTOR_TIMEOUT_MS,
   envelope,
   PERSON_GRACE_MS,
@@ -185,10 +186,18 @@ describe("hub: sessions", () => {
 });
 
 describe("hub: liveness", () => {
-  test("silent connector ends after 75 s, person leaves after 60 s more", () => {
+  test("silent connector goes offline, then ends; person leaves after the grace period", () => {
     const { hub } = setup();
     hub.onConnectorMessage("s1", hello("Martin", "c1"), 0);
     hub.onConnectorMessage("s1", snap(s("a")), 1_000);
+    expect(hub.nextDeadline()).toBe(1_000 + CONNECTOR_STALE_MS + 1);
+    expect(hub.tick(1_000 + CONNECTOR_STALE_MS)).toEqual([]);
+    const off = hub.tick(1_000 + CONNECTOR_STALE_MS + 1);
+    expect(
+      off.map((e) => [e.type, e.type === "session.connectionChanged" && e.data.offline]),
+    ).toEqual([["session.connectionChanged", true]]);
+    expect(hub.state().people[0]!.sessions[0]!.offline).toBe(true);
+    expect(hub.liveSocketsOf("martin", 1_000 + CONNECTOR_STALE_MS + 1)).toEqual([]);
     expect(hub.nextDeadline()).toBe(1_000 + CONNECTOR_TIMEOUT_MS + 1);
     expect(hub.tick(1_000 + CONNECTOR_TIMEOUT_MS)).toEqual([]);
     const t1 = 1_000 + CONNECTOR_TIMEOUT_MS + 1;
@@ -198,6 +207,20 @@ describe("hub: liveness", () => {
     expect(hub.tick(t1 + PERSON_GRACE_MS - 1)).toEqual([]);
     expect(types(hub.tick(t1 + PERSON_GRACE_MS))).toEqual(["person.left"]);
     expect(hub.nextDeadline()).toBeNull();
+  });
+
+  test("a heartbeat after going offline brings the sessions back online", () => {
+    const { hub } = setup();
+    hub.onConnectorMessage("s1", hello("M", "c1"), 0);
+    hub.onConnectorMessage("s1", snap(s("a")), 0);
+    hub.tick(CONNECTOR_STALE_MS + 1);
+    expect(hub.liveSocketsOf("m", CONNECTOR_STALE_MS + 1)).toEqual([]);
+    const back = hub.onConnectorMessage("s1", snap(s("a")), CONNECTOR_STALE_MS + 2).events;
+    expect(
+      back.map((e) => [e.type, e.type === "session.connectionChanged" && e.data.offline]),
+    ).toEqual([["session.connectionChanged", false]]);
+    expect(hub.state().people[0]!.sessions[0]!.offline).toBeUndefined();
+    expect(hub.liveSocketsOf("m", CONNECTOR_STALE_MS + 2)).toEqual(["s1"]);
   });
 
   test("heartbeats keep a connector alive", () => {
@@ -307,7 +330,7 @@ describe("hub: persistence + history", () => {
       hub2.onConnectorMessage("s1", snap(s("a"), s("b", { agent: "codex" })), 50_001).events,
     ).toEqual([]);
     // restore gives a fresh liveness window
-    expect(hub2.nextDeadline()).toBe(50_001 + CONNECTOR_TIMEOUT_MS + 1);
+    expect(hub2.nextDeadline()).toBe(50_001 + CONNECTOR_STALE_MS + 1);
   });
 
   test("restore without the old socket (deploy): connector reconnects silently", () => {

@@ -1,9 +1,11 @@
 /**
  * Worker entry: routes /ws/* and /api/* to the single "office" Durable Object, serves
  * /healthz and /install.sh itself, and everything else from static assets (apps/web/dist).
+ * Everything except the connector socket goes through the viewer password gate (auth.ts).
  */
 import installScript from "../../connector/install.sh";
-import { serverVersion, viewerAllowed } from "./core/app.ts";
+import { serverVersion } from "./core/app.ts";
+import { gate } from "./core/auth.ts";
 import type { Env } from "./office.ts";
 
 export { Office } from "./office.ts";
@@ -32,10 +34,10 @@ export default {
       });
     }
 
+    const blocked = await gate(request, env);
+    if (blocked) return blocked;
+
     if (path.startsWith("/ws/") || path.startsWith("/api/")) {
-      if (path === "/ws/viewer" && !viewerAllowed(url, env)) {
-        return new Response("viewer key required", { status: 401 });
-      }
       const stub = env.OFFICE.get(env.OFFICE.idFromName("office"));
       return stub.fetch(request);
     }

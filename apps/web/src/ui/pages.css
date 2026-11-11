@@ -400,3 +400,7 @@ select:focus-visible {
   box-shadow: inset 0 0 0 2px var(--cream);
   outline: none;
 }
+
+.page-nav .logout {
+  display: contents;
+}

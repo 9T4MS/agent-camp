@@ -190,7 +190,9 @@ export function runScenario(opts: SimOptions = {}): SimHandle {
     const deadline = Date.now() + (opts.settleTimeoutMs ?? 8_000);
     while (!stopping && Date.now() < deadline) {
       try {
-        const res = await fetch(`${urls.http}/api/state`);
+        const res = await fetch(`${urls.http}/api/state`, {
+          headers: { authorization: `Bearer ${password}` },
+        });
         if (res.ok && stateMatches((await res.json()) as z.infer<typeof OfficeSnapshot>, world))
           return;
       } catch {

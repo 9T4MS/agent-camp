@@ -25,6 +25,7 @@ const BUN = process.execPath;
 const SECRET = "SECRET_DO_NOT_LEAK_8f3a";
 const EXTERNAL = process.env.E2E_SERVER_URL?.replace(/\/$/, "");
 const PASSWORD = EXTERNAL ? (process.env.E2E_PASSWORD ?? "devpass") : "e2epass";
+const AUTH = { authorization: `Bearer ${PASSWORD}` };
 // A shared, persistent server may still hold an earlier "E2E Anna" in her grace period, which
 // would suppress person.joined; make the name unique there.
 const NAME = EXTERNAL ? `E2E Anna ${Math.random().toString(36).slice(2, 6)}` : "E2E Anna";
@@ -55,7 +56,7 @@ class Viewer {
   msgs: Msg[] = [];
   private waiters: (() => void)[] = [];
   constructor(url: string) {
-    this.ws = new WebSocket(url);
+    this.ws = new WebSocket(url, { headers: AUTH } as unknown as string[]);
     this.ws.onmessage = (ev) => {
       const data = typeof ev.data === "string" ? ev.data : String(ev.data);
       this.raw.push(data);
@@ -140,7 +141,7 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
   const stateBodies: string[] = [];
 
   async function apiState() {
-    const res = await fetch(`${base}/api/state`);
+    const res = await fetch(`${base}/api/state`, { headers: AUTH });
     expect(res.status).toBe(200);
     const text = await res.text();
     stateBodies.push(text);
@@ -234,7 +235,9 @@ describe.skipIf(!RUN)("connector -> server -> viewer (e2e)", () => {
     expect(me).toBeDefined();
     expect(me!.name).toBe(NAME);
     // the agent card's "today" endpoint sees the same person
-    const day = (await (await fetch(`${base}/api/people/${PERSON_ID}`)).json()) as {
+    const day = (await (
+      await fetch(`${base}/api/people/${PERSON_ID}`, { headers: AUTH })
+    ).json()) as {
       online: boolean;
       sessionsToday: number;
     };

@@ -19,15 +19,16 @@ import {
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
+import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
 import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
-import { Hud } from "./hud.ts";
+import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
 import { keepAwake } from "./kiosk.ts";
-import { connectViewer } from "./net/viewer.ts";
+import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
-import { OfficeModel } from "./state/officeModel.ts";
+import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
 import { Minimap } from "./ui/minimap.ts";
 import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
@@ -198,6 +199,7 @@ async function boot() {
     for (const ch of changes) {
       chars.handle(ch);
       if (ch.kind === "officeRenamed") hud.setOfficeName(ch.name);
+      if (ch.kind === "interaction") react(ch);
     }
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
@@ -220,6 +222,82 @@ async function boot() {
     } else if (m.kind === "ended") life.graveyard.add();
     else camera.notify(m.x, m.y);
   };
+
+  const BUBBLE: Record<string, string> = { wave: "HI!", coffee: "COFFEE?", cheer: "WOO!" };
+  const VERB: Record<string, string> = {
+    wave: "waved at",
+    coffee: "wants a coffee with",
+    cheer: "cheered on",
+    message: "sent a message to",
+    paper: "threw a paper ball at",
+  };
+  /** Play an interaction for everyone watching (it comes back from the server to all viewers). */
+  function react(ch: Extract<ModelChange, { kind: "interaction" }>) {
+    if (ch.interaction === "pet") {
+      cat.meow();
+      return;
+    }
+    const targets = ch.personId ? chars.charactersOf(ch.personId) : [];
+    const name = ch.personId ? (model.people.get(ch.personId)?.name ?? ch.personId) : "";
+    if (ch.interaction === "paper") {
+      const c = targets[Math.floor(Math.random() * targets.length)];
+      if (c) {
+        const side = c.x > scene.widthPx / 2 ? -1 : 1;
+        effects.throwBall(c.x + side * 110, c.y - 60, c.x, c.y - 20, () => {
+          effects.puff(c.x, c.y - 20);
+          chars.say(c, "OUCH!");
+        });
+      }
+    } else {
+      const text =
+        ch.interaction === "message"
+          ? fitText((ch.text ?? "").toUpperCase(), 110)
+          : BUBBLE[ch.interaction]!;
+      for (const c of targets) chars.say(c, text);
+      if (ch.interaction === "cheer" && targets[0])
+        effects.confetti(targets[0].x, targets[0].y - 24, 30);
+    }
+    const macs =
+      ch.delivered === undefined
+        ? ""
+        : ch.delivered > 0
+          ? `popped up on ${ch.delivered} Mac${ch.delivered === 1 ? "" : "s"}`
+          : "their Mac is not listening";
+    hud.showBanner(`${ch.from || "Someone"} ${VERB[ch.interaction]} ${name}`, macs);
+  }
+
+  async function poke(req: PokeRequest | { kind: "pet" }): Promise<PokeResult> {
+    if (demo) {
+      ingest({
+        v: 1,
+        type: "interaction.happened",
+        id: `demo-${Date.now()}`,
+        ts: Date.now(),
+        data: { ...req, ...(req.kind !== "pet" && req.kind !== "paper" ? { delivered: 0 } : {}) },
+      });
+      return { ok: true, message: "sent (demo: no Macs here)" };
+    }
+    try {
+      const r = await fetch("/api/interact", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      const body = (await r.json().catch(() => ({}))) as { delivered?: number; error?: string };
+      if (r.status === 401) void loginIfLoggedOut();
+      if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
+      if (req.kind === "paper" || req.kind === "pet") return { ok: true, message: "bonk!" };
+      return {
+        ok: true,
+        message: body.delivered
+          ? "sent, it popped up on their Mac"
+          : "sent (their Mac is not listening)",
+      };
+    } catch {
+      return { ok: false, message: "could not reach the office" };
+    }
+  }
+  if (!kiosk) hud.onPoke = poke;
 
   /** Agent card + ease the camera to the character (clear of the side panel). */
   const openSession = (sessionId: string) => {
@@ -247,6 +325,7 @@ async function boot() {
   camera.onTap = (wx, wy) => {
     if (cat.hit(wx, wy)) {
       cat.meow();
+      if (!demo) void poke({ kind: "pet" });
       return;
     }
     const c = chars.pick(wx, wy);

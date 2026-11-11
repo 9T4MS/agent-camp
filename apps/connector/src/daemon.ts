@@ -29,6 +29,7 @@ export type DaemonOptions = {
   pollMs?: number;
   debounceMs?: number;
   heartbeatMs?: number;
+  onPoked?: ClientOptions["onPoked"];
   client?: Partial<ClientOptions>;
 };
 
@@ -88,6 +89,7 @@ export class Daemon {
       hello: opts.hello,
       log: opts.log,
       onWelcomed: (w) => this.onWelcomed(w),
+      ...(opts.onPoked ? { onPoked: opts.onPoked } : {}),
       onState: (s) => {
         this.state = {
           ...this.state,

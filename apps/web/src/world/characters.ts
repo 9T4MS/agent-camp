@@ -35,6 +35,7 @@ import {
   mugTextures,
   pileTextures,
   ringTextures,
+  textBubbleTexture,
   toastTexture,
   tombstoneTexture,
 } from "../art/fun.ts";
@@ -44,6 +45,7 @@ import {
   dotsTextures,
   glowTexture,
   selectArrowTextures,
+  zzzTextures,
 } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
@@ -298,9 +300,35 @@ export class CharacterManager {
         c?.helpers.set(ch.count, true);
         break;
       }
+      case "connectionChanged": {
+        const c = this.chars.get(ch.sessionId);
+        if (!c) return;
+        if (!ch.offline) {
+          this.effects.sparkle(c.x, c.y - 14);
+          break;
+        }
+        c.bubbleT = Math.min(c.bubbleT, 0.25);
+        if (c.chat) this.endChat(c);
+        if (c.mode === "poi" || (c.mode === "walking" && c.goal !== "exit")) this.goToDesk(c);
+        break;
+      }
       case "officeRenamed":
+      case "interaction":
         break;
     }
+  }
+
+  /** Visible characters of a person, for interaction effects. */
+  charactersOf(personId: string): SessionCharacter[] {
+    return [...this.chars.values()].filter(
+      (c) => c.personId === personId && !c.removed && c.sprite.visible,
+    );
+  }
+
+  /** A short text bubble that floats up over a character (pokes from viewers). */
+  say(c: SessionCharacter, text: string) {
+    const head = c.y - (c.mode === "seated" ? 21 : 24);
+    this.effects.floater(textBubbleTexture(text), c.x, head - 2, 3.2, 10);
   }
 
   /**
@@ -940,6 +968,10 @@ export class CharacterManager {
     return out;
   }
 
+  private isOffline(c: SessionCharacter): boolean {
+    return this.model.sessions.get(c.sessionId)?.offline === true;
+  }
+
   private activityOf(c: SessionCharacter): Activity {
     return this.model.sessions.get(c.sessionId)?.activity ?? "idle";
   }
@@ -972,6 +1004,11 @@ export class CharacterManager {
     for (const c of [...this.chars.values()]) {
       this.step(c, dt, time);
       if (c.removed) continue;
+      if (c.mode !== "zapped") {
+        const off = this.isOffline(c);
+        c.sprite.tint = off ? 0x5a6988 : 0xffffff;
+        c.sprite.alpha = off ? 0.6 : 1;
+      }
       if (Math.abs(c.x - door.x) < 26 && Math.abs(c.y - door.y) < 30) doorBusy = true;
       c.helpers.update(dt, time);
       if (c.mode === "poi" && c.poi?.id.startsWith("arcade"))
@@ -1134,7 +1171,11 @@ export class CharacterManager {
       c.bubble.position.set(Math.round(this.bubbleX(c)), Math.round(headY - 1 - lift));
     }
     if (c.mode === "seated" && c.bubbleT <= 0) {
-      if (activity === "waiting") {
+      if (this.isOffline(c)) {
+        c.marker.texture = zzzTextures()[Math.floor(time * 1.5 + c.desk) % 3]!;
+        c.marker.visible = true;
+        c.marker.position.set(Math.round(c.x + 6), Math.round(headY - 1));
+      } else if (activity === "waiting") {
         const frames = alertTextures();
         c.marker.texture = frames[Math.floor(time * 3) % 2]!;
         c.marker.visible = true;
@@ -1163,6 +1204,12 @@ export class CharacterManager {
   }
 
   private seatedStep(c: SessionCharacter, activity: Activity, dt: number, time: number) {
+    if (this.isOffline(c)) {
+      this.setAnim(c, "sitIdle", 0.25, time);
+      this.setMonitorFor(c, "off");
+      c.timer = 2;
+      return;
+    }
     const d = c.hasDesk ? this.scene.desk(c.pod, c.desk) : undefined;
     if (d) d.chair.zIndex = activity === "waiting" ? c.y - 1 : c.y + 1;
     switch (activity) {

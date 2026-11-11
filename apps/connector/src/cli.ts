@@ -16,6 +16,7 @@ import {
 import { Daemon, type StatusFile } from "./daemon.ts";
 import { Detector } from "./detect/index.ts";
 import { log } from "./log.ts";
+import { Notifier } from "./notify.ts";
 import {
   agentDirs,
   configDir,
@@ -79,6 +80,7 @@ Commands:
       --server URL --password PW --name NAME --description TEXT
       --machine-name LABEL  (default: short hostname; "" resets to it)
       --share-project-names true|false     --get KEY (print one value)
+      --notifications true|false   show waves/messages from the office (default true)
   status            connection state and live sessions
   logs              follow the daemon log
   install-service   register the launchd agent (macOS) so it runs at login
@@ -197,6 +199,7 @@ async function cmdRun(args: Args): Promise<number> {
     log,
   });
 
+  const notifier = new Notifier({ enabled: config.notifications, log });
   const daemon = new Daemon({
     server,
     hello,
@@ -205,6 +208,7 @@ async function cmdRun(args: Args): Promise<number> {
     log,
     version: VERSION,
     statusFile: statusPath(),
+    onPoked: (p) => void notifier.show(p),
   });
 
   log(
@@ -255,6 +259,8 @@ function cmdConfigure(args: Args): number {
   set("machine-name", "machine_name");
   const share = flags["share-project-names"];
   if (share !== undefined) next.share_project_names = !(share === "false" || share === "0");
+  const notify = flags.notifications;
+  if (notify !== undefined) next.notifications = !(notify === "false" || notify === "0");
   if (next.name && next.name.trim().length > 40) {
     console.error("name must be at most 40 characters");
     return 2;

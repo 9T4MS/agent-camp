@@ -18,8 +18,10 @@ export const WS_VIEWER_PATH = "/ws/viewer";
 export const SNAPSHOT_DEBOUNCE_MS = 500;
 /** Connector re-sends its snapshot at least this often (heartbeat). */
 export const HEARTBEAT_MS = 30_000;
+/** Server shows a connector's sessions as offline after this long without any message. */
+export const CONNECTOR_STALE_MS = 45_000;
 /** Server treats a connector as gone after this long without any message. */
-export const CONNECTOR_TIMEOUT_MS = 75_000;
+export const CONNECTOR_TIMEOUT_MS = 180_000;
 /** After a person's last connector is gone, wait this long before `person.left`. */
 export const PERSON_GRACE_MS = 60_000;
 /** Reconnect backoff bounds (exponential with jitter), both sides. */
