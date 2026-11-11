@@ -849,7 +849,7 @@ function drawWrist(pc: PixelCanvas, look: Look, x: number, y: number) {
     look.wrist === "neon-pink"
       ? C.pink
       : look.wrist === "neon-lime"
-        ? C.neon
+        ? C.leaf
         : look.wrist === "rainbow"
           ? C.lemon
           : C.cyan;
@@ -1203,12 +1203,49 @@ export function lookPreview(look: Look, frame = 0, scale = 4): HTMLCanvasElement
   return canvas;
 }
 
-const sheetCache = new Map<string, CharacterSheet>();
+type CachedSheet = { sheet: CharacterSheet; base: Texture };
+const sheetCache = new Map<string, CachedSheet>();
+export const CHARACTER_SHEET_CACHE_LIMIT = 128;
+
+/** Evict only sheets with no live character/ghost or displayed frame referencing their source. */
+export function pruneCharacterSheetEntries(
+  cache: Map<string, CachedSheet>,
+  retained: Iterable<CharacterSheet>,
+  displayed: Iterable<Texture>,
+  limit = CHARACTER_SHEET_CACHE_LIMIT,
+): number {
+  if (cache.size <= limit) return 0;
+  const pinned = new Set(retained);
+  const sources = new Set([...displayed].map((texture) => texture.source));
+  let evicted = 0;
+  for (const [key, entry] of cache) {
+    if (cache.size <= limit) break;
+    if (pinned.has(entry.sheet) || sources.has(entry.base.source)) continue;
+    cache.delete(key);
+    // All 35 frames share one source: release frame wrappers first, then the owning texture.
+    for (const frame of entry.sheet.frames) frame.destroy();
+    entry.base.destroy(true);
+    evicted++;
+  }
+  return evicted;
+}
+
+export const characterSheetCacheSize = () => sheetCache.size;
+export function pruneCharacterSheets(
+  retained: Iterable<CharacterSheet>,
+  displayed: Iterable<Texture>,
+): number {
+  return pruneCharacterSheetEntries(sheetCache, retained, displayed);
+}
 
 export function characterSheet(look: Look): CharacterSheet {
   const key = lookKey(look);
   const cached = sheetCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    sheetCache.delete(key);
+    sheetCache.set(key, cached);
+    return cached.sheet;
+  }
   const base = Texture.from(paintSheet(look).toCanvas());
   const frames = SPECS.map(
     (_, i) =>
@@ -1219,6 +1256,6 @@ export function characterSheet(look: Look): CharacterSheet {
     anims[name as AnimName] = idx.map((i) => frames[i]!);
   }
   const sheet = { frames, anims };
-  sheetCache.set(key, sheet);
+  sheetCache.set(key, { sheet, base });
   return sheet;
 }

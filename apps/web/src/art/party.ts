@@ -1,20 +1,13 @@
 /** Vehicle art complements the single AvatarSpec paper doll; no separate wardrobe state. */
 import type { AgentKind, AvatarSpec } from "@agent-office/protocol";
 import { lookFor, paintSheet } from "./characters.ts";
+import { accentHex } from "./costumes.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
-export const ACCENT_HEX = {
-  cyan: C.cyan,
-  pink: C.pink,
-  lime: C.neon,
-  gold: C.lemon,
-  purple: C.berry,
-  red: C.red,
-} as const;
 /** Transparent vehicle layer anchored at (32,48), the character's feet. */
 export function vehiclePixels(avatar: AvatarSpec): PixelCanvas {
   const p = new PixelCanvas(64, 64).at(24, 24);
-  const color = ACCENT_HEX[avatar.accentColor ?? "cyan"];
+  const color = accentHex(avatar.accentColor ?? "cyan");
   // Vehicles sit below the body, leaving the agent-colored jacket readable.
   if (avatar.vehicle === "car") {
     p.round(-8, 19, 32, 8, C.night);

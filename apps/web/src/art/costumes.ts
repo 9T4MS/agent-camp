@@ -8,7 +8,7 @@ type View = "down" | "up" | "left";
 const ACCENTS = {
   cyan: C.cyan,
   pink: C.pink,
-  lime: C.neon,
+  lime: C.leaf,
   gold: C.lemon,
   purple: C.berry,
   red: C.red,
