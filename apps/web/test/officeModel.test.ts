@@ -114,6 +114,16 @@ describe("OfficeModel", () => {
     expect(m.sessions.get("laptop:b4")!.desk).toBe(1);
   });
 
+  test("a session moved into a freed desk frees its old one", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Ben", [sess("b1"), sess("b2"), sess("b3")])]));
+    m.apply(envelope("session.ended", { personId: "ben", sessionId: "laptop:b1" }));
+    m.moveDesk("laptop:b3", 0);
+    expect(m.sessionsOf("ben").map((s) => s.desk)).toEqual([0, 1]);
+    m.apply(envelope("session.started", { personId: "ben", session: sess("b4") }));
+    expect(m.sessions.get("laptop:b4")!.desk).toBe(2);
+  });
+
   test("events produce animated changes", () => {
     const m = new OfficeModel(() => T0);
     m.apply(snap([]));

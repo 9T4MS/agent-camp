@@ -381,6 +381,11 @@ export class OfficeModel {
     return i;
   }
 
+  moveDesk(sessionId: string, desk: number) {
+    const s = this.sessions.get(sessionId);
+    if (s) s.desk = desk;
+  }
+
   private freeDesk(personId: string): number {
     const used = new Set(this.sessionsOf(personId).map((s) => s.desk));
     let i = 0;
