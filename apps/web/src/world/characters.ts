@@ -243,8 +243,9 @@ export class CharacterManager {
     }
     if (changed.length === 0) return;
     const pois = new Set([...this.scene.map.pois, ...this.scene.nookPois]);
+    const map = this.scene.map;
     for (const c of this.chars.values()) {
-      if (c.poi && !pois.has(c.poi)) {
+      if (c.poi && (!pois.has(c.poi) || !map.isWalkable(c.poi.tile.x, c.poi.tile.y))) {
         // the nook they were lounging in became someone's pod
         this.releasePoi(c);
         if (c.mode === "poi" || c.mode === "walking") this.idleWander(c);
@@ -431,7 +432,10 @@ export class CharacterManager {
 
   private idleWander(c: SessionCharacter) {
     // mostly the coffee machine, lounge and garden (PLAN), sometimes a nook between pods
-    const free = (list: readonly Poi[]) => list.filter((p) => !this.poiTaken.has(p.id));
+    const map = this.scene.map;
+    // never a spot that furniture or a new pod now covers
+    const free = (list: readonly Poi[]) =>
+      list.filter((p) => !this.poiTaken.has(p.id) && map.isWalkable(p.tile.x, p.tile.y));
     const nooks = free(this.scene.nookPois);
     let pois = nooks.length > 0 && this.rand() < 0.25 ? nooks : free(this.scene.map.pois);
     if (pois.length === 0) pois = nooks;

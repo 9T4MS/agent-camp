@@ -30,6 +30,7 @@ import {
   BASE_POD_ROWS,
   buildOfficeMap,
   POD_COLS,
+  podDeskSpan,
   podOrigin,
   podRowsFor,
 } from "./world/map.ts";
@@ -133,6 +134,8 @@ async function boot() {
   };
 
   let snapshotSeen = false;
+  /** runs after every message (e.g. a ?focus= waiting for its person to show up) */
+  let afterIngest = () => {};
   const ingest = (msg: ServerToViewer) => {
     const changes = model.apply(msg);
     ensureCapacity();
@@ -146,6 +149,7 @@ async function boot() {
     }
     hud.setStats(model.stats());
     living.poke();
+    afterIngest();
   };
 
   chars.onMoment = (m) => {
@@ -204,12 +208,22 @@ async function boot() {
   const focusPerson = (personId: string, zoom = 3) => {
     const p = model.people.get(personId);
     if (!p) return false;
+    // centre on the person's pod (its desks + chairs), whatever its size
+    const n = Math.max(2, scene.slotDesks(p.pod));
+    const span = podDeskSpan(p.pod, n);
     const o = podOrigin(p.pod);
-    camera.set({ x: (o.x + 4) * 16, y: (o.y + 2) * 16, zoom }, true);
+    camera.set({ x: span.x + span.w / 2, y: o.y * 16 + 30, zoom }, true);
     return true;
   };
   const focusParam = params.get("focus");
-  if (focusParam) focusPerson(focusParam, Number(zoomParam) || 3);
+  if (focusParam) {
+    // with a live server the snapshot arrives later: focus as soon as the person exists
+    const tryFocus = () => {
+      if (focusPerson(focusParam, Number(zoomParam) || 3)) afterIngest = () => {};
+    };
+    afterIngest = tryFocus;
+    tryFocus();
+  }
 
   if (kiosk) keepAwake();
   if (recorder) {
