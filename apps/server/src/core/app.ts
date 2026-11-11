@@ -14,7 +14,9 @@ import {
   type LookDescribeResponse,
   type LookGenerator,
   type MessageOf,
+  MessageQuery,
   PartyState,
+  SendMessageRequest,
   type ServerToConnector,
   type ViewerEvent,
 } from "@agent-office/protocol";
@@ -39,6 +41,8 @@ import {
 } from "./genui.ts";
 import { type AvatarJob, type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
+import { messageOwner } from "./message-owner.ts";
+import { OfficeMessages } from "./messages.ts";
 import { Party, readPartyBody } from "./party.ts";
 import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
@@ -162,6 +166,7 @@ export class OfficeApp {
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
   private lastPoke = new Map<string, number>();
+  readonly messages: OfficeMessages;
   readonly party: Party;
   private lastLook = new Map<string, number>();
   private lastDescribe = new Map<string, number>();
@@ -208,6 +213,14 @@ export class OfficeApp {
       store,
     );
     this.hub.log = log;
+    this.messages = new OfficeMessages(
+      store,
+      this.hub,
+      (socket, data) => transport.sendToConnector?.(socket, data) ?? false,
+      (data) => transport.broadcast(data),
+      (who, now) => this.interactionWait(who, now),
+      this.lastPoke,
+    );
   }
 
   private now(): number {
@@ -217,7 +230,7 @@ export class OfficeApp {
   /** Rebuild state after a restart / hibernation wake. */
   restore(sockets: { socketId: string; binding: Binding | null }[]): void {
     this.hub.restore(this.now(), sockets);
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.scheduleAlarm();
   }
 
   connectorMessage(socketId: string, raw: unknown): SocketAction {
@@ -263,12 +276,13 @@ export class OfficeApp {
 
   alarm(): void {
     this.publish(this.hub.tick(this.now()));
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.messages.prune(this.now());
+    this.scheduleAlarm();
   }
 
   private handle(r: HubResult): SocketAction {
     this.publish(r.events);
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.scheduleAlarm();
     if (r.avatarJob) {
       const job = r.avatarJob;
       // a look from a hello (join, a new description): the server's provider, never a Mac. Any
@@ -291,6 +305,23 @@ export class OfficeApp {
     if (r.close) action.close = r.close;
     if (r.binding) action.binding = r.binding;
     return action;
+  }
+
+  private scheduleAlarm(): void {
+    const deadlines = [this.hub.nextDeadline(), this.messages.nextDeadline()].filter(
+      (n): n is number => n !== null,
+    );
+    this.transport.scheduleAlarm(deadlines.length ? Math.min(...deadlines) : null);
+  }
+
+  private interactionWait(who: string, now: number): number | null {
+    const previous = this.lastInteract.get(who);
+    if (previous !== undefined && now - previous < INTERACT_MIN_INTERVAL_MS)
+      return Math.ceil((previous + INTERACT_MIN_INTERVAL_MS - now) / 1000);
+    this.lastInteract.set(who, now);
+    if (this.lastInteract.size > 500)
+      this.lastInteract.delete(this.lastInteract.keys().next().value!);
+    return null;
   }
 
   private publish(events: ViewerEvent[]): void {
@@ -498,6 +529,69 @@ export class OfficeApp {
       return claim[2] ? this.verifyClaim(req, personId) : this.sendClaimCode(req, personId);
     }
 
+    if (path === "/api/messages" || path.startsWith("/api/messages/")) {
+      if (!(await isAuthorized(req, this.env, this.now())))
+        return json({ error: "unauthorized" }, { status: 401 });
+      if (path === "/api/messages/owner" && method === "GET") {
+        const owner = await messageOwner(req);
+        return json({ ok: true }, { headers: owner.cookie ? { "set-cookie": owner.cookie } : {} });
+      }
+      const deletion = /^\/api\/messages\/([A-Za-z0-9_-]{1,64})$/.exec(path);
+      if (path !== "/api/messages" && !deletion)
+        return json({ error: "not found" }, { status: 404 });
+      if (path === "/api/messages" && method === "GET") {
+        const parsed = MessageQuery.safeParse(Object.fromEntries(url.searchParams));
+        if (!parsed.success)
+          return json({ error: "invalid message cursor or limit" }, { status: 400 });
+        const owner = await messageOwner(req);
+        const page = this.messages.page(parsed.data, this.now(), owner.hash);
+        return json(page, { headers: owner.cookie ? { "set-cookie": owner.cookie } : {} });
+      }
+      if ((deletion && method !== "DELETE") || (!deletion && method !== "POST"))
+        return json({ error: "method not allowed" }, { status: 405 });
+      if (
+        (req.headers.get("origin") && req.headers.get("origin") !== url.origin) ||
+        req.headers.get("sec-fetch-site") === "cross-site"
+      )
+        return json({ error: "same-origin requests only" }, { status: 403 });
+      if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json")
+        return json({ error: "expected application/json" }, { status: 415 });
+      if (deletion) {
+        const owner = await messageOwner(req, false);
+        const result = this.messages.delete(deletion[1]!, owner.hash, this.now());
+        return json(result.error ? { error: result.error } : { ok: true }, {
+          status: result.status,
+        });
+      }
+      const body = await readPartyBody(req, 16_384);
+      if (body.status)
+        return json(
+          { error: body.status === 413 ? "too large" : "invalid JSON" },
+          { status: body.status },
+        );
+      const parsed = SendMessageRequest.safeParse(body.value);
+      if (!parsed.success) return json({ error: "invalid message or audience" }, { status: 400 });
+      const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+      const owner = await messageOwner(req);
+      const result = this.messages.send(parsed.data, who, this.now(), owner.hash!);
+      this.scheduleAlarm();
+      const headers: Record<string, string> = owner.cookie ? { "set-cookie": owner.cookie } : {};
+      return "message" in result
+        ? json(
+            { ok: true, message: result.message, queued: result.queued },
+            { status: result.status, headers },
+          )
+        : json(
+            { error: result.error },
+            {
+              status: result.status,
+              headers: {
+                ...headers,
+                ...(result.retryAfter ? { "retry-after": String(result.retryAfter) } : {}),
+              },
+            },
+          );
+    }
     if (path === "/api/interact" && method === "POST") return this.interact(req);
     if (path === "/api/party") {
       if (method !== "POST") return json({ error: "method not allowed" }, { status: 405 });
@@ -830,7 +924,7 @@ export class OfficeApp {
       );
       avatar = res.avatar;
     }
-    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    this.scheduleAlarm();
     return json({
       ok: true,
       avatar,
@@ -936,10 +1030,12 @@ export class OfficeApp {
     const now = this.now();
 
     const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
-    if (now - (this.lastInteract.get(who) ?? 0) < INTERACT_MIN_INTERVAL_MS)
-      return json({ error: "slow down" }, { status: 429 });
-    this.lastInteract.set(who, now);
-    if (this.lastInteract.size > 500) this.lastInteract.clear();
+    const wait = this.interactionWait(who, now);
+    if (wait !== null)
+      return json(
+        { error: "slow down" },
+        { status: 429, headers: { "retry-after": String(wait) } },
+      );
 
     if (r.personId && !this.hub.state().people.some((p) => p.personId === r.personId))
       return json({ error: "not in the office" }, { status: 404 });

@@ -15,6 +15,10 @@ const button = (label: string, action: () => void) => {
 };
 
 export class PartyPanel {
+  onOpen: () => void = () => {};
+  close(): void {
+    this.drawer.hidden = true;
+  }
   private person = "";
   private busy = false;
   private until = 0;
@@ -46,6 +50,7 @@ export class PartyPanel {
       /* optional */
     }
     const launch = button("✦ Office games", () => {
+      this.onOpen();
       this.drawer.hidden = false;
       this.refresh();
       this.options.focus(this.person);

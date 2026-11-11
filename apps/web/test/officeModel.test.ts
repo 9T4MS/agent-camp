@@ -29,6 +29,38 @@ const snap = (people: PersonView[]) =>
   envelope("office.snapshot", { officeName: "Camp", serverTime: T0, people }, { ts: T0 });
 
 describe("OfficeModel", () => {
+  test("Office Messages stay out of world changes; legacy message interactions remain transient", () => {
+    const m = new OfficeModel(() => T0);
+    const before = m.stats();
+    expect(
+      m.apply(
+        envelope("message.sent", {
+          message: {
+            id: "saved-message",
+            seq: 1,
+            ts: T0,
+            text: "Do not draw this in timelapse",
+            audience: "everyone",
+            recipients: [],
+            notifyDesktop: false,
+          },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      m.apply(
+        envelope("interaction.happened", {
+          kind: "message",
+          personId: "anna",
+          text: "Legacy",
+        }),
+      ),
+    ).toMatchObject([{ kind: "interaction", interaction: "message", text: "Legacy" }]);
+    expect(
+      m.apply(envelope("interaction.happened", { kind: "wave", personId: "anna" }))[0]?.kind,
+    ).toBe("interaction");
+    expect(m.stats()).toEqual(before);
+  });
   test("helper skin: robots by default, cats from snapshot and event", () => {
     const m = new OfficeModel(() => T0);
     m.apply(snap([person("Anna"), { ...person("Bob"), helpers: "cats" }]));

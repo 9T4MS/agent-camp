@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "message.deleted",
+  "id": "delete-event",
+  "ts": 1700000000000,
+  "data": { "messageId": "message-1" }
+}

@@ -216,14 +216,31 @@ are robots by default; `agent-office configure --helpers cats` turns them into k
 (`--helpers robots` switches back). Restart the connector to apply it:
 `launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector`.
 
-Received: when someone in the office waves at you, sends you a short message or sends a cat
-to sit on your keyboard, the connector shows it as a macOS notification (at most one every 5 s; macOS may list it under
-"Script Editor"). Turn it off with `agent-office configure --notifications false`.
+Received: waves, short legacy messages, cat visits and office messages with
+**Also notify recipients’ Macs** enabled are queued to connected Macs (at most one
+notification every 5 s on the connector; macOS may list it under "Script Editor"). Turn
+desktop notifications off with `agent-office configure --notifications false`. Saving a
+message never depends on whether macOS displays an alert; offline alerts are not queued
+or replayed.
 
 Never sent: prompts, responses, code, file contents or paths, commands, tool output, or
 anything else from a transcript. A unit test feeds a transcript containing a fake secret and
-checks it never appears in any outgoing message. History keeps only events (who, which agent,
-project folder name, subagent counts), never content.
+checks it never appears in any outgoing message. **Activity/statistics history** keeps only
+events (who, which agent, project folder name, subagent counts), never transcript content.
+
+**Explicitly authored office messages are different:** their text, optional display-name
+signature and recipient names are stored in a separate shared office log. Messages are
+readable for **24 hours or the latest 100 messages, whichever is smaller**. Expired bodies
+are purged in hourly batches (at most **25 hours** of physical storage). Everyone with
+office access can read every message, including selected-recipient messages. Recipients
+control notifications, not read access; typed sender names are not verified identities.
+Office Messages bodies are not stored in browser localStorage, the offline cache, activity
+CSV or world/timelapse textures. The sending browser can delete a message: the entire row
+is erased immediately, without a delivery/retry ledger. The legacy short-message interaction
+remains transient as before (including its world bubble), not part of this shared log.
+Deletion ownership uses a private HttpOnly browser cookie (only its hash is stored), not
+the typed name or the look-editor identity. Keep that browser's cookies to retain deletion
+rights; clearing them loses those rights. Already queued Mac notifications cannot be recalled.
 
 ## Office games and extra look items
 
@@ -276,11 +293,52 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 
 | URL                  | What                                                                  |
 | -------------------- | --------------------------------------------------------------------- |
-| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer or send a short message (it pops up as a notification on their Mac), send a cat to sit on their desk, or throw a paper ball (office only). There is one office cat, plus one for every two people (up to 10): click one to pet it and open its card, then feed it, toss it a yarn ball, or get out the laser pointer and tap the floor. |
+| `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer, open Office Messages with that person selected, send a cat to sit on their desk, or throw a paper ball (office only). There is one office cat, plus one for every two people (up to 10): click one to pet it and open its card, then feed it, toss it a yarn ball, or get out the laser pointer and tap the floor. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
+
+### Office Messages
+
+Use **Messages** beside Office Games (or in the logo menu) to open the shared history and
+composer. Choose **Everyone in the office** or **Selected people** (up to 50), write up to
+200 UTF-16 code units of plain text, and optionally sign it with a display name. New general
+messages start with Mac notifications off; the person/card Message button starts with its
+person selected and notifications on. The checkbox is always explicit. Everyone + Mac notify
+asks for confirmation; people are resolved when the server saves the message.
+
+- Enter adds a newline; Ctrl/Cmd+Enter sends. Selected recipients can be offline but must
+  still be present in the office roster. Everyone can post even to an empty office.
+- Collapse with **−** or Escape; hidden arrivals add a browser-local unread badge without
+  reopening the log. Read means visible, at the bottom, with no filter hiding messages —
+  not an account-level read receipt. Initial history is not an unread flood.
+- Load older history or filter broadcasts/by recipient. Reload/reconnect recovers retained
+  messages; expired periods are labelled. Drafts stay only in this tab’s memory.
+- A lost/uncertain acknowledgement keeps the draft and warns that the message may already
+  be saved. **Check history before sending again.** There is no automatic resend or
+  duplicate-safe retry guarantee; an explicit second send can create a second message.
+- Use **Delete** on your messages to remove them from the shared log, including after reload.
+  Other office viewers do not get a delete control or permission to delete them.
+- The office accepts at most **200 stored messages per UTC day**, across all browsers/IPs
+  and history-only or desktop-alert sends. The stored cap survives restarts; deleting does
+  not refund it. An interrupted insertion can conservatively reserve a slot without creating
+  a message. Legacy `/api/interact` messages remain transient, with their original limits.
+- Contiguous live arrivals use the socket only. History is fetched on connection/reconnect
+  or an actual sequence gap, not on every message or return to a healthy tab. Server pruning
+  runs only after inserts and in the hourly-batched coordinated alarm; reads filter expired
+  rows at 24h without writes. Notification cooldowns are saved once per notified message,
+  not once per recipient; quick-poke cooldowns keep their original in-memory behavior.
+- The “queued” count is accepted **connector socket sends**, not people, and does **not**
+  mean the notification was displayed/read. Opt-out, client throttling and macOS permissions still
+  apply. Everyone + Mac notify has a 30 s office-wide cooldown; each person shares the
+  existing 10 s notification cooldown with quick pokes. History-only sends ignore desktop
+  cooldowns; the existing 2 s viewer-IP guard still applies.
+
+On narrow screens, typing gives the composer the sheet; **History** returns to the log
+without losing the draft. The send action and shared-visibility notice stay visible.
+Kiosk and `nohud` hide the messaging UI and do not retain new message events. Demo mode
+supports local compose/history without any server or desktop-notification requests.
 
 ### On your phone or iPad
 

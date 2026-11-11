@@ -1,0 +1,266 @@
+/* Beside, not on top of, the existing Office Games launcher. */
+.messages-launch {
+  position: fixed;
+  left: max(190px, calc(180px + env(safe-area-inset-left)));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 30;
+  min-height: 44px;
+  color: var(--lemon);
+}
+.messages-panel {
+  position: fixed;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: calc(76px + env(safe-area-inset-bottom) + var(--messages-bottom, 0px));
+  z-index: 41;
+  width: min(420px, calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  height: min(640px, calc(100dvh - 140px));
+  max-height: calc(var(--messages-vh, 100dvh) - 100px - env(safe-area-inset-top));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  touch-action: pan-y;
+  user-select: text;
+  -webkit-user-select: text;
+  overscroll-behavior: contain;
+}
+.messages-panel[hidden],
+.hud-panel[hidden],
+.messages-panel [hidden] {
+  display: none;
+}
+.messages-panel header,
+.messages-toolbar,
+.messages-audience,
+.messages-send-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.messages-panel header {
+  justify-content: space-between;
+}
+.messages-history-tab {
+  display: none;
+}
+.messages-panel h2 {
+  margin: 0;
+  color: var(--amber);
+  font: 14px var(--font-pixel);
+}
+.messages-panel .pixel-btn {
+  min-height: 44px;
+  font-size: 10px;
+}
+.messages-panel :focus-visible,
+.messages-launch:focus-visible {
+  outline: 2px solid var(--lemon);
+  outline-offset: 2px;
+}
+.messages-panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.messages-panel select,
+.messages-panel input:not([type="checkbox"]),
+.messages-panel textarea {
+  min-width: 0;
+  max-width: 100%;
+  border: 2px solid var(--dusk);
+  background: var(--night);
+  color: var(--cream);
+  font: 16px var(--font-body);
+  border-radius: 0;
+  padding: 6px;
+  min-height: 38px;
+}
+.messages-panel select {
+  flex: 1;
+}
+.messages-log {
+  min-height: 76px;
+  flex: 1 1 160px;
+  overflow-y: auto;
+  scrollbar-color: var(--bark) var(--night);
+  overscroll-behavior: contain;
+  background: var(--night);
+  padding: 8px;
+}
+.messages-log article {
+  border-bottom: 2px solid var(--cocoa);
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.messages-byline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--sand);
+  font-size: 14px;
+  unicode-bidi: isolate;
+}
+.messages-byline time {
+  color: var(--grey);
+  font-size: 12px;
+}
+.messages-log p {
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+  margin: 6px 0;
+  line-height: 1.35;
+}
+.messages-panel form {
+  min-height: 100px;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: contain;
+}
+.messages-panel fieldset {
+  padding: 0;
+  margin: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 76px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  overscroll-behavior: contain;
+}
+.messages-panel fieldset > * {
+  flex-shrink: 0;
+}
+.messages-panel label:not(.messages-notify) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.messages-panel label input:not([type="checkbox"]) {
+  flex: 1;
+}
+.messages-panel textarea {
+  resize: vertical;
+  width: 100%;
+  min-height: 60px;
+}
+.messages-panel input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--amber);
+  flex-shrink: 0;
+}
+.messages-notify {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.messages-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.messages-picker {
+  background: var(--ink);
+  padding: 8px;
+}
+.messages-picker > input {
+  width: 100%;
+}
+.messages-picker > div {
+  max-height: 150px;
+  overflow-y: auto;
+}
+.messages-picker label {
+  min-height: 44px;
+}
+.messages-privacy,
+.messages-history-status,
+.messages-send-status {
+  font-size: 13px;
+  line-height: 1.25;
+  margin: 2px 0;
+  flex: none;
+  overflow-wrap: anywhere;
+}
+.messages-privacy {
+  color: var(--sand);
+}
+.messages-history-status,
+.messages-send-status {
+  color: var(--lemon);
+}
+.messages-history-status:empty,
+.messages-send-status:empty {
+  display: none;
+}
+.messages-send-row {
+  justify-content: flex-end;
+}
+.messages-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.kiosk .messages-launch,
+.kiosk .messages-panel,
+.nohud .messages-launch,
+.nohud .messages-panel {
+  display: none;
+}
+@media (max-width: 560px) {
+  .messages-launch {
+    left: 166px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+  .messages-panel {
+    bottom: calc(60px + env(safe-area-inset-bottom) + var(--messages-bottom, 0px));
+    height: min(55dvh, 620px);
+    padding: 8px;
+    gap: 4px;
+  }
+  .messages-panel form {
+    flex-basis: 250px;
+  }
+  .messages-history-tab {
+    display: block;
+    margin-left: auto;
+  }
+  .messages-panel label:not(.messages-notify) {
+    flex-wrap: wrap;
+  }
+  .messages-panel.messages-keyboard {
+    height: calc(var(--messages-vh) - 24px);
+    max-height: calc(var(--messages-vh) - 24px);
+    bottom: calc(12px + var(--messages-bottom));
+  }
+  .messages-keyboard .messages-log,
+  .messages-keyboard .messages-toolbar,
+  .messages-keyboard .messages-history-status,
+  .messages-keyboard .messages-jump {
+    display: none;
+  }
+  .messages-keyboard form {
+    flex: 1;
+    min-height: 0;
+  }
+  .messages-keyboard fieldset {
+    min-height: 44px;
+  }
+  /* Give the composer the sheet while typing; History restores the log without losing drafts. */
+  .messages-panel:has(form:focus-within) .messages-log,
+  .messages-panel:has(form:focus-within) .messages-toolbar,
+  .messages-panel:has(form:focus-within) .messages-history-status,
+  .messages-panel:has(form:focus-within) .messages-jump {
+    display: none;
+  }
+  .messages-panel:has(form:focus-within) form {
+    flex: 1;
+  }
+}
