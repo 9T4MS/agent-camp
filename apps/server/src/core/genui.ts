@@ -70,6 +70,8 @@ export type GenuiEnv = {
   GENUI_PROVIDER?: string;
   GENUI_MODEL?: string;
   GENUI_MAX_CALLS_PER_DAY?: string;
+  /** look studio Generates per person per day on the server's provider (app.ts), default 5 */
+  GENUI_MAX_CALLS_PER_PERSON?: string;
   /**
    * anthropic only: low (default) | medium | high | xhigh | max; not sent to models without
    * effort, such as the default claude-haiku-4-5 (it matters with e.g. claude-opus-5-5)
@@ -467,11 +469,38 @@ export class AvatarService {
   }
 
   /**
+   * Check an untrusted AI answer (server provider or a connector's local AI): repaired, and
+   * usable only if at least MIN_LOOK_SCORE of the look is the model's own. Null = unusable.
+   */
+  accept(
+    candidate: unknown,
+    job: AvatarJob | (AvatarRequest & { key?: string; previous?: AvatarSpec }),
+    by: string,
+  ): AvatarResult | null {
+    const key = job.key ?? this.cacheKey(job.name, job.selfDescription);
+    const { avatar, repaired } = repairAvatar(candidate, job.personId, job.previous);
+    const candidateLook = isRecord(candidate) ? candidate.look : undefined;
+    const score = avatar.look ? repairLookScored(candidateLook, lookFromCatalog(avatar)).score : 0;
+    if (score < MIN_LOOK_SCORE) {
+      this.log(
+        `genui ${by} unusable avatar for ${job.personId} (look score ${score.toFixed(2)}), kept current look`,
+      );
+      return null;
+    }
+    if (repaired) this.log(`genui ${by} repaired avatar for ${job.personId}`);
+    return { avatar, key, source: "ai" };
+  }
+
+  /**
    * Resolve a look for a Hub avatar job. No description or no provider -> no call, previous
    * look kept. On failure the returned key is marked so the next join retries (still bounded
-   * by the cap).
+   * by the cap). `take` is asked right before a call is counted (the studio's per-person
+   * limit, see app.ts): false keeps the current look, as the daily cap does.
    */
-  async resolve(job: AvatarJob | (AvatarRequest & { key?: string })): Promise<AvatarResult> {
+  async resolve(
+    job: AvatarJob | (AvatarRequest & { key?: string }),
+    opts: { take?: () => boolean } = {},
+  ): Promise<AvatarResult> {
     const key = job.key ?? this.cacheKey(job.name, job.selfDescription);
     const keep = job.previous ?? avatarFromSeed(job.personId);
     if (!job.selfDescription?.trim()) return { avatar: keep, key, source: "seed" };
@@ -485,25 +514,19 @@ export class AvatarService {
       );
       return fallback;
     }
+    if (opts.take && !opts.take()) {
+      this.log(
+        `genui ${this.providerId} ${job.personId} used their looks for today, kept current look`,
+      );
+      return fallback;
+    }
     this.store.kvPut(this.dayKey(), String(used + 1));
     try {
       const r = await this.limited(() => provider.generate(job));
       this.log(
         `genui ${this.providerId} ${job.personId} tokens in=${r.inputTokens ?? "?"} out=${r.outputTokens ?? "?"} (call ${used + 1}/${this.maxCallsPerDay} today)${r.note ? ` ${r.note}` : ""}`,
       );
-      const { avatar, repaired } = repairAvatar(r.candidate, job.personId, job.previous);
-      const candidateLook = isRecord(r.candidate) ? r.candidate.look : undefined;
-      const score = avatar.look
-        ? repairLookScored(candidateLook, lookFromCatalog(avatar)).score
-        : 0;
-      if (score < MIN_LOOK_SCORE) {
-        this.log(
-          `genui ${this.providerId} unusable avatar for ${job.personId} (look score ${score.toFixed(2)}), kept current look`,
-        );
-        return fallback;
-      }
-      if (repaired) this.log(`genui ${this.providerId} repaired avatar for ${job.personId}`);
-      return { avatar, key, source: "ai" };
+      return this.accept(r.candidate, { ...job, key }, this.providerId) ?? fallback;
     } catch (err) {
       this.log(`genui ${this.providerId} error for ${job.personId}: ${(err as Error).message}`);
       return fallback;

@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "connector.lookGenerated",
+  "id": "01KD8QZ0000000000000000041",
+  "ts": 1793174461000,
+  "data": {
+    "requestId": "lr_7f3a9c2e1b",
+    "generator": "claude",
+    "avatar": { "hairStyle": "curly", "hairColor": "auburn" }
+  }
+}

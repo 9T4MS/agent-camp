@@ -75,10 +75,35 @@ export async function verifySessionToken(
   return safeEqual(sig, await sign(password, exp));
 }
 
-/** Signed `<personId>.<exp>.<sig>` for the ME_COOKIE. */
-export async function makeMeToken(password: string, personId: string, now: number) {
+/**
+ * Signed `<personId>.<exp>.<sig>` for the ME_COOKIE, or `<personId>.<exp>.<mac>.<sig>` when the
+ * code came from one connector socket (`mac`): the Mac this browser proved it can read, the
+ * only one its look studio may send the description to (see OfficeApp.requestLocalLook).
+ */
+export async function makeMeToken(password: string, personId: string, now: number, mac?: string) {
   const exp = String(now + ME_TTL_MS);
-  return `${personId}.${exp}.${await sign(password, `me:${personId}:${exp}`)}`;
+  if (!mac) return `${personId}.${exp}.${await sign(password, `me:${personId}:${exp}`)}`;
+  return `${personId}.${exp}.${mac}.${await sign(password, `me:${personId}:${exp}:${mac}`)}`;
+}
+
+/** The person this browser proved to be (ME_COOKIE) and the Mac it proved it with, or null. */
+export async function meProofFromRequest(
+  req: Request,
+  env: AppEnv,
+  now = Date.now(),
+): Promise<{ personId: string; mac?: string } | null> {
+  const pw = connectorPassword(env);
+  const token = cookieValue(req, ME_COOKIE);
+  if (!pw || !token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const [personId, exp] = parts;
+  const mac = parts.length === 4 ? parts[2] : undefined;
+  const sig = parts.at(-1);
+  if (!personId || !exp || !sig || mac === "" || !(Number(exp) > now)) return null;
+  const payload = mac ? `me:${personId}:${exp}:${mac}` : `me:${personId}:${exp}`;
+  if (!safeEqual(sig, await sign(pw, payload))) return null;
+  return mac ? { personId, mac } : { personId };
 }
 
 /** The person this browser proved to be (ME_COOKIE), or null. */
@@ -87,12 +112,7 @@ export async function meFromRequest(
   env: AppEnv,
   now = Date.now(),
 ): Promise<string | null> {
-  const pw = connectorPassword(env);
-  const token = cookieValue(req, ME_COOKIE);
-  if (!pw || !token) return null;
-  const [personId, exp, sig] = token.split(".");
-  if (!personId || !exp || !sig || !(Number(exp) > now)) return null;
-  return safeEqual(sig, await sign(pw, `me:${personId}:${exp}`)) ? personId : null;
+  return (await meProofFromRequest(req, env, now))?.personId ?? null;
 }
 
 /** Set-Cookie for ME_COOKIE (empty value + 0 = forget). */

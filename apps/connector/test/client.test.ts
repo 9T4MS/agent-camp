@@ -117,6 +117,53 @@ describe("client + daemon against a fake server", () => {
     await waitFor(() => srv.of("connector.bye").length === 1, 2000, "bye");
   });
 
+  test("draws a look when the office asks, and resends it after a reconnect", async () => {
+    srv = fakeServer();
+    let release = () => {};
+    const asked: string[] = [];
+    const d = daemonWith(
+      { current: [] },
+      {
+        looks: {
+          generate: (r) => {
+            asked.push(r.requestId);
+            return new Promise((resolve) => {
+              release = () =>
+                resolve({
+                  requestId: r.requestId,
+                  generator: "claude",
+                  avatar: { hairColor: "brown" },
+                });
+            });
+          },
+        },
+      },
+    );
+    await d.start();
+    await waitFor(() => srv.of("connector.hello").length === 1, 3000, "hello");
+    await waitFor(() => d.client.welcomed !== null, 3000, "welcomed");
+    const request = envelope("connector.lookRequested", {
+      requestId: "lr_abc",
+      system: "s",
+      prompt: "Tracht",
+      schema: { type: "object" },
+    });
+    for (const ws of srv.sockets) ws.send(JSON.stringify(request));
+    await waitFor(() => asked.length === 1, 2000, "look requested");
+    // the connection drops while the local AI is still drawing
+    srv.closeAll(1012, "restart");
+    await Bun.sleep(50);
+    release();
+    await waitFor(() => srv.of("connector.hello").length === 2, 4000, "second hello");
+    await waitFor(() => srv.of("connector.lookGenerated").length === 1, 3000, "look sent");
+    expect(srv.of("connector.lookGenerated")[0]!.data).toEqual({
+      requestId: "lr_abc",
+      generator: "claude",
+      avatar: { hairColor: "brown" },
+    });
+    for (const raw of srv.received) expect(parseConnectorMessage(raw).ok).toBe(true);
+  });
+
   test("4001 bad password: no hammering", async () => {
     srv = fakeServer({
       onHello: (ws) => {

@@ -997,3 +997,50 @@ describe("hub: custom looks win over GenUI (detailed looks)", () => {
     });
   });
 });
+
+describe("hub: look studio (describeLook)", () => {
+  const countWrites = (store: MemoryStore) => {
+    const writes: (string | undefined)[] = [];
+    const put = store.putAvatar.bind(store);
+    store.putAvatar = (personId, avatar, key, selfDescription) => {
+      writes.push(selfDescription);
+      put(personId, avatar, key, selfDescription);
+    };
+    return writes;
+  };
+
+  test("the same text again still returns a job but writes no row; new text does", () => {
+    const { hub, store } = setup();
+    hub.onConnectorMessage("s1", hello("Tom", "mac"), 1_000);
+    const writes = countWrites(store);
+
+    const first = hub.describeLook("tom", "curly hair")!;
+    expect(first.selfDescription).toBe("curly hair");
+    expect(writes).toEqual(["curly hair"]);
+    expect(store.getAvatar("tom")!.selfDescription).toBe("curly hair");
+
+    // "Generate" again (AI off / cap reached: no setAvatar in between)
+    const again = hub.describeLook("tom", "curly hair")!;
+    expect(again.key).toBe(first.key);
+    expect(writes).toEqual(["curly hair"]);
+
+    hub.describeLook("tom", "blue mohawk");
+    expect(writes).toEqual(["curly hair", "blue mohawk"]);
+    expect(store.getAvatar("tom")!.selfDescription).toBe("blue mohawk");
+  });
+
+  test("no row: an empty text writes nothing, a non-empty one is kept for a restart", () => {
+    const { hub, store } = setup();
+    hub.onConnectorMessage("s1", hello("Tom", "mac"), 1_000);
+    expect(store.getAvatar("tom")).toBeNull();
+    const writes = countWrites(store);
+
+    expect(hub.describeLook("tom", "")).not.toBeNull();
+    expect(writes).toEqual([]);
+    expect(hub.descriptionOf("tom")).toBe("");
+
+    hub.describeLook("tom", "curly hair");
+    expect(writes).toEqual(["curly hair"]);
+    expect(new Hub(CFG, store).descriptionOf("tom")).toBe("curly hair");
+  });
+});

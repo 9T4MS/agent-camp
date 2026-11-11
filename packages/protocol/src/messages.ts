@@ -106,6 +106,14 @@ function msg<const T extends string, D extends z.ZodType>(type: T, data: D) {
 }
 
 // ---- connector -> server ------------------------------------------------------------------
+/**
+ * Local AI command-line tools a connector can draw its person's look with, on that person's own
+ * subscription (Claude Code `claude -p`, run without tools). No shared API key involved.
+ */
+export const LOOK_GENERATORS = ["claude"] as const;
+export const LookGenerator = z.enum(LOOK_GENERATORS);
+export type LookGenerator = z.infer<typeof LookGenerator>;
+
 export const ConnectorHello = msg(
   "connector.hello",
   z.object({
@@ -126,6 +134,8 @@ export const ConnectorHello = msg(
       .string()
       .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)
       .optional(),
+    /** local AI tools this Mac can draw the look with, preferred first; older ones omit it */
+    lookGenerators: z.array(LookGenerator).max(LOOK_GENERATORS.length).optional(),
     /** what this person's subagents look like; older connectors omit it (= robots) */
     helpers: HelperSkin.optional(),
   }),
@@ -136,10 +146,25 @@ export const PresenceSnapshot = msg(
 );
 export const ConnectorBye = msg("connector.bye", z.object({}));
 
+/**
+ * Answer to `connector.lookRequested`: the look a local AI drew (`avatar`, untrusted: the server
+ * repairs and scores it like any AI answer) or why it could not (`error`).
+ */
+export const ConnectorLookGenerated = msg(
+  "connector.lookGenerated",
+  z.object({
+    requestId: z.string().min(1).max(64),
+    generator: LookGenerator,
+    avatar: z.unknown().optional(),
+    error: z.string().max(300).optional(),
+  }),
+);
+
 export const ConnectorToServer = z.discriminatedUnion("type", [
   ConnectorHello,
   PresenceSnapshot,
   ConnectorBye,
+  ConnectorLookGenerated,
 ]);
 export type ConnectorToServer = z.infer<typeof ConnectorToServer>;
 
@@ -172,10 +197,26 @@ export const ConnectorPoked = msg(
   }),
 );
 
+/**
+ * Draw this person's look with a local AI tool (the person's own subscription) and answer with
+ * `connector.lookGenerated`. The server sends the prompt and the JSON schema, so the catalog
+ * can grow without a connector release. Older connectors ignore it.
+ */
+export const ConnectorLookRequested = msg(
+  "connector.lookRequested",
+  z.object({
+    requestId: z.string().min(1).max(64),
+    system: z.string().max(20_000),
+    prompt: z.string().max(MAX_SELF_DESCRIPTION + 1_000),
+    schema: z.record(z.string(), z.unknown()),
+  }),
+);
+
 export const ServerToConnector = z.discriminatedUnion("type", [
   ConnectorWelcomed,
   ConnectorRejected,
   ConnectorPoked,
+  ConnectorLookRequested,
 ]);
 export type ServerToConnector = z.infer<typeof ServerToConnector>;
 

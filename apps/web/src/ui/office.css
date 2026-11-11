@@ -1262,3 +1262,55 @@ body.kiosk .celebration ul {
     display: none;
   }
 }
+
+/* look studio: describe your look, the server's AI draws it */
+.look-studio .look-describe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.look-studio .describe-label {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--grey);
+  text-transform: uppercase;
+}
+.look-studio .look-describe textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 30vh;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+  /* 16px: iOS Safari zooms the page into smaller fields */
+  font-size: 16px;
+  padding: 6px 8px;
+  background: var(--cream);
+  color: var(--night);
+  border: 2px solid var(--night);
+}
+.look-studio .describe-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.look-studio .describe-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--grey);
+}
+.look-studio .describe-go {
+  flex: none;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.look-studio .describe-go:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (max-width: 760px) {
+  .look-studio .look-describe textarea {
+    min-height: 56px;
+  }
+}

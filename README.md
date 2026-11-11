@@ -135,8 +135,21 @@ shows up on the agent card so you can tell the sessions apart.
 
 ### How do I look?
 
-The server picks your look. With AI off it comes from a hash of your name. With AI on it is
-drawn from your description: a few words work, but a detailed one (up to ~8000 characters)
+Your look is drawn by AI from your description. If you opt in, the AI is **your own**: the
+connector asks Claude Code (`claude -p`, with no tools, MCP servers or hooks) on your Mac, on
+your own subscription, so the office needs no shared API key. This is **off by default** (it
+spends your subscription); turn it on with
+
+```bash
+agent-office configure --look-generator auto   # or claude; off turns it off
+launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector
+```
+
+Only your description goes to your AI and only the finished look goes to the office. With it
+off (or without Claude Code), the office's own AI draws your look if the admin set one up
+(`GENUI_PROVIDER`), else it comes from a hash of your name. `agent-office status` shows
+whether your Mac draws looks; updates and reconnects never turn it on.
+The description: a few words work, but a detailed one (up to ~8000 characters)
 gets you a detailed character: hair cut and colour, glasses and their frame, each layer of
 clothing with its collar, buttons, pockets, pattern and embroidery, socks, shoes, even an
 expression and a pose. Exact colours (`#1f3d2b`, "forest green") are used as given. All of it
@@ -162,6 +175,22 @@ logging out) drops the claim. Outfits that are not in the agent colour carry a s
 badge on the tee and a band across the back, so you can still tell Claude from Codex at the
 desk.
 
+The studio also has a **Describe your look** box: write how you look (a few words or a whole
+paragraph) and press **Generate look**; the Mac you confirmed **It's me** on draws you from
+it (as above) within a minute or two, replacing a look picked in the studio. Only that Mac:
+each Mac gets its own code, so another connector started under your name never gets your text,
+and a description a connector sends when it connects never runs on any Mac. After that Mac
+reconnects (sleep, restart), confirm **It's me** again to draw on it; meanwhile the office's
+AI draws. Pressing it again with the same text is
+a fresh try (one per person every 20 s, and one at a time: a new one waits until the last one
+is drawn). Without a Mac that can draw it, the office's own AI draws it, at most 5 times per
+person per day (`GENUI_MAX_CALLS_PER_PERSON`), so nobody uses up the shared daily cap; looks
+drawn on your own Mac do not count. Like editing your look, this needs **It's me** first:
+only your own browser can ask, only that Mac's answer is taken. The text becomes your description, just
+like one set with `agent-office configure --description-file` (a connector that keeps sending
+its old, unchanged description does not undo it). If AI looks are off on the server, the box
+says so and the text is kept for when they are turned on (`GENUI_PROVIDER`, see Deploy).
+
 ![Look studio](screenshots/14-look-editor-laptop.png)
 
 ### Privacy
@@ -173,8 +202,11 @@ the context window is (a percentage), when the
 session started, the connector version, the **machine name** you chose (`machine_name`,
 defaults to the short hostname, e.g. `martins-mbp`; set it to anything you like), and your
 **look description** (up to 8000 characters, if you set one). The server keeps the
-description to draw your avatar (with AI on it goes to the configured AI provider) and never
-shows it to viewers; they only see the finished avatar.
+description to draw your avatar and never shows it to viewers; they only see the finished
+avatar. A description your connector sends is drawn by the office's AI provider, if one is
+set. One you write in the look studio goes to the Mac you confirmed **It's me** on, whose
+Claude Code (your own account, if you opted in) turns it into the look, which the connector sends to
+the office; only when that Mac cannot does it go to the office's AI provider.
 
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).
@@ -378,9 +410,11 @@ Deploys keep what you add there; only the variables listed in `apps/server/wrang
 reset to its values.
 With AI on, a described person costs one call per description change (default model
 `claude-haiku-4-5`, roughly $0.02-0.04 per call); `GENUI_MAX_CALLS_PER_DAY` (default 50)
-bounds the day. People without a description never cause a call. For more faithful looks set
-the *Text* variable `GENUI_MODEL=claude-opus-5-5` (roughly $0.10-0.15 and 30-90 s per call at
-the default `GENUI_EFFORT=low`). A deploy that bumps the look revision regenerates every
+bounds the day, and `GENUI_MAX_CALLS_PER_PERSON` (default 5) the look studio's Generates per
+person per day on it (looks drawn on a person's own Mac count against neither). People
+without a description never cause a call. For more faithful looks set the *Text* variable
+`GENUI_MODEL=claude-opus-5-5` (roughly $0.10-0.15 and 30-90 s per call at the default
+`GENUI_EFFORT=low`). A deploy that bumps the look revision regenerates every
 described person once, within the same daily cap.
 
 **Order when a change touches both sides:** release the connector before the server is

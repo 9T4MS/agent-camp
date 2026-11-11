@@ -25,6 +25,7 @@ import {
   type AvatarSpec,
   type InteractRequest,
   isCatInteraction,
+  type LookDescribeResponse,
   type PartyEvent,
   type PersonDayResponse,
   parseViewerMessage,
@@ -624,18 +625,65 @@ async function boot() {
     }
     return previews;
   };
-  hud.fetchLookCustom = async (personId) => {
+  hud.fetchLookInfo = async (personId) => {
     if (demo) return null;
     try {
       const r = await fetch(
         `/api/people/${encodeURIComponent(personId)}/avatar${key ? `?key=${encodeURIComponent(key)}` : ""}`,
       );
       if (!r.ok) return null;
-      return ((await r.json()) as AvatarEditResponse).custom;
+      const body = (await r.json()) as AvatarEditResponse;
+      return {
+        custom: body.custom,
+        ...(body.aiLooks !== undefined ? { aiLooks: body.aiLooks } : {}),
+        ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.localLooks ? { localLooks: body.localLooks.map(toolName) } : {}),
+      };
     } catch {
       return null;
     }
   };
+  const toolName = (g: string) => (g === "claude" ? "Claude Code" : g);
+  /**
+   * Look studio: describe your look. Your own Mac draws it (Claude Code on your own
+   * subscription; the look arrives as avatar.updated), else the server's AI (waits for it).
+   */
+  async function describeLook(personId: string, description: string) {
+    if (demo) return { ok: false, message: "demo: no AI looks here" };
+    try {
+      const r = await fetch(
+        `/api/people/${encodeURIComponent(personId)}/look${key ? `?key=${encodeURIComponent(key)}` : ""}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ description }),
+        },
+      );
+      const body = (await r.json().catch(() => ({}))) as Partial<LookDescribeResponse> & {
+        error?: string;
+      };
+      if (r.status === 401) void loginIfLoggedOut();
+      if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
+      if (body.result === "pending")
+        return {
+          ok: true,
+          pending: true,
+          message: `your Mac is drawing you with ${toolName(body.generator ?? "its AI")} on your own subscription, about a minute...`,
+        };
+      const message =
+        body.result === "ai"
+          ? "new look, straight from your description!"
+          : body.result === "off"
+            ? "saved, but AI looks are off on this server: ask the office admin to set GENUI_PROVIDER (README, Deploy)"
+            : body.result === "superseded"
+              ? "your look changed while the AI was drawing (a newer Generate or a saved look), so that one stays"
+              : "the AI could not draw you this time (error or daily limit); your look stays. Try again later.";
+      return { ok: body.result === "ai", message, ...(body.avatar ? { avatar: body.avatar } : {}) };
+    } catch {
+      return { ok: false, message: "could not reach the office" };
+    }
+  }
+  if (!kiosk) hud.onDescribeLook = describeLook;
 
   /** Agent card + ease the camera to the character (clear of the side panel). */
   const openSession = (sessionId: string) => {
