@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-11
 
+- The auto-tour comes back to the desks after every other stop and shows the pods where agents are working
 - Agents sitting on a sofa, bench or chair now sit in front of it instead of hiding behind it
 - The "New version!" popup is now a wide banner across the office that goes away by itself after 15 s
 - Version numbers now go 0.2.x and show up right after a deploy, the same on the page, the release and the connectors

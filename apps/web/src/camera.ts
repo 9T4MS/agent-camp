@@ -7,7 +7,25 @@ import type { Container } from "pixi.js";
 import { type Area, type AreaName, TILE } from "./world/map.ts";
 
 const IDLE_BEFORE_AUTO_MS = 30_000;
-const TOUR_STOP_S = 12;
+const TOUR_STOP_S = 10;
+const DESK_STOP_S = 15;
+/** every other stop is the desk floor, so the agents are on screen most of the time */
+const TOUR_STOPS: readonly (AreaName | "all")[] = [
+  "desks",
+  "lounge",
+  "desks",
+  "meeting",
+  "desks",
+  "game",
+  "desks",
+  "garden",
+  "desks",
+  "bar",
+  "desks",
+  "shop",
+  "desks",
+  "all",
+];
 const FOLLOW_S = 9;
 const MAX_ZOOM = 6;
 
@@ -55,6 +73,9 @@ export class Camera {
    * frames the original office and adds the east street block only while someone is there.
    */
   fitWidth: () => number = () => this.worldSize().width;
+  /** pods with agents at work (pod centers, px); desk stops cycle through them */
+  busyDesks: () => readonly { x: number; y: number }[] = () => [];
+  private deskIdx = 0;
   /** tour stops that are skipped right now (e.g. the bar while it is closed) */
   skipStop: (name: AreaName) => boolean = () => false;
   private fitW = 0;
@@ -299,36 +320,27 @@ export class Camera {
     if (this.opts.view === "overview") return this.overview(dt);
     this.tourT -= dt;
     if (this.tourT > 0) return;
-    const stops: (AreaName | "all")[] = [
-      "desks",
-      "lounge",
-      "desks",
-      "meeting",
-      "game",
-      "desks",
-      "garden",
-      "bar",
-      "desks",
-      "shop",
-      "all",
-    ];
-    let stop = stops[this.tourIdx++ % stops.length]!;
+    const next = () => TOUR_STOPS[this.tourIdx++ % TOUR_STOPS.length]!;
+    let stop = next();
     // closed places are skipped (the next stop is always the desk floor)
-    if (stop !== "all" && this.skipStop(stop)) stop = stops[this.tourIdx++ % stops.length]!;
+    if (stop !== "all" && this.skipStop(stop)) stop = next();
     // a portrait phone would show the whole office as a thin strip: stay on the desks
     const s = this.screen();
     if (stop === "all" && s.height > s.width * 1.15) stop = "desks";
-    this.tourT = TOUR_STOP_S;
-    if (stop === "desks") {
-      // pan across the desk floor in thirds
-      const a = this.areas().find((ar) => ar.name === "desks");
-      if (a) {
-        const third = this.tourIdx % 3;
-        this.set({ x: (a.x + 6 + third * 10) * TILE, y: (a.y + a.h / 2) * TILE, zoom: 2.5 });
-        return;
-      }
-    }
+    this.tourT = stop === "desks" ? DESK_STOP_S : TOUR_STOP_S;
+    if (stop === "desks") return this.deskStop();
     this.focusArea(stop);
+  }
+
+  /** The next pod where agents are at work, or a third of the desk floor when nobody is. */
+  private deskStop() {
+    const busy = this.busyDesks();
+    const i = this.deskIdx++;
+    const spot = busy[i % Math.max(1, busy.length)];
+    if (spot) return this.set({ x: spot.x, y: spot.y, zoom: 3 });
+    const a = this.areas().find((ar) => ar.name === "desks");
+    if (!a) return this.focusArea("desks");
+    this.set({ x: (a.x + 6 + (i % 3) * 10) * TILE, y: (a.y + a.h / 2) * TILE, zoom: 2.5 });
   }
 
   /** Whole office most of the time; a close-up of the hot spot every `overviewEvery` s. */

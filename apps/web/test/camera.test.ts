@@ -86,3 +86,40 @@ describe("camera framing with the east street block", () => {
     expect(visited).toContain("shop");
   });
 });
+
+describe("the tour keeps the agents in view", () => {
+  test("every other stop is the desk floor, and desk stops visit the busy pods in turn", () => {
+    const { cam } = camera();
+    const busy = [
+      { x: 100, y: 200 },
+      { x: 300, y: 400 },
+    ];
+    cam.busyDesks = () => busy;
+    let current = "";
+    let inArea = false;
+    const deskVisits: { x: number; y: number }[] = [];
+    const focusArea = cam.focusArea.bind(cam);
+    cam.focusArea = (name, instant) => {
+      current = name;
+      inArea = true;
+      focusArea(name, instant);
+      inArea = false;
+    };
+    const set = cam.set.bind(cam);
+    cam.set = (view, instant) => {
+      if (!inArea) {
+        current = "desks";
+        deskVisits.push({ x: view.x!, y: view.y! });
+      }
+      set(view, instant);
+    };
+    const frames = 30 * 60 * 10;
+    let deskFrames = 0;
+    for (let i = 0; i < frames; i++) {
+      cam.update(1 / 30);
+      if (current === "desks") deskFrames++;
+    }
+    expect(deskVisits.slice(0, 4)).toEqual([busy[0]!, busy[1]!, busy[0]!, busy[1]!]);
+    expect(deskFrames / frames).toBeGreaterThan(0.55);
+  });
+});
