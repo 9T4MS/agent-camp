@@ -30,6 +30,7 @@ import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
 import { keepAwake } from "./kiosk.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { registerServiceWorker } from "./pwa.ts";
+import { PartyPanel } from "./partyPanel.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
 import { Minimap } from "./ui/minimap.ts";
@@ -49,6 +50,7 @@ import {
   podRowsFor,
 } from "./world/map.ts";
 import { OfficeScene } from "./world/office.ts";
+import { PartyWorld } from "./world/party.ts";
 
 type OfficeApi = {
   ready: boolean;
@@ -124,6 +126,7 @@ async function boot() {
   app.stage.addChild(scene.root);
   const effects = new Effects(scene.fx);
   const chars = new CharacterManager(scene, model, effects);
+  const partyWorld = new PartyWorld(scene, chars);
   const party = demo === "party" || flag("lively");
   // the party demo runs the waiting thresholds 10x faster and starts at lunch time
   if (party) {
@@ -413,6 +416,11 @@ async function boot() {
     return true;
   };
   const focusParam = params.get("focus");
+  new PartyPanel(host, model, partyWorld, {
+    demo: !!demo,
+    key,
+    focus: (id) => void focusPerson(id, 4),
+  });
   if (focusParam) {
     // with a live server the snapshot arrives later: focus as soon as the person exists
     const tryFocus = () => {
@@ -453,6 +461,7 @@ async function boot() {
     time += dt;
     scene.update(time, dt);
     chars.update(dt, time);
+    partyWorld.update(dt, time);
     cat.update(dt, time);
     life.update(dt, time);
     effects.update(dt);
