@@ -6,11 +6,18 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   DETECT_POLL_MS,
+  envelope,
   HEARTBEAT_MS,
+  type MessageData,
   type SessionInfo,
   SNAPSHOT_DEBOUNCE_MS,
 } from "@agent-office/protocol";
-import { type ClientOptions, ConnectorClient, type Welcomed } from "./client.ts";
+import {
+  type ClientOptions,
+  ConnectorClient,
+  type LookRequested,
+  type Welcomed,
+} from "./client.ts";
 import { snapshotKey } from "./detect/index.ts";
 import type { Logger } from "./log.ts";
 import { isNewer, type Updater } from "./update.ts";
@@ -30,6 +37,10 @@ export type DaemonOptions = {
   debounceMs?: number;
   heartbeatMs?: number;
   onPoked?: ClientOptions["onPoked"];
+  /** draws looks with a local AI tool when the office asks (see lookgen.ts) */
+  looks?: { generate(req: LookRequested): Promise<MessageData<"connector.lookGenerated">> };
+  /** for `agent-office status`: which local AI draws the look ("off" when none) */
+  looksLabel?: string;
   client?: Partial<ClientOptions>;
 };
 
@@ -43,6 +54,8 @@ export type StatusFile = {
   personId?: string;
   lastError?: string;
   updatedAt: number;
+  /** local AI that draws the look, e.g. "claude (/Users/x/.local/bin/claude)" or "off" */
+  looks?: string;
   sessions: Omit<SessionInfo, "sessionKey">[];
 };
 
@@ -75,6 +88,8 @@ export class Daemon {
   private lastSentKey = "";
   private blocked = false;
   private stopped = false;
+  /** a drawn look that could not be sent (connection dropped meanwhile): sent on the next welcome */
+  private unsentLook: MessageData<"connector.lookGenerated"> | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -90,6 +105,7 @@ export class Daemon {
       log: opts.log,
       onWelcomed: (w) => this.onWelcomed(w),
       ...(opts.onPoked ? { onPoked: opts.onPoked } : {}),
+      ...(opts.looks ? { onLookRequested: (r: LookRequested) => void this.drawLook(r) } : {}),
       onState: (s) => {
         this.state = {
           ...this.state,
@@ -157,6 +173,18 @@ export class Daemon {
     if (this.client.sendSnapshot(this.sessions)) this.lastSentKey = this.lastKey;
   }
 
+  /** Draw the look the office asked for and send it back (or keep it for the next welcome). */
+  private async drawLook(req: LookRequested): Promise<void> {
+    const looks = this.opts.looks;
+    if (!looks || this.stopped) return;
+    const answer = await looks.generate(req);
+    if (this.stopped) return;
+    if (!this.client.send(envelope("connector.lookGenerated", answer))) {
+      this.opts.log("look: not connected, sending it once the office is back");
+      this.unsentLook = answer;
+    }
+  }
+
   private onWelcomed(w: Welcomed): void {
     this.state.personId = w.personId;
     const up = this.opts.updater;
@@ -170,6 +198,8 @@ export class Daemon {
       return;
     }
     this.blocked = false;
+    if (this.unsentLook && this.client.send(envelope("connector.lookGenerated", this.unsentLook)))
+      this.unsentLook = null;
     if (up && isNewer(w.latestConnectorVersion, this.opts.version)) {
       void up.maybeUpdate(w.latestConnectorVersion, "server announced");
     }
@@ -189,6 +219,7 @@ export class Daemon {
       personId: this.state.personId,
       lastError: this.state.error,
       updatedAt: Date.now(),
+      ...(this.opts.looksLabel ? { looks: this.opts.looksLabel } : {}),
       sessions: this.sessions.map(({ sessionKey: _k, ...rest }) => rest),
     };
     try {

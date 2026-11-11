@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "connector.lookRequested",
+  "id": "01KD8QZ0000000000000000040",
+  "ts": 1793174401000,
+  "data": {
+    "requestId": "lr_7f3a9c2e1b",
+    "system": "You dress up a small pixel-art character...",
+    "prompt": "Name: Anna\n<self_description>\ncurly red hair, round glasses\n</self_description>",
+    "schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+  }
+}

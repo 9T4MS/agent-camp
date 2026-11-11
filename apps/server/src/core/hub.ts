@@ -17,6 +17,8 @@ import {
   envelope,
   type HelperSkin,
   hashString,
+  type LookGenerator,
+  type MessageData,
   type MessageOf,
   PERSON_GRACE_MS,
   type PersonView,
@@ -62,6 +64,8 @@ export type Binding = {
   machine?: string;
   /** opt-in "MM-DD" */
   birthday?: string;
+  /** local AI tools this connector can draw its person's look with (their own subscription) */
+  lookGenerators?: LookGenerator[];
   /** opt-in: this person's subagents are kittens (omitted = robots) */
   helpers?: HelperSkin;
 };
@@ -107,6 +111,8 @@ export type HubResult = {
   avatarJob?: AvatarJob;
   /** new binding for this socket (persist it with the socket) */
   binding?: Binding;
+  /** a connector answered a look request on `socketId` (checked and applied by the app) */
+  lookGenerated?: MessageData<"connector.lookGenerated"> & { personId: string; socketId: string };
 };
 
 type Persisted = { v: 1; connectors: ConnectorRec[]; people: PersonRec[] };
@@ -269,6 +275,12 @@ export class Hub {
         return this.onHello(socketId, msg, now);
       case "presence.snapshot":
         return this.onSnapshot(socketId, msg.data.sessions, now);
+      case "connector.lookGenerated": {
+        const b = this.sockets.get(socketId);
+        if (!b) return this.reject("bad_message", CLOSE_BAD_MESSAGE, "send connector.hello first");
+        // the person comes from the socket's own hello, never from the message
+        return { events: [], lookGenerated: { ...msg.data, personId: b.personId, socketId } };
+      }
       case "connector.bye": {
         const b = this.sockets.get(socketId);
         this.sockets.delete(socketId);
@@ -306,6 +318,12 @@ export class Hub {
     return Number.isFinite(min) ? min : null;
   }
 
+  /** Whether a look made for this key is still wanted (else `setAvatar` drops it). */
+  isCurrentLookKey(personId: string, key: string): boolean {
+    const p = this.people.get(personId);
+    return !p?.lookKey || key.replace(/:fallback$/, "") === p.lookKey;
+  }
+
   /**
    * Store a (generated) avatar and emit avatar.updated if the person is present. A result for
    * an older job (the description changed again meanwhile) is dropped.
@@ -318,7 +336,7 @@ export class Hub {
     selfDescription?: string,
   ): ViewerEvent[] {
     const p = this.people.get(personId);
-    if (p?.lookKey && key.replace(/:fallback$/, "") !== p.lookKey) return [];
+    if (!this.isCurrentLookKey(personId, key)) return [];
     this.store.putAvatar(personId, avatar, key, selfDescription ?? p?.selfDescription ?? "");
     // a custom look stays on; the automatic one waits in its row for "Automatic"
     if (this.customAvatar(personId)) return [];
@@ -376,6 +394,50 @@ export class Hub {
     return this.customAvatar(personId) !== null;
   }
 
+  /** The person-level look description ("" = none). Never part of the office state. */
+  descriptionOf(personId: string): string {
+    const p = this.people.get(personId);
+    return p?.selfDescription ?? this.storedAvatar(personId)?.selfDescription ?? "";
+  }
+
+  /**
+   * Look studio: the owner describes their look in the browser. The text becomes the
+   * person-level description, exactly as if a connector had sent a new one (a connector that
+   * keeps sending its old, unchanged description does not flip it back, see `ensurePerson`).
+   * Always returns an avatar job, even for the same text: "Generate" means "try again". A
+   * custom look stays pinned until the caller drops it (only once the AI made a new look, so
+   * a failed attempt never costs the person their look). Null when not in the office.
+   */
+  describeLook(personId: string, description: string): AvatarJob | null {
+    const p = this.people.get(personId);
+    if (!p) return null;
+    const stored = this.storedAvatar(personId);
+    p.selfDescription = description;
+    // keep the text with the automatic look right away, so it survives a restart even if
+    // the AI call fails (the `:fallback` key then retries it on the next join). Skipped when
+    // the row already holds this text (no row reads back as ""), so repeated Generates with
+    // the AI off or the cap reached write nothing.
+    const kept = stored ? stored.selfDescription : "";
+    if (kept !== description)
+      this.store.putAvatar(
+        personId,
+        stored?.avatar ?? avatarFromSeed(personId),
+        stored?.key ?? "",
+        description,
+      );
+    const keyFn = this.cfg.avatarKey ?? defaultAvatarKey;
+    const key = keyFn(personId, description);
+    p.lookKey = key;
+    this.log(`look ${personId} described in the look studio`);
+    return {
+      personId,
+      name: p.name,
+      key,
+      selfDescription: description,
+      ...(stored ? { previous: stored.avatar } : {}),
+    };
+  }
+
   state(): OfficeState {
     return this.current;
   }
@@ -414,6 +476,19 @@ export class Hub {
 
   bindingOf(socketId: string): Binding | undefined {
     return this.sockets.get(socketId);
+  }
+
+  /**
+   * The local AI tools of one socket (the Mac a browser proved it can read, see
+   * OfficeApp.requestLocalLook), when it is the live socket of one of this person's connectors;
+   * else []. Never any other socket of the person: a connector's person is only a claimed name.
+   */
+  lookGeneratorsOf(personId: string, socketId: string | undefined, now: number): LookGenerator[] {
+    if (!socketId) return [];
+    const b = this.sockets.get(socketId);
+    const c = b && this.connectors.get(b.clientId);
+    if (!c || c.socketId !== socketId || c.personId !== personId || this.isStale(c, now)) return [];
+    return [...(c.lookGenerators ?? [])];
   }
 
   /** Open sockets of a person's connectors that are still heartbeating. */
@@ -469,6 +544,7 @@ export class Hub {
       ...(desc ? { selfDescription: desc } : {}),
       ...(machine ? { machine } : {}),
       ...(d.birthday ? { birthday: d.birthday } : {}),
+      ...(d.lookGenerators?.length ? { lookGenerators: [...new Set(d.lookGenerators)] } : {}),
       ...(d.helpers === "cats" ? { helpers: d.helpers } : {}),
     };
     // a hello on a socket that was bound to another clientId: drop the old binding

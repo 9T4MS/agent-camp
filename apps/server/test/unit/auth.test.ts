@@ -6,6 +6,7 @@ import {
   makeMeToken,
   makeSessionToken,
   meFromRequest,
+  meProofFromRequest,
   renewedSessionCookie,
   SESSION_COOKIE,
   SESSION_RENEW_BELOW_MS,
@@ -111,6 +112,28 @@ describe("viewer gate", () => {
     expect(await meFromRequest(withMe(token), { CONNECTOR_PASSWORD: "other" }, NOW)).toBeNull();
     expect(await meFromRequest(withMe(token), ENV, NOW + 366 * 86_400_000)).toBeNull();
     expect(await meFromRequest(req("/"), ENV, NOW)).toBeNull();
+  });
+
+  test("me cookie: the Mac it was proved with is signed in too", async () => {
+    const token = await makeMeToken("pw", "tom", NOW, "sock-1");
+    const withMe = (t: string) => req("/", { headers: { cookie: `${ME_COOKIE}=${t}` } });
+    expect(await meProofFromRequest(withMe(token), ENV, NOW)).toEqual({
+      personId: "tom",
+      mac: "sock-1",
+    });
+    expect(await meFromRequest(withMe(token), ENV, NOW)).toBe("tom");
+    // another socket, or the Mac dropped from a signed token: rejected
+    expect(
+      await meProofFromRequest(withMe(token.replace(".sock-1.", ".sock-2.")), ENV, NOW),
+    ).toBeNull();
+    const [p, exp, , sig] = token.split(".");
+    expect(await meProofFromRequest(withMe(`${p}.${exp}.${sig}`), ENV, NOW)).toBeNull();
+    // an older cookie without a Mac is still the person, with no Mac
+    expect(await meProofFromRequest(withMe(await makeMeToken("pw", "tom", NOW)), ENV, NOW)).toEqual(
+      {
+        personId: "tom",
+      },
+    );
   });
 
   test("next only allows same-site paths", () => {

@@ -6,9 +6,11 @@
  *   POST /api/history/backfill <- HistoryRow[]   (Bearer CONNECTOR_PASSWORD)
  *   POST /api/interact         <- InteractRequest -> InteractResponse
  *   PUT  /api/people/:personId/avatar <- AvatarEditRequest -> AvatarEditResponse
+ *   POST /api/people/:personId/look   <- LookDescribeRequest -> LookDescribeResponse
  */
 import { z } from "zod";
 import { AvatarSpec } from "./catalog.ts";
+import { MAX_SELF_DESCRIPTION } from "./constants.ts";
 import {
   Activity,
   AgentKind,
@@ -16,6 +18,7 @@ import {
   InteractionKind,
   InteractionText,
   isCatInteraction,
+  LookGenerator,
   needsSpot,
   PersonId,
   ViewerName,
@@ -58,8 +61,43 @@ export const AvatarEditResponse = z.object({
   /** the look now shown (for a reset: the current one until the new automatic look lands) */
   avatar: AvatarSpec,
   custom: z.boolean(),
+  /** whether a description can become a look (a local AI on their Mac or GENUI_PROVIDER) */
+  aiLooks: z.boolean().optional(),
+  /** local AI tools on this person's live Macs that draw looks on their own subscription */
+  localLooks: z.array(LookGenerator).optional(),
+  /** the person's look description; only sent to that person's own browser */
+  description: z.string().optional(),
 });
 export type AvatarEditResponse = z.infer<typeof AvatarEditResponse>;
+
+/**
+ * The owner describes their look in the look studio (same text a connector sends as its look
+ * description). It becomes the person's description and the server's GenUI makes a new look.
+ * Refused with 429 `{error}` (nothing changes) while their last Generate is still being drawn,
+ * within 20 s of it, or once they used their daily Generates on the server's AI (5 by default;
+ * looks drawn on their own Mac do not count).
+ */
+export const LookDescribeRequest = z.object({
+  description: z.string().trim().min(1).max(MAX_SELF_DESCRIPTION),
+});
+export type LookDescribeRequest = z.infer<typeof LookDescribeRequest>;
+
+export const LookDescribeResponse = z.object({
+  ok: z.boolean(),
+  /** the look now shown */
+  avatar: AvatarSpec,
+  /**
+   * ai = a new look from the description; off = this server has no AI looks (the description
+   * is saved and used once they are turned on); failed = error, refusal, unusable answer,
+   * daily cap or the person's daily limit (the previous look stays, the next join retries);
+   * pending = the person's own Mac is drawing it (`generator`), the new look arrives as
+   * avatar.updated; superseded = the AI drew it, but the look changed meanwhile (a newer
+   * Generate, a new description or a look picked in the editor), so that one stays
+   */
+  result: z.enum(["ai", "off", "failed", "pending", "superseded"]),
+  generator: LookGenerator.optional(),
+});
+export type LookDescribeResponse = z.infer<typeof LookDescribeResponse>;
 
 /** One stored history row (one per viewer event, except activity changes). No content. */
 export const HistoryRow = z.object({
