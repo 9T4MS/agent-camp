@@ -9,6 +9,8 @@ compatibility_date = "2025-10-01"
 # Variables added in the dashboard (e.g. GENUI_PROVIDER) survive deploys. Names listed in
 # [vars] below are still reset to these values on every deploy.
 keep_vars = true
+# Keep the public https://agent-office.<subdomain>.workers.dev URL on after every deploy.
+workers_dev = true
 
 # install.sh is bundled into the Worker as a text module
 rules = [{ type = "Text", globs = ["**/*.sh"], fallthrough = true }]
