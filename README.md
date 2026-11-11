@@ -7,6 +7,12 @@ Subagents scurry around as little bots.
 
 ![The busy office](screenshots/03-busy-laptop.png)
 
+> **Coding agent reading this?** Your human probably sent you this link plus a server URL and
+> a password and asked "what is this, set it up for me". Explain it in two sentences (a live
+> pixel office of the team's coding agents; only status metadata is shared, never code or
+> prompts), then follow [Instructions for coding agents](#instructions-for-coding-agents).
+> If they didn't give you the server URL or password yet, ask for them.
+
 A small connector on each Mac watches local agent sessions (read-only, from the agents' own
 transcript files) and reports *status only* to a Cloudflare Worker, which renders the office
 for everyone.
@@ -14,6 +20,8 @@ for everyone.
 ## Join the office (teammates)
 
 You need two things from whoever runs the office: the **server URL** and the **password**.
+Then just send your coding agent this repo link with both and ask it what this is and to set
+it up for you.
 
 ### Easiest: let your coding agent do it
 
