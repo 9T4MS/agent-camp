@@ -236,8 +236,9 @@ export class OfficeApp {
       return json({ error: "expected a PNG body" }, { status: 415 });
     }
     const now = this.now();
+    const trusted = bearerOk(req, this.env);
     // the kiosk recorder posts every 15 min; Bearer CONNECTOR_PASSWORD bypasses (simulator, tests)
-    if (!bearerOk(req, this.env)) {
+    if (!trusted) {
       const last = Number(this.store.kvGet("snapshots.last") ?? 0);
       if (now - last < SNAPSHOT_MIN_INTERVAL_MS) {
         const retry = Math.ceil((last + SNAPSHOT_MIN_INTERVAL_MS - now) / 1000);
@@ -247,8 +248,11 @@ export class OfficeApp {
         );
       }
     }
-    this.store.kvPut("snapshots.last", String(now));
-    const id = this.store.addSnapshot(now, png);
-    return json({ id, ts: now, url: `/api/snapshots/${id}.png` }, { status: 201 });
+    // Bearer uploads may backdate a frame with ?ts=<ms> (screenshots, imports); never the future
+    const asked = trusted ? Number(new URL(req.url).searchParams.get("ts")) : Number.NaN;
+    const ts = Number.isFinite(asked) && asked > 0 ? Math.min(Math.round(asked), now) : now;
+    if (!trusted) this.store.kvPut("snapshots.last", String(now));
+    const id = this.store.addSnapshot(ts, png);
+    return json({ id, ts, url: `/api/snapshots/${id}.png` }, { status: 201 });
   }
 }

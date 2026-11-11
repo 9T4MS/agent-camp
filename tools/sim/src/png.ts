@@ -150,7 +150,7 @@ export async function uploadSnapshots(
     const res = await fetch(`${http}/api/snapshots`, {
       method: "POST",
       headers: { authorization: `Bearer ${password}`, "content-type": "image/png" },
-      body: png,
+      body: png as Uint8Array<ArrayBuffer>, // DOM typings (screenshots tool) want a plain ArrayBuffer
     });
     if (!res.ok) throw new Error(`snapshot upload failed: ${res.status} ${await res.text()}`);
     const body = (await res.json().catch(() => ({}))) as { id?: number };

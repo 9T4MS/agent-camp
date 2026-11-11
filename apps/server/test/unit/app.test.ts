@@ -78,6 +78,22 @@ describe("OfficeApp", () => {
     expect((await app.handleHttp(req("/api/snapshots/99.png")))!.status).toBe(404);
   });
 
+  test("snapshots: bearer uploads may backdate with ?ts=, others may not", async () => {
+    const { app } = setup();
+    const post = (q: string, headers: Record<string, string> = {}) =>
+      app.handleHttp(req(`/api/snapshots${q}`, { method: "POST", body: PNG, headers }));
+    const back = (await (await post("?ts=500000", { authorization: "Bearer pw" }))!.json()) as {
+      ts: number;
+    };
+    expect(back.ts).toBe(500_000);
+    const future = (await (await post("?ts=9000000", { authorization: "Bearer pw" }))!.json()) as {
+      ts: number;
+    };
+    expect(future.ts).toBe(1_000_000);
+    const anon = (await (await post("?ts=500000"))!.json()) as { ts: number };
+    expect(anon.ts).toBe(1_000_000);
+  });
+
   test("backfill requires bearer and validates rows; stats + csv reflect it", async () => {
     const { app } = setup();
     const rows = [{ ts: 5, type: "session.started", person: "bot", agent: "codex", project: "p" }];
