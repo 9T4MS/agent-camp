@@ -449,6 +449,38 @@ async function sceneOfficeLife() {
   }
 }
 
+/**
+ * 16: Friday after work in the east street block (`?feierabend=1`): happy hour in the bar,
+ * beers at the standing tables, someone smoking in the corner by the weed shop.
+ */
+async function sceneBarAndShop() {
+  const name = "16-bar-and-shop";
+  if (!want(name)) return;
+  log(name);
+  const o = await office("busy");
+  try {
+    for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
+      const page = await openOffice(
+        vp,
+        `${o.http}/?feierabend=1&weather=sun&zoom=1.7`,
+        BUSY.people,
+        BUSY.sessions,
+        800,
+      );
+      await livenUp(page);
+      await sleep(40_000);
+      // frame both buildings: the bar on top, the shop and the smokers' corner below
+      await page.evaluate(() => window.__office.camera.lookAt(68, 15.5, 1.7));
+      await sleep(1000);
+      await page.evaluate(() => window.__office.setSpeed(0));
+      await shoot(page, `${name}-${vp}`);
+      await page.close();
+    }
+  } finally {
+    o.stop();
+  }
+}
+
 /** 13: a `/clear` (end + restart a second later): the old character gets zapped. */
 async function sceneCleared() {
   const name = "13-cleared-session";
@@ -705,6 +737,7 @@ async function main() {
     await sceneAgentCard();
     await sceneOfficeLife();
     await sceneCleared();
+    await sceneBarAndShop();
     await sceneTerminal();
   } finally {
     await browser.close();
@@ -723,6 +756,7 @@ declare global {
       camera: {
         zoomToFit(): void;
         focusArea(name: string): void;
+        lookAt(tileX: number, tileY: number, zoom: number): void;
         focusPerson(personId: string, zoom?: number): boolean;
       };
       snapshotPng(): Promise<string | null>;

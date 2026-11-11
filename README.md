@@ -229,8 +229,16 @@ bar.
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?season=winter` (or spring,
 summer, autumn), `?weather=snow` (sun, clouds, rain, snow; otherwise it changes every hour),
 `?nohud=1`, `?demo=busy` (no server needed), `?event=kaiju` (also tornado, meteors, eclipse,
-raccoons, alarm, catboss, flood) and `?birthday=<personId>` to see the rare stuff now. A car
-drives by every minute or so: click it for the stats.
+raccoons, alarm, catboss, flood, happyhour) and `?birthday=<personId>` to see the rare stuff
+now. A car drives by every minute or so: click it for the stats.
+
+East of the garden there is a street block with the **Feierabend bar** (17:00–02:00, Fridays
+from 16:00 with happy hour until 18:00) and a **weed shop** (10:00–20:00) with a smokers'
+corner outside. Idle agents pour a beer at the tap and take it to a stool or standing table,
+or buy something at the shop and smoke it in the corner. Closed places stay empty. Try
+`?demo=feierabend`, or `?bar=open` / `?shop=closed` to ignore the opening hours.
+
+![Bar, weed shop and smokers' corner](screenshots/16-bar-and-shop-laptop.png)
 
 Everything is behind the office password (the same one as the connector's): the first visit
 shows a login page and the browser stays logged in for 30 days; opening the office during the

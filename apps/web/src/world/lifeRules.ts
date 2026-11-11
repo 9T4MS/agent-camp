@@ -190,6 +190,34 @@ export function pizzaWindow(hour: number): "lunch" | "dinner" | null {
   return null;
 }
 
+// ---- bar + weed shop -------------------------------------------------------------------------
+/** Friday (weekdayOf: 0 = Sunday). */
+const FRIDAY = 5;
+
+/**
+ * The "Feierabend" bar: 17:00-02:00 every night, on Fridays from 16:00 (happy hour).
+ * `weekday` is the calendar day of `hour` (after midnight it is the next day, which is fine:
+ * only the Friday afternoon depends on it).
+ */
+export function barOpen(hour: number, weekday: number): boolean {
+  return hour >= 17 || hour < 2 || (weekday === FRIDAY && hour >= 16);
+}
+
+/** Friday happy hour 16:00-18:00: the BAR sign blinks and people head over more often. */
+export function happyHour(hour: number, weekday: number): boolean {
+  return weekday === FRIDAY && hour >= 16 && hour < 18;
+}
+
+/** The weed shop: 10:00-20:00 every day. The smokers' corner outside never closes. */
+export function shopOpen(hour: number): boolean {
+  return hour >= 10 && hour < 20;
+}
+
+/** `?bar=` / `?shop=` overrides: "open" | "closed" (else null = follow the clock). */
+export function parseOpenOverride(v: string | null | undefined): boolean | null {
+  return v === "open" ? true : v === "closed" ? false : null;
+}
+
 /** Session age at its end, in ms, given the server clock skew (server - local). */
 export function sessionAgeMs(startedAt: number, clockSkew: number, now: number): number {
   return now + clockSkew - startedAt;
@@ -372,6 +400,7 @@ export const FORCE_EVENTS = [
   "alarm",
   "catboss",
   "flood",
+  "happyhour",
 ] as const;
 export type ForcedEvent = (typeof FORCE_EVENTS)[number];
 export function parseForcedEvent(v: string | null | undefined): ForcedEvent | null {

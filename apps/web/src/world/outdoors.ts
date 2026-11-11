@@ -279,7 +279,8 @@ class Forest {
 // ---- the sky of the hour --------------------------------------------------------------------
 type Drop = { sprite: Sprite; seed: number };
 type Region = { x: number; y: number; w: number; h: number };
-const DROPS = 110;
+/** 110 used to cover garden + forest + street; the smokers' corner got its own share */
+const DROPS = 140;
 const DRIFT = 8;
 
 class SkyLayer {
@@ -399,6 +400,17 @@ export class Outdoors {
         const { w, h } = world();
         const out: Region[] = [];
         if (g) out.push({ x: g.x * TILE + 24, y: g.y * TILE, w: g.w * TILE - 20, h: g.h * TILE });
+        // the smokers' corner (and the sidewalk lane next to it) below the weed shop
+        const shop = scene.map.areas.find((a) => a.name === "shop");
+        if (shop) {
+          const top = shop.y + 10;
+          out.push({
+            x: (shop.x - 1) * TILE,
+            y: top * TILE,
+            w: (shop.w + 1) * TILE,
+            h: (scene.map.height - 1 - top) * TILE,
+          });
+        }
         out.push({ x: -SURROUND_PX, y: -SURROUND_PX, w: w + 2 * SURROUND_PX, h: SURROUND_PX - 4 });
         out.push({ x: -SURROUND_PX, y: h + 2, w: w + 2 * SURROUND_PX, h: SURROUND_PX - 4 });
         return out;

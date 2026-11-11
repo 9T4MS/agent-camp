@@ -19,6 +19,7 @@ import {
   headstoneTextures,
   pizzaTextures,
   roombaTextures,
+  textBubbleTexture,
 } from "../art/fun.ts";
 import { pixelTexture } from "../art/fx.ts";
 import type { OfficeModel } from "../state/officeModel.ts";
@@ -35,25 +36,30 @@ import {
 } from "./chaos.ts";
 import type { Effects } from "./effects.ts";
 import {
+  barOpen,
   catBossWindow,
   eclipseDark,
   type ForcedEvent,
   floodLevel,
   forcedSky,
+  happyHour,
   kaijuAt,
   localDayKey,
   PARTY_HELPERS,
   parseForcedEvent,
+  parseOpenOverride,
   pizzaWindow,
   RACCOON_RAID_H,
   raccoonPhase,
   rareEventOf,
   type Season,
   type SkyNow,
+  shopOpen,
   skyAt,
   tornadoAt,
   trashOut,
   type Weather,
+  weekdayOf,
 } from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
 import type { OfficeScene } from "./office.ts";
@@ -93,6 +99,9 @@ export type LifeOptions = {
   forceEvent?: string | null;
   /** `?birthday=<personId>`: that person has their birthday today */
   forceBirthday?: string | null;
+  /** `?bar=open|closed`, `?shop=open|closed`: ignore the opening hours */
+  barOpen?: boolean | null;
+  shopOpen?: boolean | null;
 };
 
 /** forced kaiju (`?event=kaiju`): 40 s walk, 10 s pause, again */
@@ -600,6 +609,10 @@ export class OfficeLife {
   private readonly forced: ForcedEvent | null;
   private readonly forcedBirthday: string | null;
   private bossSpot: Point | null = null;
+  private readonly barOverride: boolean | null;
+  private readonly shopOverride: boolean | null;
+  /** seconds until the next "HAPPY HOUR!" shout over the bar */
+  private happyShout = 2;
   /** seconds since boot (forced events loop on it) */
   private clock = 0;
 
@@ -638,6 +651,8 @@ export class OfficeLife {
     const url = typeof location === "undefined" ? null : new URLSearchParams(location.search);
     this.forced = parseForcedEvent(opts.forceEvent ?? url?.get("event"));
     this.forcedBirthday = opts.forceBirthday ?? url?.get("birthday") ?? null;
+    this.barOverride = opts.barOpen ?? parseOpenOverride(url?.get("bar"));
+    this.shopOverride = opts.shopOpen ?? parseOpenOverride(url?.get("shop"));
     this.alarm = new FireAlarm(scene, effects, (spot) => hooks.evacuate?.(spot));
     this.mafia = new MafiaCoffee(scene, effects);
     this.raccoons = new Raccoons(scene, effects);
@@ -743,6 +758,7 @@ export class OfficeLife {
     const level = f === "flood" ? Math.min(1, 0.3 + this.clock / 8) : this.floodNow;
     this.flood.update(time, level, this.ducks);
     this.chef.update(dt, time);
+    this.barUpdate(dt);
     this.outdoors.update(dt, time, this.sky, this.hooks.hour(), this.day);
     // ping-pong rally
     const match = this.hooks.pongMatch();
@@ -759,6 +775,35 @@ export class OfficeLife {
         this.ball.zIndex = (t.y + 2) * TILE + 1;
       }
     }
+  }
+
+  /** Opening hours of the bar and the shop (every 0.5 s); `?event=happyhour` forces it. */
+  private placesSlow(day: string, hour: number) {
+    const weekday = day ? weekdayOf(day) : new Date().getDay();
+    const happy = this.forced === "happyhour" || happyHour(hour, weekday);
+    this.scene.happyHour = happy && this.barOverride !== false;
+    this.scene.barOpen = this.barOverride ?? (happy || barOpen(hour, weekday));
+    this.scene.shopOpen = this.shopOverride ?? shopOpen(hour);
+  }
+
+  /** Happy hour: the bar shouts it out every ~25 s. */
+  private barUpdate(dt: number) {
+    if (!this.scene.happyHour) {
+      this.happyShout = 2;
+      return;
+    }
+    this.happyShout -= dt;
+    if (this.happyShout > 0) return;
+    this.happyShout = 22 + this.partyRand() * 8;
+    const neon = this.scene.map.objects.find((o) => o.kind === "neonBeer");
+    if (!neon) return;
+    this.effects.floater(
+      textBubbleTexture("HAPPY HOUR!"),
+      (neon.x + 1.5) * TILE,
+      (neon.y + 1) * TILE,
+      4,
+      8,
+    );
   }
 
   private floodNow = 0;
@@ -797,6 +842,7 @@ export class OfficeLife {
     if (this.forced === "flood" && !this.opts.weather) this.sky = forcedSky("rain");
     this.scene.weather = this.sky.weather;
     this.chaosSlow(day, hour);
+    this.placesSlow(day, hour);
     this.outdoors.slow(day, hour);
     this.drone.slow(day);
     this.chef.slow();
