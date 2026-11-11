@@ -554,6 +554,53 @@ body.kiosk .hud-reconnect {
   }
 }
 
+/* phones: logo only, compact chips that scroll sideways instead of being cut off */
+@media (max-width: 560px) {
+  .hud-top {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .hud-top .brand {
+    flex: none;
+  }
+  .hud-top .brand span {
+    display: none;
+  }
+  .hud-top .chips {
+    justify-content: flex-start;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    pointer-events: auto;
+    touch-action: pan-x;
+  }
+  .hud-top .chips::-webkit-scrollbar {
+    display: none;
+  }
+  .hud-top .chips > *:first-child {
+    margin-left: auto;
+  }
+  .hud-top .chips > *:last-child {
+    margin-right: auto;
+  }
+  .hud-top .agents {
+    gap: 4px;
+  }
+  .hud-top .pixel-chip {
+    gap: 4px;
+    padding: 1px 5px;
+    flex: none;
+  }
+  .hud-top .chip-icon {
+    width: 14px;
+    height: 14px;
+  }
+  .hud-top .clock {
+    flex: none;
+    min-width: 0;
+  }
+}
+
 /* poke box (person panel + agent card) */
 .hud-panel .poke {
   margin-top: 12px;
