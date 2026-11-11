@@ -175,7 +175,7 @@ broadcast `party.updated` on that socket (including to kiosks). Opening or leavi
 panel idle creates no extra HTTP requests or periodic server alarms. Only a deliberate move
 sends one POST. Every party POST is rate-limited per IP to one attempt per 1.2 seconds before
 body parsing, including malformed attempts; every actor also has a 1.2-second cooldown.
-Limits survive restarts and return `429` with `Retry-After`. Hand items, vehicles and race rolls
+The short IP limit is in memory; actor cooldowns survive restarts. Both return `429` with `Retry-After`. Hand items, vehicles and race rolls
 are server-owned; requests cannot forge equipment or points. Total hosting usage still depends
 on visitors, existing office traffic and intentional actions; rate limits cannot guarantee
 an entire deployment remains within its provider's free allowance.

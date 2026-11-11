@@ -14,7 +14,6 @@ export const PARTY_REQUEST_INTERVAL_MS = 1200;
 export const PARTY_EVENT_TTL_MS = 15_000;
 export const PARTY_MAX_REQUESTERS = 512;
 const STORAGE_KEY = "party.v1";
-const REQUESTS_KEY = "party.requests.v1";
 const MAX_PARTICIPANTS = 1000;
 const MAX_SCORE = 1_000_000;
 const Times = z.record(z.string().max(128), z.number().int().nonnegative());
@@ -50,15 +49,6 @@ export class Party {
     } catch {
       /* Optional party data must never stop office presence. */
     }
-    try {
-      const raw = store.kvGet(REQUESTS_KEY);
-      const parsed = Times.safeParse(raw ? JSON.parse(raw) : null);
-      if (parsed.success && Object.keys(parsed.data).length <= PARTY_MAX_REQUESTERS) {
-        this.requests = new Map(Object.entries(parsed.data));
-      }
-    } catch {
-      /* Corrupt optional request limiter starts empty. */
-    }
   }
 
   /** Apply before reading a body, including malformed/unauthorized POST attempts. */
@@ -74,7 +64,6 @@ export class Party {
       return Math.max(1, Math.ceil((firstExpiry - now) / 1000));
     }
     this.requests.set(key, now);
-    this.store.kvPut(REQUESTS_KEY, JSON.stringify(Object.fromEntries(this.requests)));
     return null;
   }
 

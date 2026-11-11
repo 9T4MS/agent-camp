@@ -191,7 +191,7 @@ describe("party API uses canonical avatars and viewer socket state", () => {
     expect(restarted.state().events).toEqual([]);
   });
 
-  test("rate limits malformed and unauthorized attempts before parsing, persists by IP across actors/restart", async () => {
+  test("rate limits malformed and unauthorized attempts by IP across actors without durable writes", async () => {
     const first = setup();
     expect((await first.post(null, { raw: "{", ip: "same" }))!.status).toBe(400);
     expect((await first.post({ personId: "bob", action: "dance" }, { ip: "same" }))!.status).toBe(
@@ -201,17 +201,17 @@ describe("party API uses canonical avatars and viewer socket state", () => {
     expect(
       (await first.post({ personId: "anna", action: "dance" }, { ip: "unauthorized" }))!.status,
     ).toBe(429);
-    const restarted = setup(first.store);
-    const limited = (await restarted.post({ personId: "bob", action: "dance" }, { ip: "same" }))!;
+    expect(first.store.kvGet("party.requests.v1")).toBeNull();
+    const limited = (await first.post({ personId: "bob", action: "dance" }, { ip: "same" }))!;
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
-    restarted.advance(PARTY_REQUEST_INTERVAL_MS);
-    expect(
-      (await restarted.post({ personId: "bob", action: "dance" }, { ip: "same" }))!.status,
-    ).toBe(200);
-    expect(
-      (await restarted.post({ personId: "anna", action: "dance" }, { ip: "same" }))!.status,
-    ).toBe(429);
+    first.advance(PARTY_REQUEST_INTERVAL_MS);
+    expect((await first.post({ personId: "bob", action: "dance" }, { ip: "same" }))!.status).toBe(
+      200,
+    );
+    expect((await first.post({ personId: "anna", action: "dance" }, { ip: "same" }))!.status).toBe(
+      429,
+    );
   });
 
   test("limiter capacity preserves active entries and prunes expired ones without resetting all limits", () => {
@@ -222,11 +222,10 @@ describe("party API uses canonical avatars and viewer socket state", () => {
       expect(party.requestAllowed(`ip-${i}`, now)).toBeNull();
     expect(party.requestAllowed("overflow", now)).toBeGreaterThan(0);
     expect(party.requestAllowed("ip-0", now)).toBeGreaterThan(0);
-    expect(Object.keys(JSON.parse(store.kvGet("party.requests.v1")!))).toHaveLength(
-      PARTY_MAX_REQUESTERS,
-    );
+    expect(store.kv.size).toBe(0);
     expect(party.requestAllowed("new", now + PARTY_REQUEST_INTERVAL_MS)).toBeNull();
-    expect(Object.keys(JSON.parse(store.kvGet("party.requests.v1")!))).toEqual(["new"]);
+    expect(party.requestAllowed("new", now + PARTY_REQUEST_INTERVAL_MS)).toBeGreaterThan(0);
+    expect(store.kv.size).toBe(0);
   });
 
   test("rejects actual oversized bytes without Content-Length and bounds transient events", async () => {

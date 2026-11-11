@@ -139,7 +139,7 @@ describe("negative parsing", () => {
     expect(
       parseViewerMessage({ ...message, data: { party: { ...message.data.party, profiles: {} } } })
         .ok,
-    ).toBe(false);
+    ).toBe(true);
   });
   test("future avatar and party equipment IDs do not drop the office snapshot", () => {
     const snapshot = load("office.snapshot") as {
@@ -168,6 +168,36 @@ describe("negative parsing", () => {
     const update = load("party.updated") as { data: unknown };
     expect(parseViewerMessage({ ...update, data: { party } }).ok).toBe(true);
     expect(PartyState.safeParse(party).success).toBe(false);
+  });
+  test("future party actions and fields degrade safely without losing office presence", () => {
+    const update = load("party.updated") as {
+      data: { party: { events: Record<string, unknown>[]; scores: Record<string, number> } };
+    };
+    const party = {
+      ...update.data.party,
+      futureState: true,
+      events: [{ ...update.data.party.events[0], action: "future-dance", futureEvent: true }],
+    };
+    const parsed = parseViewerMessage({ ...update, data: { party } });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok && parsed.msg.type === "party.updated") {
+      expect(parsed.msg.data.party.events[0]?.action).toBe("wave");
+      expect(parsed.msg.data.party).not.toHaveProperty("futureState");
+      expect(parsed.msg.data.party.events[0]).not.toHaveProperty("futureEvent");
+    } else throw new Error("future party message rejected");
+    expect(PartyState.safeParse(party).success).toBe(false);
+    const snapshot = load("office.snapshot") as { data: { people: unknown[] } };
+    for (const optionalParty of [party, { changedFormat: true }, null, "future-format"]) {
+      const result = parseViewerMessage({
+        ...snapshot,
+        data: { ...snapshot.data, party: optionalParty },
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok && result.msg.type === "office.snapshot") {
+        expect(result.msg.data.people.length).toBe(snapshot.data.people.length);
+        if (optionalParty !== party) expect(result.msg.data.party).toBeUndefined();
+      }
+    }
   });
   test("invalid avatar in avatar.updated", () => {
     // unknown ids fall back (see "viewers tolerate catalog ids"), but not a missing avatar

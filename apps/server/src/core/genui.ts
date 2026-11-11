@@ -115,6 +115,7 @@ export const SYSTEM_PROMPT = [
   `wrist: ${list(WRISTWEAR)}`,
   `accentColor: ${list(ACCENT_COLORS)}`,
   `vehicle: ${list(VEHICLES)}`,
+  "Use cat-ears, fox-ears, bunny-ears, devil-horns, halo, crown, wizard-hat, party-hat or antenna only when the person's self-description explicitly requests them; otherwise choose an ordinary accessory (none, headphones, beanie, cap, cap-mint, bow or earring).",
   "Use no bracelets, cyan accent and no vehicle unless the description requests them.",
   "Use jacket and empty hands unless the description asks for another outfit or held items.",
   `deskProps (0-${MAX_DESK_PROPS}, distinct): ${list(DESK_PROPS)}`,

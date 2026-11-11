@@ -174,7 +174,7 @@ export const OfficeSnapshot = msg(
   "office.snapshot",
   z.object({
     officeName: z.string(),
-    party: ViewerPartyState.optional(),
+    party: ViewerPartyState.optional().catch(undefined),
     serverTime: EpochMs,
     people: z.array(PersonView),
     /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
