@@ -30,6 +30,8 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
     case "avatar.updated":
     case "person.birthdayChanged":
       return `${e.type} ${person}`;
+    case "gif.updated":
+      return `gif.updated ${person} ${e.data.gif ?? "-"}`;
     case "person.helpersChanged":
       return `${e.type} ${person} ${e.data.helpers}`;
     case "session.started":
@@ -61,6 +63,7 @@ export function logLine(e: ViewerEvent, lookup: SessionLookup): string {
 /** Event types not written to history (high volume, useless for stats). */
 export const HISTORY_SKIP = new Set<ViewerEvent["type"]>([
   "session.activityChanged",
+  "gif.updated",
   "session.connectionChanged",
   "session.contextChanged",
   "person.birthdayChanged",

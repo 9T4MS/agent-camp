@@ -24,6 +24,8 @@ export type PersonState = {
   avatar: AvatarSpec;
   joinedAt: number;
   pod: number;
+  /** Giphy id of the GIF over the person's head */
+  gif: string | undefined;
   /** it's their birthday today (opt-in on their connector) */
   birthday: boolean;
   /** what their subagents look like (connector `helpers`) */
@@ -65,6 +67,7 @@ export type ModelChange =
   | { kind: "personAdded"; personId: string; instant: boolean }
   | { kind: "personRemoved"; personId: string; instant: boolean }
   | { kind: "avatarChanged"; personId: string }
+  | { kind: "gifChanged"; personId: string }
   | { kind: "birthdayChanged"; personId: string; birthday: boolean }
   | { kind: "helpersChanged"; personId: string; helpers: HelperSkin }
   | { kind: "sessionAdded"; personId: string; sessionId: string; instant: boolean }
@@ -347,6 +350,14 @@ export class OfficeModel {
         }
         break;
       }
+      case "gif.updated": {
+        const p = this.people.get(msg.data.personId);
+        if (p && p.gif !== msg.data.gif) {
+          p.gif = msg.data.gif;
+          out.push({ kind: "gifChanged", personId: p.personId });
+        }
+        break;
+      }
     }
     this.trackPeak();
     return out;
@@ -432,6 +443,7 @@ export class OfficeModel {
       avatar: pv.avatar,
       joinedAt: pv.joinedAt,
       pod: this.freePod(),
+      gif: pv.gif,
       birthday: !!pv.birthday,
       helpers: pv.helpers ?? "robots",
     });
@@ -452,6 +464,10 @@ export class OfficeModel {
       if (JSON.stringify(existing.avatar) !== JSON.stringify(pv.avatar)) {
         existing.avatar = pv.avatar;
         out.push({ kind: "avatarChanged", personId: pv.personId });
+      }
+      if (existing.gif !== pv.gif) {
+        existing.gif = pv.gif;
+        out.push({ kind: "gifChanged", personId: pv.personId });
       }
     }
     const keep = new Set(pv.sessions.map((s) => s.sessionId));

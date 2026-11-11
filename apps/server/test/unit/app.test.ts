@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ApiError,
   type AvatarSpec,
   envelope,
   PersonDayResponse,
   parseViewerMessage,
   resolveLook,
+  SetGifResponse,
 } from "@agent-office/protocol";
 import { LOOK_FIXTURES } from "@agent-office/protocol/fixtures";
 import {
@@ -217,6 +219,183 @@ describe("OfficeApp", () => {
     const { app } = setup();
     expect((await app.handleHttp(req("/api/nope")))!.status).toBe(404);
     expect(await app.handleHttp(req("/stats"))).toBeNull();
+  });
+
+  describe("PUT /api/people/:personId/gif", () => {
+    const GIF = "JIX9t2j0ZTN9S";
+    /** "It's me": ask for a code, read it off the Mac notification, confirm it -> cookie. */
+    async function claimCookie(t: ReturnType<typeof setup>, personId: string): Promise<string> {
+      const post = (path: string, body: unknown = {}) =>
+        t.app.handleHttp(
+          req(path, {
+            method: "POST",
+            headers: { "content-type": "application/json", "cf-connecting-ip": `ip-${personId}` },
+            body: JSON.stringify(body),
+          }),
+        );
+      expect((await post(`/api/people/${personId}/claim`))!.status).toBe(200);
+      const poke = JSON.parse(t.toConnector.at(-1)!.data);
+      const code = /\b(\d{6})\b/.exec(poke.data.text)![1];
+      const r = (await post(`/api/people/${personId}/claim/verify`, { code }))!;
+      expect(r.status).toBe(200);
+      return r.headers.get("set-cookie")!.split(";")[0]!;
+    }
+
+    function joined() {
+      const t = setup({ CONNECTOR_PASSWORD: "s3cret-pw" });
+      t.app.connectorMessage(
+        "s1",
+        JSON.stringify(
+          envelope("connector.hello", {
+            name: "Anna",
+            password: "s3cret-pw",
+            clientId: "c1",
+            connectorVersion: "1.0.0",
+            gif: "l0HlBO7eyXzSZkJri",
+          }),
+        ),
+      );
+      t.sent.length = 0;
+      const put = (
+        id: string,
+        body: unknown,
+        auth: string | null = "Bearer s3cret-pw",
+        cookie = "",
+      ) =>
+        t.app.handleHttp(
+          req(`/api/people/${id}/gif`, {
+            method: "PUT",
+            body: typeof body === "string" ? body : JSON.stringify(body),
+            headers: {
+              "content-type": "application/json",
+              ...(auth ? { authorization: auth } : {}),
+              ...(cookie ? { cookie } : {}),
+            },
+          }),
+        );
+      const gifEvents = () =>
+        t.sent.map((m) => JSON.parse(m)).filter((m) => m.type === "gif.updated");
+      return { ...t, put, gifEvents };
+    }
+
+    test("403 without this person's It's-me cookie or the bearer, before anything else", async () => {
+      const t = joined();
+      // a browser that confirmed it is someone else
+      t.app.connectorMessage(
+        "s2",
+        JSON.stringify(
+          envelope("connector.hello", {
+            name: "Bob",
+            password: "s3cret-pw",
+            clientId: "c2",
+            connectorVersion: "1.0.0",
+          }),
+        ),
+      );
+      const bobCookie = await claimCookie(t, "bob");
+      t.sent.length = 0;
+      for (const auth of [null, "Bearer nope", "s3cret-pw", "Basic s3cret-pw"]) {
+        for (const id of ["anna", "nobody"]) {
+          for (const cookie of ["", bobCookie]) {
+            const res = (await t.put(id, "{not json", auth, cookie))!;
+            expect(res.status).toBe(403);
+            const text = await res.text();
+            expect(ApiError.parse(JSON.parse(text)).error).toContain("only change your own GIF");
+            expect(text).not.toContain("s3cret");
+          }
+        }
+      }
+      expect(t.sent).toEqual([]);
+    });
+
+    test("200 with the person's own It's-me cookie (no bearer)", async () => {
+      const t = joined();
+      const cookie = await claimCookie(t, "anna");
+      t.sent.length = 0;
+      const res = (await t.put("anna", { link: GIF }, null, cookie))!;
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ personId: "anna", gif: GIF });
+      expect(t.gifEvents()).toHaveLength(1);
+    });
+
+    test("400 on bad id encoding, invalid JSON, schema failure, non-Giphy link", async () => {
+      const { put, sent } = joined();
+      const err = async (id: string, body: unknown) => {
+        const res = (await put(id, body))!;
+        expect(res.status).toBe(400);
+        return ApiError.parse(await res.json()).error;
+      };
+      expect(await err("%E0%A4%A", { link: GIF })).toBe("bad person id");
+      expect(await err("anna", "{not json")).toBe("invalid JSON");
+      expect(await err("anna", { link: 42 })).toContain("link");
+      expect(await err("anna", {})).toContain("link");
+      expect(await err("anna", { link: "x".repeat(2001) })).toContain("link");
+      expect(await err("anna", { link: "https://example.com/cat.gif" })).toBe(
+        "not a Giphy GIF link (paste a giphy.com/gifs/... or media.giphy.com link)",
+      );
+      expect(sent).toEqual([]);
+    });
+
+    test("404 when the person is not in the office", async () => {
+      const { put } = joined();
+      const res = (await put("nobody", { link: GIF }))!;
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "not in the office" });
+    });
+
+    test("200 set: response, one gif.updated to viewers, snapshot", async () => {
+      const { app, put, gifEvents } = joined();
+      const res = (await put("anna", { link: `https://giphy.com/gifs/cat-funny-${GIF}` }))!;
+      expect(res.status).toBe(200);
+      expect(SetGifResponse.parse(await res.json())).toEqual({ personId: "anna", gif: GIF });
+      expect(gifEvents()).toHaveLength(1);
+      expect(gifEvents()[0].data).toEqual({ personId: "anna", gif: GIF });
+      expect(JSON.parse(app.viewerSnapshot()).data.people[0].gif).toBe(GIF);
+      // unchanged: 200, nothing broadcast
+      expect((await put("anna", { link: GIF }))!.status).toBe(200);
+      expect(gifEvents()).toHaveLength(1);
+    });
+
+    test("200 remove with link null or blank", async () => {
+      const { app, put, gifEvents } = joined();
+      const res = (await put("anna", { link: null }))!;
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ personId: "anna", gif: null });
+      expect(gifEvents()).toHaveLength(1);
+      expect(gifEvents()[0].data).toEqual({ personId: "anna" });
+      expect(JSON.parse(app.viewerSnapshot()).data.people[0].gif).toBeUndefined();
+      await put("anna", { link: GIF });
+      expect(await (await put("anna", { link: "   " }))!.json()).toEqual({
+        personId: "anna",
+        gif: null,
+      });
+      expect(gifEvents()).toHaveLength(3);
+    });
+
+    test("the UI choice survives the connector reconnecting", async () => {
+      const { app, put } = joined();
+      await put("anna", { link: GIF });
+      app.connectorClosed("s1");
+      app.connectorMessage(
+        "s2",
+        JSON.stringify(
+          envelope("connector.hello", {
+            name: "Anna",
+            password: "s3cret-pw",
+            clientId: "c1",
+            connectorVersion: "1.0.0",
+            gif: "l0HlBO7eyXzSZkJri",
+          }),
+        ),
+      );
+      expect(JSON.parse(app.viewerSnapshot()).data.people[0].gif).toBe(GIF);
+    });
+
+    test("other methods fall through to 404", async () => {
+      const { app } = joined();
+      const res = (await app.handleHttp(req("/api/people/anna/gif")))!;
+      expect(res.status).toBe(404);
+    });
   });
 });
 

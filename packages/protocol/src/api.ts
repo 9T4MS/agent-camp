@@ -7,10 +7,13 @@
  *   POST /api/interact         <- InteractRequest -> InteractResponse
  *   PUT  /api/people/:personId/avatar <- AvatarEditRequest -> AvatarEditResponse
  *   POST /api/people/:personId/look   <- LookDescribeRequest -> LookDescribeResponse
+ *   PUT  /api/people/:personId/gif    <- SetGifRequest -> SetGifResponse
+ * Errors are `ApiError` bodies.
  */
 import { z } from "zod";
 import { AvatarSpec } from "./catalog.ts";
 import { MAX_SELF_DESCRIPTION } from "./constants.ts";
+import { GiphyId } from "./giphy.ts";
 import {
   Activity,
   AgentKind,
@@ -98,6 +101,21 @@ export const LookDescribeResponse = z.object({
   generator: LookGenerator.optional(),
 });
 export type LookDescribeResponse = z.infer<typeof LookDescribeResponse>;
+
+/** Error body of a failed API request. */
+export const ApiError = z.object({ error: z.string() });
+export type ApiError = z.infer<typeof ApiError>;
+
+/**
+ * Set or remove the GIF over a person's head from the web UI. `link` is anything
+ * `parseGiphyId` accepts (Giphy page/media link or bare id); null or "" removes the GIF.
+ */
+export const SetGifRequest = z.object({ link: z.string().max(2000).nullable() });
+export type SetGifRequest = z.infer<typeof SetGifRequest>;
+
+/** The person's GIF after the change; null = none. */
+export const SetGifResponse = z.object({ personId: z.string(), gif: GiphyId.nullable() });
+export type SetGifResponse = z.infer<typeof SetGifResponse>;
 
 /** One stored history row (one per viewer event, except activity changes). No content. */
 export const HistoryRow = z.object({

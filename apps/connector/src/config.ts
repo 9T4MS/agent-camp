@@ -17,6 +17,8 @@ export type Config = {
   self_description?: string;
   /** label of this machine on the agent card; default: the short hostname */
   machine_name?: string;
+  /** Giphy id of the GIF over your head; "" = explicitly none (removes it everywhere) */
+  gif?: string;
   share_project_names: boolean;
   /** show pokes from the office as macOS notifications */
   notifications: boolean;
@@ -40,6 +42,7 @@ export const CONFIG_KEYS = [
   "name",
   "self_description",
   "machine_name",
+  "gif",
   "share_project_names",
   "notifications",
   "birthday",
@@ -180,6 +183,7 @@ export function toConfig(values: Record<string, TomlValue>): Config {
     name: s("name"),
     self_description: s("self_description"),
     machine_name: s("machine_name"),
+    gif: s("gif"),
     share_project_names: !(share === false || share === "false"),
     notifications: !(notify === false || notify === "false"),
     birthday: validBirthday(s("birthday")),
@@ -211,6 +215,7 @@ export function saveConfig(path: string, config: Config): void {
       name: config.name,
       self_description: config.self_description,
       machine_name: config.machine_name,
+      gif: config.gif,
       share_project_names: config.share_project_names,
       notifications: config.notifications,
       birthday: config.birthday,

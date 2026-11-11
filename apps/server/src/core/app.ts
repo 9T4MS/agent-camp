@@ -1,7 +1,8 @@
 /**
  * OfficeApp: everything the Durable Object and the Bun dev server share. Wraps the Hub,
- * the store, GenUI and the /api/* routes. Uses only web-standard Request/Response;
- * sockets are abstracted behind `Transport` and identified by string ids.
+ * the store, GenUI and the /api/* routes (listed in packages/protocol/src/api.ts). Uses only
+ * web-standard Request/Response; sockets are abstracted behind `Transport` and identified by
+ * string ids.
  */
 import {
   AvatarEditRequest,
@@ -16,8 +17,11 @@ import {
   type MessageOf,
   MessageQuery,
   PartyState,
+  parseGiphyId,
   SendMessageRequest,
   type ServerToConnector,
+  SetGifRequest,
+  type SetGifResponse,
   type ViewerEvent,
 } from "@agent-office/protocol";
 import { z } from "zod";
@@ -39,7 +43,7 @@ import {
   SYSTEM_PROMPT,
   userPrompt,
 } from "./genui.ts";
-import { type AvatarJob, type Binding, Hub, type HubResult } from "./hub.ts";
+import { type AvatarJob, type Binding, Hub, type HubResult, safeEqual } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
 import { messageOwner } from "./message-owner.ts";
 import { OfficeMessages } from "./messages.ts";
@@ -146,7 +150,7 @@ export function connectorPassword(env: AppEnv): string | undefined {
 
 export function bearerOk(req: Request, env: AppEnv): boolean {
   const pw = connectorPassword(env);
-  return !!pw && req.headers.get("authorization") === `Bearer ${pw}`;
+  return !!pw && safeEqual(req.headers.get("authorization") ?? "", `Bearer ${pw}`);
 }
 
 const json = (data: unknown, init: ResponseInit = {}) =>
@@ -731,6 +735,9 @@ export class OfficeApp {
       );
     }
 
+    const personGif = /^\/api\/people\/([^/]{1,64})\/gif$/.exec(path);
+    if (personGif && method === "PUT") return this.putGif(req, personGif[1]!);
+
     if (path === "/api/history.csv" && method === "GET") {
       return new Response(historyToCsv(this.store.history()), {
         headers: {
@@ -881,6 +888,52 @@ export class OfficeApp {
       { ok: true, personId },
       { headers: { "set-cookie": meCookie(req, token, ME_TTL_MS / 1000) } },
     );
+  }
+
+  /**
+   * PUT /api/people/:personId/gif: set or remove a person's head GIF from the web UI. Own GIF
+   * only, like the look (L9): the browser needs that person's signed `ao_me` cookie ("It's
+   * me"); a Bearer connector password also works (scripts). Checked before the body or the
+   * person lookup. A connector reconnect does not undo it (see `Hub.helloGifs`).
+   */
+  private async putGif(req: Request, rawId: string): Promise<Response> {
+    let personId: string;
+    try {
+      personId = decodeURIComponent(rawId);
+    } catch {
+      return json({ error: "bad person id" }, { status: 400 });
+    }
+    const me = await meFromRequest(req, this.env, this.now());
+    if (me !== personId && !bearerOk(req, this.env))
+      return json(
+        { error: "you can only change your own GIF (confirm it is you first)" },
+        { status: 403 },
+      );
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const parsed = SetGifRequest.safeParse(body);
+    if (!parsed.success)
+      return json({ error: z.prettifyError(parsed.error).slice(0, 500) }, { status: 400 });
+    const link = parsed.data.link?.trim() ?? "";
+    let gif: string | undefined;
+    if (link) {
+      const id = parseGiphyId(link);
+      if (!id)
+        return json(
+          { error: "not a Giphy GIF link (paste a giphy.com/gifs/... or media.giphy.com link)" },
+          { status: 400 },
+        );
+      gif = id;
+    }
+    const events = this.hub.setGif(personId, gif, this.now());
+    if (!events) return json({ error: "not in the office" }, { status: 404 });
+    this.publish(events);
+    this.transport.scheduleAlarm(this.hub.nextDeadline());
+    return json({ personId, gif: gif ?? null } satisfies SetGifResponse);
   }
 
   /** Look editor: pin a custom look or go back to the automatic one. */

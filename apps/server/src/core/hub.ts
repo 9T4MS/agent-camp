@@ -62,6 +62,11 @@ export type Binding = {
   connectorVersion: string;
   /** user-chosen machine label, copied into every SessionView of this connector */
   machine?: string;
+  /**
+   * Giphy id from this connector's hello; "" = remove, undefined = leave as is. Only applied
+   * when it differs from what this clientId sent before for this person (see `Hub.helloGifs`).
+   */
+  gif?: string;
   /** opt-in "MM-DD" */
   birthday?: string;
   /** local AI tools this connector can draw its person's look with (their own subscription) */
@@ -115,7 +120,19 @@ export type HubResult = {
   lookGenerated?: MessageData<"connector.lookGenerated"> & { personId: string; socketId: string };
 };
 
-type Persisted = { v: 1; connectors: ConnectorRec[]; people: PersonRec[] };
+/** `helloGifs` key: one entry per connector and person (client ids never contain "/"). */
+const helloKey = (clientId: string, personId: string) => `${clientId}/${personId}`;
+
+type Persisted = {
+  v: 1;
+  connectors: ConnectorRec[];
+  /** `gif` only in state written before `gifs` existed */
+  people: (PersonRec & { gif?: string })[];
+  /** personId -> Giphy id (missing in old state) */
+  gifs?: Record<string, string>;
+  /** "clientId/personId" -> last gif that connector sent for that person (missing in old state) */
+  helloGifs?: Record<string, string>;
+};
 
 /** How long the in-memory activity log of a live session reaches back. */
 export const RECENT_ACTIVITY_MS = 30 * 60_000;
@@ -180,7 +197,7 @@ export function monthDayIn(timeZone: string, now: number): string {
   return `${v("month")}-${v("day")}`;
 }
 
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   let diffBits = a.length ^ b.length;
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     diffBits |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
@@ -191,6 +208,19 @@ function safeEqual(a: string, b: string): boolean {
 export class Hub {
   private connectors = new Map<string, ConnectorRec>();
   private people = new Map<string, PersonRec>();
+  /**
+   * personId -> Giphy id of the GIF over the head. Kept (and persisted) while the person is
+   * away, so the GIF is back when they return, however it was chosen (CLI or web UI).
+   */
+  private gifs = new Map<string, string>();
+  /**
+   * `helloKey(clientId, personId)` -> the last `gif` that connector sent in a hello for that
+   * person. A hello only changes the person's GIF when its value differs from this (the user
+   * ran `agent-office gif` again), so a reconnect never overwrites a GIF chosen in the web UI.
+   * Keyed per person too, so renaming and renaming back doesn't re-apply an old value.
+   * Outlives connector records (they expire when a laptop stays offline) and is persisted.
+   */
+  private helloGifs = new Map<string, string>();
   /** socketId -> binding (only sockets that said hello) */
   private sockets = new Map<string, Binding>();
   private current: OfficeState = EMPTY_STATE;
@@ -252,6 +282,20 @@ export class Hub {
           const custom = this.customAvatar(person.personId);
           if (custom) person.avatar = custom;
           this.people.set(person.personId, person);
+        }
+        // state from before `gifs`: the GIF lived on the person record
+        for (const person of p.people ?? []) {
+          if (person.gif && !p.gifs) this.gifs.set(person.personId, person.gif);
+          delete person.gif;
+        }
+        for (const [id, gif] of Object.entries(p.gifs ?? {})) this.gifs.set(id, gif);
+        if (p.helloGifs) {
+          for (const [id, h] of Object.entries(p.helloGifs)) this.helloGifs.set(id, h);
+        } else {
+          // state from before `helloGifs`: what each connector last sent is on its record, so
+          // the first reconnect after the deploy doesn't re-apply an unchanged config value
+          for (const c of p.connectors ?? [])
+            if (c.gif !== undefined) this.helloGifs.set(helloKey(c.clientId, c.personId), c.gif);
         }
       } catch {
         // corrupt state: start empty
@@ -341,6 +385,17 @@ export class Hub {
     // a custom look stays on; the automatic one waits in its row for "Automatic"
     if (this.customAvatar(personId)) return [];
     if (p) p.avatar = avatar;
+    return this.commit(now);
+  }
+
+  /**
+   * Set (`gif` = Giphy id) or remove (undefined) a person's head GIF, e.g. from the web UI.
+   * Returns null when the person is not in the office, else the events (`[]` if unchanged).
+   * Leaves `helloGifs` alone, so the connector's next reconnect does not undo it.
+   */
+  setGif(personId: string, gif: string | undefined, now: number): ViewerEvent[] | null {
+    if (!this.people.has(personId)) return null;
+    this.applyGif(personId, gif || undefined);
     return this.commit(now);
   }
 
@@ -543,12 +598,20 @@ export class Hub {
       connectorVersion: d.connectorVersion,
       ...(desc ? { selfDescription: desc } : {}),
       ...(machine ? { machine } : {}),
+      ...(d.gif !== undefined ? { gif: d.gif } : {}),
       ...(d.birthday ? { birthday: d.birthday } : {}),
       ...(d.lookGenerators?.length ? { lookGenerators: [...new Set(d.lookGenerators)] } : {}),
       ...(d.helpers === "cats" ? { helpers: d.helpers } : {}),
     };
     // a hello on a socket that was bound to another clientId: drop the old binding
     this.sockets.set(socketId, binding);
+    // head GIF: only a value this connector did not send before counts (see `helloGifs`)
+    let gif: string | undefined;
+    if (d.gif !== undefined) {
+      const key = helloKey(d.clientId, binding.personId);
+      if (this.helloGifs.get(key) !== d.gif) gif = d.gif;
+      this.helloGifs.set(key, d.gif);
+    }
     const existing = this.connectors.get(d.clientId);
     this.connectors.set(d.clientId, {
       ...withoutDescription(binding),
@@ -558,6 +621,7 @@ export class Hub {
       sessions: existing && existing.personId === binding.personId ? existing.sessions : [],
     });
     const avatarJob = this.ensurePerson(binding, now);
+    if (gif !== undefined) this.applyGif(binding.personId, gif || undefined);
     const reply = envelope("connector.welcomed", {
       personId: binding.personId,
       serverVersion: this.cfg.serverVersion,
@@ -686,6 +750,11 @@ export class Hub {
     };
   }
 
+  private applyGif(personId: string, gif: string | undefined): void {
+    if (gif) this.gifs.set(personId, gif);
+    else this.gifs.delete(personId);
+  }
+
   private rememberClientDesc(clientId: string, desc: string): void {
     const sig = descSig(desc);
     if (this.clientDescs[clientId] === sig) return;
@@ -787,6 +856,7 @@ export class Hub {
       (a, b) => a.joinedAt - b.joinedAt || a.personId.localeCompare(b.personId),
     );
     for (const p of sorted) {
+      const gif = this.gifs.get(p.personId);
       const sessions: SessionView[] = [];
       for (const c of this.connectors.values()) {
         if (c.personId !== p.personId) continue;
@@ -819,6 +889,7 @@ export class Hub {
         avatar: p.avatar,
         sessions,
         joinedAt: p.joinedAt,
+        ...(gif ? { gif } : {}),
         ...(birthday ? { birthday } : {}),
         ...(cats ? { helpers: "cats" as const } : {}),
       });
@@ -833,6 +904,7 @@ export class Hub {
       c.personId,
       c.name,
       c.machine ?? "",
+      c.gif ?? "-",
       c.helpers ?? "",
       c.socketId ?? "",
       c.sessions.map((s) => s.sessionKey).join(","),
@@ -842,7 +914,7 @@ export class Hub {
       const { look: _l, ...catalog } = p.avatar;
       return [p.personId, p.name, JSON.stringify(catalog), p.goneSince, p.joinedAt];
     });
-    return JSON.stringify([cs, ps]);
+    return JSON.stringify([cs, ps, [...this.gifs], [...this.helloGifs]]);
   }
 
   private persist(): void {
@@ -853,6 +925,8 @@ export class Hub {
       v: 1,
       connectors: [...this.connectors.values()],
       people: [...this.people.values()].map(persistable),
+      gifs: Object.fromEntries(this.gifs),
+      helloGifs: Object.fromEntries(this.helloGifs),
     };
     this.store.kvPut(STATE_KEY, JSON.stringify(state));
   }

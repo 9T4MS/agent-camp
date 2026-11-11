@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_SELF_DESCRIPTION, SHORT_SELF_DESCRIPTION } from "@agent-office/protocol";
-import { helloDescription, parseArgs } from "../src/cli.ts";
+import { gifSetting, helloDescription, parseArgs } from "../src/cli.ts";
 import {
   defaultMachineName,
   loadConfig,
@@ -313,6 +313,57 @@ describe("look generator is opt-in", () => {
       expect((await run("configure", "--look-generator", "sure")).code).toBe(2);
       expect((await run("configure", "--look-generator", "off")).code).toBe(0);
       expect((await run("configure", "--get", "look_generator")).out).toBe("off");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("head gif", () => {
+  test("gifSetting: Giphy links -> id, off words -> empty, junk -> null", () => {
+    expect(gifSetting("https://giphy.com/gifs/cat-typing-JIX9t2j0ZTN9S")).toBe("JIX9t2j0ZTN9S");
+    expect(gifSetting("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif")).toBe(
+      "JIX9t2j0ZTN9S",
+    );
+    for (const off of ["off", "OFF", "none", "", "  "]) expect(gifSetting(off)).toBe("");
+    expect(gifSetting("https://example.com/cat.gif")).toBeNull();
+  });
+
+  test("gif / configure --gif write the id; off clears; junk is refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ao-cfg-"));
+    try {
+      const main = join(import.meta.dir, "..", "src", "main.ts");
+      const env = { ...process.env, AGENT_OFFICE_CONFIG_DIR: dir };
+      const run = async (...args: string[]) => {
+        const p = Bun.spawn([process.execPath, main, ...args], {
+          env,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const out = await new Response(p.stdout).text();
+        return { code: await p.exited, out: out.trim() };
+      };
+      // not configured yet: nothing to attach a gif to
+      expect((await run("gif", "JIX9t2j0ZTN9S")).code).toBe(1);
+      expect((await run("configure", "--name", "Anna")).code).toBe(0);
+      expect((await run("gif")).out).toBe("no GIF set");
+      const set = await run("gif", "https://giphy.com/gifs/cat-typing-JIX9t2j0ZTN9S");
+      expect(set.code).toBe(0);
+      expect(set.out).toContain("GIF set: https://giphy.com/gifs/JIX9t2j0ZTN9S");
+      expect((await run("configure", "--get", "gif")).out).toBe("JIX9t2j0ZTN9S");
+      expect((await run("gif")).out).toBe("https://giphy.com/gifs/JIX9t2j0ZTN9S");
+      // same value again: nothing to send, explain why the office may show another GIF
+      const again = await run("gif", "JIX9t2j0ZTN9S");
+      expect(again.code).toBe(0);
+      expect(again.out).toContain("already set");
+      expect((await run("gif", "https://example.com/cat.gif")).code).toBe(2);
+      expect((await run("configure", "--get", "gif")).out).toBe("JIX9t2j0ZTN9S");
+      expect((await run("gif", "off")).code).toBe(0);
+      expect((await run("configure", "--get", "gif")).out).toBe("");
+      expect(readFileSync(join(dir, "config.toml"), "utf8")).toContain('gif = ""');
+      expect((await run("configure", "--gif", "l0HlBO7eyXzSZkJri")).code).toBe(0);
+      expect((await run("configure", "--get", "gif")).out).toBe("l0HlBO7eyXzSZkJri");
+      expect((await run("configure", "--gif", "nope://x")).code).toBe(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

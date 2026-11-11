@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { ViewerAvatar } from "./catalog.ts";
 import { MAX_SELF_DESCRIPTION, PROTOCOL_VERSION, SHORT_SELF_DESCRIPTION } from "./constants.ts";
+import { GiphyId } from "./giphy.ts";
 import { MessageRecord } from "./officeMessages.ts";
 import { ViewerPartyState } from "./party.ts";
 
@@ -92,6 +93,8 @@ export const PersonView = z.object({
   avatar: ViewerAvatar,
   sessions: z.array(SessionView),
   joinedAt: EpochMs,
+  /** Giphy media id of the GIF shown over the person's head; omitted when none */
+  gif: GiphyId.optional(),
   /** opt-in (connector `birthday = "MM-DD"`): it is their birthday in the office time zone */
   birthday: z.boolean().optional(),
   /** opt-in (connector `helpers = "cats"`): their subagents are kittens; omitted = robots */
@@ -134,6 +137,11 @@ export const ConnectorHello = msg(
     platform: z.string().max(40).optional(),
     /** user-chosen machine label shown on the agent card; older connectors omit it */
     machine: MachineName.optional(),
+    /**
+     * Giphy media id for the GIF over the person's head; "" removes it. Omitted (old
+     * connectors, or never set on this machine) leaves the person's GIF as it is.
+     */
+    gif: z.union([GiphyId, z.literal("")]).optional(),
     /** opt-in "MM-DD"; only "is it today" is ever shown */
     birthday: z
       .string()
@@ -367,6 +375,12 @@ export const MessageDeleted = msg(
 
 export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
 
+/** The person's head GIF changed; `gif` omitted = removed. */
+export const GifUpdated = msg(
+  "gif.updated",
+  z.object({ personId: PersonId, gif: GiphyId.optional() }),
+);
+
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,
   MessageSent,
@@ -380,6 +394,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   SubagentSpawned,
   SubagentFinished,
   AvatarUpdated,
+  GifUpdated,
   SessionConnectionChanged,
   SessionContextChanged,
   PersonBirthdayChanged,

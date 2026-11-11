@@ -34,6 +34,7 @@ import type { ConnectionStatus } from "./net/viewer.ts";
 import { installMode, onInstallChange, promptInstall } from "./pwa.ts";
 import type { OfficeModel, OfficeStats, PersonState, SessionState } from "./state/officeModel.ts";
 import { cycleOption } from "./ui/carousel.ts";
+import { CustomizeSection, type PutGif } from "./ui/customizeSection.ts";
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -283,6 +284,8 @@ export class Hud {
     joins?: string[];
   }[] = [];
   private panel: HTMLElement;
+  /** "GIF over your head" section of your own card, kept across re-renders (half-typed link) */
+  private customize: CustomizeSection | null = null;
   private menu: HTMLElement;
   private reconnect: HTMLElement;
   readonly minimapHost: HTMLElement;
@@ -301,6 +304,8 @@ export class Hud {
   portrait: (personId: string) => HTMLCanvasElement | null = () => null;
   /** "today" numbers for a person (GET /api/people/:id); null = not available (demo) */
   fetchDay: (personId: string) => Promise<PersonDayResponse | null> = async () => null;
+  /** set / remove a person's head GIF (PUT /api/people/:id/gif); null = no server (demo) */
+  putGif: PutGif | null = null;
   /** the panel opened, closed or switched between person and agent card */
   onPanelChange: () => void = () => {};
   /** send a poke / paper ball; null hides the poke buttons (kiosk, no server) */
@@ -384,6 +389,7 @@ export class Hud {
     if (!opts.kiosk) this.setupMenu();
     this.panel.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.panel.addEventListener("wheel", (e) => e.stopPropagation());
+    // (Escape inside the Customize inputs only blurs them, see CustomizeSection)
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this.panelOpen) this.closePanel();
     });
@@ -733,6 +739,11 @@ export class Hud {
     // don't yank the poke / claim box away while someone is typing in it
     if (this.pokeBox?.isConnected && this.pokeBox.contains(document.activeElement)) return;
     if (this.claimBox?.isConnected && this.claimBox.contains(document.activeElement)) return;
+    if (this.customize?.root.isConnected && this.customize.root.contains(document.activeElement)) {
+      // ... but the GIF section still shows a new GIF as soon as `gif.updated` arrives
+      this.customize.update(this.model.people.get(this.customize.personId)?.gif);
+      return;
+    }
     const p = this.panelPerson ? this.model.people.get(this.panelPerson) : undefined;
     if (!p) {
       this.closePanel();
@@ -800,6 +811,7 @@ export class Hud {
       }
       slot.replaceWith(this.claimBox);
     } else slot?.remove();
+    this.mountCustomize(p);
     this.mountPoke(p);
     const portrait = this.portrait(p.personId);
     if (portrait) {
@@ -817,6 +829,20 @@ export class Hud {
     this.panel.classList.remove("card");
     this.panel.classList.add("show");
     this.onPanelChange();
+  }
+
+  /**
+   * The "GIF over your head" section, on your own card only (this browser confirmed "It's me",
+   * like the look editor; the server checks the same cookie). The same element across
+   * re-renders, so a half-typed link survives; a fresh one for a different person. Not in
+   * kiosk mode, not without a server (demo).
+   */
+  private mountCustomize(p: PersonState) {
+    if (this.opts.kiosk || !this.putGif || this.me !== p.personId) return;
+    if (this.customize?.personId !== p.personId)
+      this.customize = new CustomizeSection(p.personId, p.gif, this.putGif);
+    else this.customize.update(p.gif);
+    this.panel.append(this.customize.root);
   }
 
   /** Whether the fullscreen look studio is open. */
@@ -1135,7 +1161,7 @@ export class Hud {
   private buildClaim(p: PersonState): HTMLElement {
     const box = el("div", "claim");
     box.innerHTML = `
-      <div class="claim-title">Is this you? Confirm with a code from your Mac to change this look.</div>
+      <div class="claim-title">Is this you? Confirm with a code from your Mac to change this look and your head GIF.</div>
       <button type="button" class="pixel-btn claim-send" title="A 6-digit code pops up on this person's Mac">&#128274; It's me: send a code</button>
       <form class="claim-form" hidden>
         <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" aria-label="code from the Mac notification">

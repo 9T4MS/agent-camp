@@ -7,7 +7,7 @@
  *   2. person.left          (after all of that person's session.ended)
  *   3. person.joined        (person carries `sessions: []`; sessions follow as session.started)
  *   4. avatar.updated       (people present in both states whose look changed), then
- *      person.birthdayChanged / person.helpersChanged
+ *      person.birthdayChanged / person.helpersChanged / gif.updated
  *   5. session.started
  *   6. session.activityChanged, session.contextChanged, session.connectionChanged
  *   7. subagent.spawned / subagent.finished (one event per unit, with the running count)
@@ -59,8 +59,21 @@ export function diff(prev: OfficeState, next: OfficeState, ts: number = Date.now
     const p = prevPeople.get(n.personId);
     if (!p) {
       joined.push(envelope("person.joined", { person: { ...n, sessions: [] } }, { ts }));
-    } else if (!sameAvatar(p.avatar, n.avatar)) {
-      avatars.push(envelope("avatar.updated", { personId: n.personId, avatar: n.avatar }, { ts }));
+    } else {
+      if (!sameAvatar(p.avatar, n.avatar)) {
+        avatars.push(
+          envelope("avatar.updated", { personId: n.personId, avatar: n.avatar }, { ts }),
+        );
+      }
+      if (p.gif !== n.gif) {
+        avatars.push(
+          envelope(
+            "gif.updated",
+            { personId: n.personId, ...(n.gif ? { gif: n.gif } : {}) },
+            { ts },
+          ),
+        );
+      }
     }
     if (p && !!p.birthday !== !!n.birthday) {
       avatars.push(
@@ -159,6 +172,13 @@ export function applyEvents(state: OfficeState, events: readonly ViewerEvent[]):
       case "avatar.updated": {
         const p = people.get(e.data.personId);
         if (p) p.avatar = e.data.avatar;
+        break;
+      }
+      case "gif.updated": {
+        const p = people.get(e.data.personId);
+        if (!p) break;
+        if (e.data.gif) p.gif = e.data.gif;
+        else delete p.gif;
         break;
       }
       case "person.birthdayChanged": {
