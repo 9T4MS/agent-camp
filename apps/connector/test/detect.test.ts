@@ -177,8 +177,15 @@ describe("detectors on fixtures/home", () => {
     mkdirSync(h.path(".claude/projects/-x"), { recursive: true });
     writeFileSync(h.path(".claude/projects/-x/abc.jsonl"), "\u0000\u0001garbage\n{\n[1]\nnull\n");
     writeFileSync(h.path(".codex/sessions/2026/11/10/rollout-broken.jsonl"), "{{{{");
+    // legacy sidechain transcript next to sessions: not a session of its own
+    writeFileSync(
+      h.path(".claude/projects/-Users-anna-code-website/agent-1234.jsonl"),
+      '{"type":"user","isSidechain":true}\n',
+    );
     const sessions = await detector({ assume: true }).poll();
-    expect(sessions.length).toBeGreaterThanOrEqual(4);
+    // the broken codex rollout is fresh, so it counts (as waiting); agent-*.jsonl does not
+    expect(sessions.filter((s) => s.agent === "claude")).toHaveLength(3);
+    expect(sessions.length).toBe(6);
     // missing home entirely
     h.cleanup();
     expect(await detector({ assume: true }).poll()).toEqual([]);

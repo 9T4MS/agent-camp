@@ -44,3 +44,29 @@ Implementer-decides choices from `PLAN.md`, one line of reasoning each. Newest a
 | S15 | Static assets         | `[assets]` from `../web/dist`, `run_worker_first` for /ws/*, /api/*, /healthz, /install.sh; default `auto-trailing-slash` maps /stats → stats.html | Assets are served without invoking the Worker (free, not counted as requests). |
 | S16 | Extra protocol fields | Additive: `office.snapshot.data.timezone?` (day/night) and `packages/protocol/src/api.ts` (`HistoryRow`, `StatsResponse`, `SnapshotList`) | Web and simulator share the HTTP shapes with the server. |
 | S17 | Request budget        | Estimate for 10 connectors, 10 h/day: heartbeats 10 × 1,200 = 12k msgs + ~20k change snapshots = ~32k incoming WS msgs ÷ 20 ≈ 1.6k billed requests; alarms ≈ 600–800; WS upgrades, viewer connects, /api calls and 40–96 snapshot posts ≈ 300–500 → **≈ 2.5–3.5k requests/day** (≈ 4–5k if laptops stay on 24 h). Ping/pong auto-responses are free; outgoing broadcasts are not billed; static assets are free | Comfortably within "a few thousand/day" on the shared 100k free plan. |
+
+## Connector (apps/connector)
+
+| #   | Topic                 | Decision | Why |
+| --- | --------------------- | -------- | --- |
+| C1  | Runtime deps          | Zero beyond `@agent-office/protocol` (Bun WebSocket/fetch/crypto/spawn, hand-rolled flat TOML) | Smallest binary surface; nothing to audit or break on cross-compile. |
+| C2  | Process detection     | `ps -axo pid=,args=` on macOS (not `comm`), `/proc/*/cmdline` on Linux; match argv0 or `node/bun <script>` against claude/codex/pi | Claude/Pi often run as `node …/cli.js` and the native Claude binary's file name is its version number. |
+| C3  | Liveness              | Live = Claude pid file with a running claude pid, OR newest transcript whose folder/cwd matches a running agent's cwd (lsof, cached per pid), OR transcript < 90 s old while any process of that agent runs; the first two stay live as `idle` | Pid files/cwd give exact process ties and real idle; the mtime rule keeps it working without either. |
+| C4  | Test mode             | `--assume-processes` / `AGENT_OFFICE_ASSUME_PROCESSES=1` = every agent running and every pid-file pid alive; `--home`/`AGENT_OFFICE_HOME` replaces ~ and then ignores CLAUDE_CONFIG_DIR/CODEX_HOME/PI_CODING_AGENT_DIR | Fixtures run on Linux CI; a fixture run can never pick up the real ~/.claude via a stray env var. |
+| C5  | Activity extras       | Assistant text with no end marker + 30 s silence → `waiting`; "[Request interrupted by user" / Codex task_complete/turn_aborted / Pi aborted → `waiting`; TodoWrite/Task/MCP tools → `thinking`; subagent count forced to 0 when idle | Not every agent version writes stop reasons; idle desks shouldn't show busy helpers. |
+| C6  | Session key           | `sha256(clientId:agent:rawId)` → 16 hex chars | Salted per laptop so keys can't be joined across machines or reversed to session ids. |
+| C7  | Codex scan scope      | Only the two newest `sessions/YYYY/MM/DD` folders | Constant cost per poll, independent of the date; a resumed week-old rollout is missed (acceptable). |
+| C8  | Claude cwd fallback   | Pid file cwd → transcript `cwd` field → greedy filesystem-guided decode of the folder name; `agent-*.jsonl` next to sessions ignored | Basename is right even for hyphenated folder names; legacy sidechains aren't separate sessions. |
+| C9  | Self-update safety    | Download → temp file next to the binary → run `<tmp> version` → require strictly newer → atomic rename → exit(0) (launchd KeepAlive restarts); failed version not retried for 10 min; dev builds and `bun src/main.ts` never update; `AGENT_OFFICE_NO_UPDATE=1` disables | A broken or stale (CDN-cached) asset can never replace a working binary or cause a restart loop. |
+| C10 | GitHub poll           | Every 5 min: REST `releases/latest` tag_name, falling back to the `/releases/latest` redirect `Location` | Unauthenticated API is 60 req/h per IP; ~10 laptops on one office NAT would exceed it. |
+| C11 | Below min version     | Stay connected but send no snapshots until the update succeeds | PLAN: "update before sending anything else"; the server would reject the old shape anyway. |
+| C12 | Bad password (4001)   | Retry after 5 min, no exponential hammering; 4002 → update then normal backoff | A typo shouldn't flood the server; too-old fixes itself. |
+| C13 | Config/status         | `configure` subcommand writes the TOML (0600, atomic) so install.sh never quotes TOML; daemon writes `status.json` each poll, `status` treats it as stale after 10 s or a dead pid | Shell quoting bugs avoided; `status` works without IPC. |
+| C14 | install.sh            | POSIX sh, prompts via /dev/tty (stdin is the curl pipe), env `AO_*` for non-interactive, accepts both `__AGENT_OFFICE_SERVER__` (what the server substitutes) and `__SERVER_URL__` placeholders, installs to ~/.local/bin, Rosetta-aware arch detection | Works as `curl … | sh`, in CI, and with either placeholder convention. |
+| C15 | launchd               | `~/Library/LaunchAgents/dev.agentoffice.connector.plist`, RunAtLoad + KeepAlive + ThrottleInterval 5, stdout/err → `~/Library/Logs/agent-office.log`, `launchctl bootout` then `bootstrap gui/<uid>` | Re-running the installer is idempotent; exit(0) after an update restarts within ~5 s. |
+| C16 | Linux                 | Builds and runs (for tests); no service manager integration, logs to stdout | Team is macOS-only. |
+
+### Connector: unbuilt
+
+- Optional Claude Code hook (`~/.claude/settings.json` pinging the daemon on session start/end) is not built; 2 s file polling is fast enough.
+- launchd/`install-service`/`uninstall` and the darwin binaries are untested on a real Mac (cross-compiled from Linux; arm64 binary carries an ad-hoc LC_CODE_SIGNATURE).

@@ -168,7 +168,8 @@ export function scanClaude(claudeDir: string, cache: MetaCache = new Map()): Can
       continue; // not a directory
     }
     for (const file of files) {
-      if (!file.endsWith(".jsonl")) continue;
+      // older Claude Code versions keep subagent sidechains as agent-*.jsonl next to sessions
+      if (!file.endsWith(".jsonl") || file.startsWith("agent-")) continue;
       const path = join(folderPath, file);
       let mtimeMs: number;
       let birthMs: number;
