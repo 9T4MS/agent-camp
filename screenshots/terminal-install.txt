@@ -1,0 +1,66 @@
+# Agent Office connector: install + status + self-update, captured on Linux (test mode) against
+# the local Bun dev server (apps/server) and a local release dir served by python3 -m http.server.
+# AGENT_OFFICE_UPDATE_BASE=http://localhost:9124, temp HOME. On macOS the installer also runs
+# 'agent-office install-service' (launchd) instead of the Linux note.
+
+$ curl -fsSL http://localhost:9123/install.sh | AO_PASSWORD=*** AO_NAME="Anna Lee" AO_DESCRIPTION="curly hair, round glasses" sh
+warning: Linux is only supported for testing (no launchd service will be installed).
+Agent Office connector installer
+  downloading agent-office-linux-x64 from http://localhost:9124
+  installed agent-office 0.1.1 to ~/.local/bin/agent-office
+  config written to ~/.config/agent-office/config.toml
+  (Linux: no service installed; start it with: ~/.local/bin/agent-office run)
+  note: ~/.local/bin is not on your PATH; add it, or run ~/.local/bin/agent-office directly.
+
+agent-office 0.1.1 (linux-x64)
+  config    ~/.config/agent-office/config.toml  (name: Anna Lee, server: http://localhost:9123)
+  daemon    not running (no status file yet)
+  logs      ~/.config/agent-office/agent-office.log
+
+Done. Useful commands: agent-office status | agent-office logs | agent-office uninstall
+
+$ cat ~/.config/agent-office/config.toml        # password redacted here
+# Agent Office connector config (written by `agent-office configure`)
+server = "http://localhost:9123"
+password = "***"
+name = "Anna Lee"
+self_description = "curly hair, round glasses"
+share_project_names = true
+client_id = "c_9664ebb94d5ae0a829"
+
+$ AGENT_OFFICE_HOME=<fixtures> AGENT_OFFICE_ASSUME_PROCESSES=1 agent-office run &   # Linux test mode; launchd runs it on macOS
+  | agent-office 0.1.1 (linux-x64) starting; server ws://localhost:9123/ws/connector; self-update on; assuming processes
+  | session+ claude website waiting
+  | session+ claude agent-office typing +2 sub
+  | session+ codex codex-thing running
+  | session+ pi pi-proj typing
+  | connected to ws://localhost:9123/ws/connector as anna-lee (server 0.1.1)
+
+$ agent-office status
+agent-office 0.1.1 (linux-x64)
+  config    ~/.config/agent-office/config.toml  (name: Anna Lee, server: http://localhost:9123)
+  daemon    running (pid 4164, version 0.1.1, updated 2s ago)
+  server    connected to ws://localhost:9123/ws/connector as anna-lee
+  sessions  4 live
+    claude website               waiting                 started 14d ago
+    claude agent-office          typing    2 subagents   started 14d ago
+    codex  codex-thing           running                 started 15h ago
+    pi     pi-proj               typing                  started 15h ago
+  logs      ~/.config/agent-office/agent-office.log
+
+$ curl -s http://localhost:9123/api/state     # what the server sees (summarized)
+  Anna Lee: claude/website/waiting/sub=0, claude/agent-office/typing/sub=2, codex/codex-thing/running/sub=0, pi/pi-proj/typing/sub=0
+
+# self-update: server redeployed with LATEST_CONNECTOR_VERSION=0.1.2, release 0.1.2 published
+$ agent-office run      # (launchd restarts it after the swap)
+  | agent-office 0.1.1 (linux-x64) starting; server ws://localhost:9123/ws/connector; self-update on; assuming processes
+  | session+ claude website waiting
+  | session+ claude agent-office typing +2 sub
+  | session+ codex codex-thing running
+  | session+ pi pi-proj typing
+  | connected to ws://localhost:9123/ws/connector as anna-lee (server 0.1.2)
+  | update 0.1.1 -> 0.1.2 (server announced)
+  | updated to 0.1.2; restarting
+  (exited with code 0)
+$ agent-office version
+0.1.2

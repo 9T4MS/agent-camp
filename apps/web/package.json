@@ -1,0 +1,22 @@
+{
+  "name": "@agent-office/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "shots": "node scripts/shot.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "@agent-office/protocol": "workspace:*",
+    "pixi.js": "^8.22.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.7"
+  }
+}

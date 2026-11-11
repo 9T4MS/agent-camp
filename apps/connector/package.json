@@ -1,0 +1,20 @@
+{
+  "name": "@agent-office/connector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-office": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "build": "bun scripts/build.ts all",
+    "build:local": "bun scripts/build.ts local",
+    "build:linux": "bun scripts/build.ts linux-x64",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-office/protocol": "workspace:*"
+  }
+}
