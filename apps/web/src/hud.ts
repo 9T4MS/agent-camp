@@ -216,6 +216,11 @@ export class Hud {
   private name: HTMLElement;
   private chips: HTMLElement;
   private clock: HTMLElement;
+  private refreshBtn: HTMLButtonElement | null = null;
+  /** the refresh button was pressed */
+  onRefresh: () => void = () => location.reload();
+  /** "What's new" in the menu */
+  onWhatsNew: (() => void) | null = null;
   private banner: HTMLElement;
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
   private bannerQueue: {
@@ -288,7 +293,20 @@ export class Hud {
     this.menu = el("div", "hud-menu pixel-box");
     this.chips = el("div", "chips");
     this.clock = el("div", "clock");
-    top.append(this.name, this.chips, this.clock);
+    top.append(this.name, this.chips);
+    if (!opts.kiosk) {
+      this.refreshBtn = el(
+        "button",
+        "refresh",
+        `<span class="icon" aria-hidden="true">&#8635;</span><span class="label">New version</span>`,
+      );
+      this.refreshBtn.type = "button";
+      this.refreshBtn.title = "Refresh";
+      this.refreshBtn.setAttribute("aria-label", "Refresh");
+      this.refreshBtn.addEventListener("click", () => this.onRefresh());
+      top.append(this.refreshBtn);
+    }
+    top.append(this.clock);
     this.banner = el("div", "hud-banner pixel-box");
     this.panel = el("div", "hud-panel pixel-box");
     this.reconnect = el(
@@ -366,8 +384,13 @@ export class Hud {
     this.menu.innerHTML = `
       <a class="pixel-btn" role="menuitem" href="./stats${q}">Stats</a>
       <a class="pixel-btn" role="menuitem" href="./timelapse${q}">Timelapse</a>
+      ${this.onWhatsNew ? `<button type="button" class="pixel-btn whats-new" role="menuitem">What's new</button>` : ""}
       ${install}
       <form method="post" action="/api/logout"><button class="pixel-btn" type="submit" role="menuitem">Log out</button></form>`;
+    this.menu.querySelector(".whats-new")?.addEventListener("click", () => {
+      this.closeMenu();
+      this.onWhatsNew?.();
+    });
     this.menu.querySelector(".install")?.addEventListener("click", () => {
       this.closeMenu();
       void promptInstall();
@@ -401,6 +424,13 @@ export class Hud {
     if (!v) return;
     v.textContent = version && version !== "0.0.0" ? `v${version.replace(/^v/, "")}` : build;
     v.title = `server ${version ?? "?"} · web build ${build}`;
+  }
+
+  /** A newer build is deployed: the refresh button says so. */
+  setUpdateReady(ready: boolean) {
+    if (!this.refreshBtn) return;
+    this.refreshBtn.classList.toggle("ready", ready);
+    this.refreshBtn.title = ready ? "A new version is out: refresh" : "Refresh";
   }
 
   setStats(st: OfficeStats) {

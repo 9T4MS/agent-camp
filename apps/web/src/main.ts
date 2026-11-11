@@ -10,7 +10,7 @@
  *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
  *   ?key=...      viewer key passed through to /ws/viewer
  *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour,
- *                 reloads itself after a deploy)
+ *                 reloads itself right after a deploy)
  *   ?recorder=1   upload a timelapse PNG every 15 min (&recordEvery=ms to override)
  *   ?nohud=1      hide all DOM overlays     ?zoom=fit|<n>  initial zoom
  *   ?hour=0..24   force the time of day     ?gallery=1     art gallery (dev)
@@ -34,14 +34,24 @@ import { C } from "./art/palette.ts";
 import { avatarPortrait } from "./art/party.ts";
 import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
+import { CHANGELOG } from "./changelog.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
-import { keepAwake, reloadOnNewBuild } from "./kiosk.ts";
+import { keepAwake, reloadInto, watchForNewBuild } from "./kiosk.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
 import { registerServiceWorker } from "./pwa.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
+import {
+  loadSeen,
+  mayAutoReload,
+  newVersionLabel,
+  notesKey,
+  saveSeen,
+  shouldCelebrate,
+} from "./release.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
+import { Celebration } from "./ui/celebration.ts";
 import { Minimap } from "./ui/minimap.ts";
 import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
@@ -213,6 +223,16 @@ async function boot() {
   chars.onCoffee = (personId) =>
     life.coffeeDrunk(personId, model.people.get(personId)?.name ?? personId);
   const hud = new Hud(host, model, { kiosk });
+  const celebration = new Celebration(host);
+  const seenRelease = loadSeen();
+  const notes = notesKey(CHANGELOG[0]);
+  let celebrate = !demo && !nohud && shouldCelebrate(seenRelease, __BUILD__, notes);
+  hud.onWhatsNew = () =>
+    celebration.show({
+      heading: "What's new",
+      version: model.version ? `v${model.version.replace(/^v/, "")}` : null,
+      section: CHANGELOG[0],
+    });
   // the top bar is 36 px (46 in kiosk) plus the notch inset in an installed app
   const hudTop = host.querySelector<HTMLElement>(".hud-top");
   const fallbackInset = kiosk ? 46 : 36;
@@ -279,6 +299,14 @@ async function boot() {
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
       hud.setVersion(model.version, __BUILD__);
+      if (!demo) {
+        const label = newVersionLabel(seenRelease, model.version);
+        if (celebrate) {
+          celebrate = false;
+          celebration.show({ heading: "New version!", version: label, section: CHANGELOG[0] });
+        } else if (label && celebration.open) celebration.setVersion(label);
+        saveSeen({ build: __BUILD__, version: model.version ?? seenRelease?.version, notes });
+      }
       chars.syncSlots();
     }
     hud.setStats(model.stats());
@@ -601,13 +629,37 @@ async function boot() {
     );
     feed.start();
   } else {
-    const checkBuild = kiosk ? reloadOnNewBuild() : null;
+    let newBuild: string | null = null;
+    let lastInput = performance.now();
+    for (const ev of ["pointerdown", "pointermove", "keydown", "wheel"] as const)
+      window.addEventListener(ev, () => (lastInput = performance.now()), {
+        capture: true,
+        passive: true,
+      });
+    const typing = () =>
+      document.activeElement?.matches("input, textarea, select, [contenteditable]");
+    const reloadWhenIdle = () => {
+      if (!newBuild) return;
+      const ok = mayAutoReload({
+        kiosk,
+        hidden: document.visibilityState === "hidden",
+        busy: hud.lookEditorOpen || !!typing(),
+        idleMs: performance.now() - lastInput,
+      });
+      if (ok) reloadInto(newBuild);
+    };
+    const checkBuild = watchForNewBuild((served) => {
+      newBuild = served;
+      hud.setUpdateReady(true);
+      reloadWhenIdle();
+    });
+    setInterval(reloadWhenIdle, 15_000);
     connectViewer({
       key,
       onMessage: ingest,
       onStatus: (s) => {
         hud.setStatus(s);
-        if (s === "open") checkBuild?.();
+        if (s === "open") checkBuild();
       },
     });
   }

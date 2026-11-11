@@ -288,6 +288,9 @@ bun run sim -- --backfill-week        # a fake week of history for /stats
 bun run sim -- --snapshots 12         # test frames for /timelapse
 ```
 
+Every PR adds a line to [CHANGELOG.md](CHANGELOG.md) under today's date; after a deploy the
+office shows the top section in its full-screen "New version!" banner.
+
 The dev password is `devpass`. Run a connector against it with
 `bun apps/connector/src/main.ts run --server http://localhost:8787 --password devpass --name You`.
 
