@@ -1,15 +1,50 @@
 /**
  * Process liveness, cheap and dependency-free.
- *   macOS: `ps -axo pid=,args=` (+ `lsof -a -d cwd -p <pids> -Fn` for agent pids only, cached)
- *   Linux: /proc/<pid>/cmdline and /proc/<pid>/cwd
+ *   macOS: `ps -axo pid=,ppid=,args=` (+ `lsof -a -d cwd -p <pids> -Fn` for agent pids only, cached)
+ *   Linux: /proc/<pid>/cmdline, /proc/<pid>/stat (ppid) and /proc/<pid>/cwd
  * We look at argv rather than `comm` because Claude Code / Pi often run as `node .../cli.js`
  * and the native Claude binary's file name is its version number.
+ *
+ * Parent pids let us spot an agent running *inside* another agent, e.g. Pi's Claude bridge
+ * (pi-claude-bridge) spawning the Claude Agent SDK's `claude` binary as its model backend.
+ * Such a process gets `hostPid`; the detector folds its session into the host's and counts
+ * hosted agents (e.g. purrness subagent workers) as the host's helpers, except model backends.
  */
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 import type { AgentKind } from "@agent-office/protocol";
 
-export type ProcInfo = { pid: number; agent: AgentKind };
+export type ProcInfo = {
+  pid: number;
+  agent: AgentKind;
+  /** pid of the nearest ancestor that is itself a coding agent (this one runs inside it) */
+  hostPid?: number;
+  /** the Claude Agent SDK binary: a model backend of its host, not a helper */
+  backend?: boolean;
+};
+
+/** Any process: its parent pid and, if it is a coding agent, which one. */
+export type ProcRow = {
+  pid: number;
+  ppid: number;
+  agent: AgentKind | null;
+  backend?: boolean;
+  /** argv0 is a JS runtime (`node …/bin/codex`), not the agent's native binary */
+  launcher?: boolean;
+};
+
+/** The Claude Agent SDK's bundled `claude` (`@anthropic-ai/claude-agent-sdk-<platform>/claude`). */
+export function isAgentSdkBackend(argv: readonly string[]): boolean {
+  return argv.some((a) => a.includes("claude-agent-sdk"));
+}
+
+function row(pid: number, ppid: number, argv: readonly string[]): ProcRow {
+  const agent = classifyArgv(argv);
+  const r: ProcRow = { pid, ppid, agent };
+  if (agent === "claude" && isAgentSdkBackend(argv)) r.backend = true;
+  if (agent && RUNTIMES.has(basename(argv[0] ?? ""))) r.launcher = true;
+  return r;
+}
 
 export interface ProcessSource {
   /** All running coding-agent processes. */
@@ -56,16 +91,61 @@ async function run(cmd: string[]): Promise<string> {
   }
 }
 
-/** Parse `ps -axo pid=,args=` output. */
-export function parsePs(out: string): ProcInfo[] {
+/**
+ * Agent processes of a process table, each with the pid of its nearest agent ancestor
+ * (`hostPid`) when it runs inside another coding agent.
+ *
+ * A JS launcher's own native binary is the same agent, not a hosted one: npm-installed Codex
+ * runs as `node …/bin/codex` plus a child `…/vendor/…/codex/codex`. Such a child (same kind,
+ * native, direct parent a launcher) is left out, and agents below it see the launcher as host.
+ */
+export function agentProcesses(rows: readonly ProcRow[]): ProcInfo[] {
+  const byPid = new Map<number, ProcRow>();
+  for (const r of rows) byPid.set(r.pid, r);
+  const wrapped = (r: ProcRow) => {
+    const parent = byPid.get(r.ppid);
+    return !r.launcher && parent?.launcher === true && parent.agent === r.agent;
+  };
+  const isAgent = (r: ProcRow) => r.agent !== null && !wrapped(r);
   const procs: ProcInfo[] = [];
-  for (const line of out.split("\n")) {
-    const m = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (!m) continue;
-    const agent = classifyArgv(m[2]!.trim().split(/\s+/));
-    if (agent) procs.push({ pid: Number(m[1]), agent });
+  for (const r of rows) {
+    if (!r.agent || !isAgent(r)) continue;
+    const info: ProcInfo = { pid: r.pid, agent: r.agent };
+    if (r.backend) info.backend = true;
+    const seen = new Set<number>([r.pid]);
+    let parent = byPid.get(r.ppid);
+    while (parent && !seen.has(parent.pid)) {
+      if (isAgent(parent)) {
+        info.hostPid = parent.pid;
+        break;
+      }
+      seen.add(parent.pid);
+      parent = byPid.get(parent.ppid);
+    }
+    procs.push(info);
   }
   return procs;
+}
+
+/** Parse `ps -axo pid=,ppid=,args=` output. */
+export function parsePs(out: string): ProcInfo[] {
+  const rows: ProcRow[] = [];
+  for (const line of out.split("\n")) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (!m) continue;
+    rows.push(row(Number(m[1]), Number(m[2]), m[3]!.trim().split(/\s+/)));
+  }
+  return agentProcesses(rows);
+}
+
+/** Parent pid from `/proc/<pid>/stat` ("pid (comm) state ppid ..."; comm may hold spaces). */
+export function parseStatPpid(stat: string): number | undefined {
+  const rest = stat
+    .slice(stat.lastIndexOf(")") + 1)
+    .trim()
+    .split(/\s+/);
+  const ppid = Number(rest[1]);
+  return Number.isInteger(ppid) ? ppid : undefined;
 }
 
 /** Parse `lsof -Fn` output ("p123\nfcwd\nn/path"). */
@@ -83,7 +163,7 @@ class MacProcesses implements ProcessSource {
   private cwdCache = new Map<number, string>();
 
   async list(): Promise<ProcInfo[]> {
-    return parsePs(await run(["ps", "-axo", "pid=,args="]));
+    return parsePs(await run(["ps", "-axo", "pid=,ppid=,args="]));
   }
 
   async cwds(pids: number[]): Promise<Map<number, string>> {
@@ -107,24 +187,24 @@ class MacProcesses implements ProcessSource {
 
 class LinuxProcesses implements ProcessSource {
   async list(): Promise<ProcInfo[]> {
-    const procs: ProcInfo[] = [];
+    const rows: ProcRow[] = [];
     let entries: string[];
     try {
       entries = readdirSync("/proc");
     } catch {
-      return procs;
+      return [];
     }
     for (const e of entries) {
       if (!/^\d+$/.test(e)) continue;
       try {
+        const ppid = parseStatPpid(readFileSync(`/proc/${e}/stat`, "utf8"));
         const argv = readFileSync(`/proc/${e}/cmdline`, "utf8").split("\0").filter(Boolean);
-        const agent = classifyArgv(argv);
-        if (agent) procs.push({ pid: Number(e), agent });
+        rows.push(row(Number(e), ppid ?? 0, argv));
       } catch {
         // exited or not ours
       }
     }
-    return procs;
+    return agentProcesses(rows);
   }
 
   async cwds(pids: number[]): Promise<Map<number, string>> {

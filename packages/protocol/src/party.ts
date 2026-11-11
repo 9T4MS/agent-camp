@@ -21,6 +21,16 @@ export const PartyState = z.strictObject({
   scores: z.record(z.string(), z.number().int().nonnegative()),
 });
 export type PartyState = z.infer<typeof PartyState>;
+/** A cached viewer can render newer equipment without dropping the entire office message. */
+export const ViewerPartyEvent = PartyEvent.extend({
+  item: HeldItem.catch("none"),
+  vehicle: Vehicle.catch("none"),
+});
+export const ViewerPartyState = PartyState.extend({
+  events: z.array(ViewerPartyEvent).max(32),
+});
+export type ViewerPartyState = z.infer<typeof ViewerPartyState>;
+
 export const PartyMutation = z.strictObject({
   personId: PersonRef,
   action: PartyAction,

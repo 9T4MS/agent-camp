@@ -856,9 +856,10 @@ body.kiosk .hud-reconnect {
   color: var(--grey);
 }
 .hud-panel .look-form select {
+  /* 16px: iOS Safari zooms the page into smaller fields */
   min-width: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   padding: 3px 4px;
   background: var(--cream);
   color: var(--night);

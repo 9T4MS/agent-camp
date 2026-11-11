@@ -9,9 +9,9 @@
  * Parsers never throw; they return { ok: true, msg } | { ok: false, error }.
  */
 import { z } from "zod";
-import { AvatarSpec } from "./catalog.ts";
+import { ViewerAvatar } from "./catalog.ts";
 import { PROTOCOL_VERSION } from "./constants.ts";
-import { PartyState } from "./party.ts";
+import { ViewerPartyState } from "./party.ts";
 
 // ---- building blocks ----------------------------------------------------------------------
 export const AGENTS = ["claude", "codex", "pi", "unknown"] as const;
@@ -80,7 +80,7 @@ export type SessionView = z.infer<typeof SessionView>;
 export const PersonView = z.object({
   personId: PersonId,
   name: z.string().min(1).max(40),
-  avatar: AvatarSpec,
+  avatar: ViewerAvatar,
   sessions: z.array(SessionView),
   joinedAt: EpochMs,
   /** opt-in (connector `birthday = "MM-DD"`): it is their birthday in the office time zone */
@@ -174,7 +174,7 @@ export const OfficeSnapshot = msg(
   "office.snapshot",
   z.object({
     officeName: z.string(),
-    party: PartyState.optional(),
+    party: ViewerPartyState.optional(),
     serverTime: EpochMs,
     people: z.array(PersonView),
     /** IANA zone of the office (for day/night lighting), e.g. "Europe/Vienna" */
@@ -217,7 +217,7 @@ export const SubagentFinished = msg(
 );
 export const AvatarUpdated = msg(
   "avatar.updated",
-  z.object({ personId: PersonId, avatar: AvatarSpec }),
+  z.object({ personId: PersonId, avatar: ViewerAvatar }),
 );
 /** Context use moved by at least one 5% step (connectors round to 0.05). */
 export const SessionContextChanged = msg(
@@ -266,7 +266,7 @@ export const InteractionHappened = msg(
   }),
 );
 
-export const PartyUpdated = msg("party.updated", z.object({ party: PartyState }));
+export const PartyUpdated = msg("party.updated", z.object({ party: ViewerPartyState }));
 
 export const ServerToViewer = z.discriminatedUnion("type", [
   OfficeSnapshot,

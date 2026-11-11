@@ -16,6 +16,12 @@ export interface Store {
   history(since?: number): HistoryRow[];
   getAvatar(personId: string): StoredAvatar | null;
   putAvatar(personId: string, avatar: AvatarSpec, key: string, selfDescription?: string): void;
+  /**
+   * Look picked in the look editor. Kept next to the automatic look (`getAvatar`), so going
+   * back to automatic is a free restore. `null` removes it.
+   */
+  getCustomAvatar(personId: string): AvatarSpec | null;
+  putCustomAvatar(personId: string, avatar: AvatarSpec | null): void;
   kvGet(key: string): string | null;
   kvPut(key: string, value: string): void;
   addSnapshot(ts: number, png: Uint8Array): number;
@@ -26,6 +32,7 @@ export interface Store {
 export class MemoryStore implements Store {
   rows: HistoryRow[] = [];
   avatars = new Map<string, StoredAvatar>();
+  customAvatars = new Map<string, AvatarSpec>();
   kv = new Map<string, string>();
   snapshots: { id: number; ts: number; png: Uint8Array }[] = [];
 
@@ -44,6 +51,13 @@ export class MemoryStore implements Store {
       key,
       ...(selfDescription !== undefined ? { selfDescription } : {}),
     });
+  }
+  getCustomAvatar(personId: string): AvatarSpec | null {
+    return this.customAvatars.get(personId) ?? null;
+  }
+  putCustomAvatar(personId: string, avatar: AvatarSpec | null): void {
+    if (avatar) this.customAvatars.set(personId, avatar);
+    else this.customAvatars.delete(personId);
   }
   kvGet(key: string): string | null {
     return this.kv.get(key) ?? null;
@@ -75,6 +89,8 @@ export const SCHEMA = [
   "CREATE INDEX IF NOT EXISTS history_ts ON history(ts)",
   `CREATE TABLE IF NOT EXISTS avatars (
      person TEXT PRIMARY KEY, spec TEXT NOT NULL, key TEXT NOT NULL, updated INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS custom_avatars (
+     person TEXT PRIMARY KEY, spec TEXT NOT NULL, updated INTEGER NOT NULL)`,
   "CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
   `CREATE TABLE IF NOT EXISTS snapshots (
      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, png BLOB NOT NULL)`,
@@ -158,6 +174,28 @@ export class SqlStore implements Store {
       key,
       Date.now(),
       selfDescription ?? null,
+    );
+  }
+  getCustomAvatar(personId: string): AvatarSpec | null {
+    const r = this.run("SELECT spec FROM custom_avatars WHERE person = ?", personId)[0];
+    if (!r) return null;
+    try {
+      const look = AvatarSpec.safeParse(JSON.parse(String(r.spec)));
+      return look.success ? look.data : null;
+    } catch {
+      return null;
+    }
+  }
+  putCustomAvatar(personId: string, avatar: AvatarSpec | null): void {
+    if (!avatar) {
+      this.run("DELETE FROM custom_avatars WHERE person = ?", personId);
+      return;
+    }
+    this.run(
+      "INSERT OR REPLACE INTO custom_avatars (person, spec, updated) VALUES (?, ?, ?)",
+      personId,
+      JSON.stringify(avatar),
+      Date.now(),
     );
   }
   kvGet(key: string): string | null {

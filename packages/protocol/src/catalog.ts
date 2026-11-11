@@ -222,6 +222,36 @@ export const AvatarSpec = z.object({
 });
 export type AvatarSpec = z.infer<typeof AvatarSpec>;
 
+/**
+ * The avatar as viewers read it: an id this bundle does not know yet (a newer server added it
+ * to the catalog) falls back to a default instead of rejecting the whole snapshot. Servers
+ * and GenUI keep validating with the strict `AvatarSpec`.
+ */
+export const ViewerAvatar = z.object({
+  hairStyle: HairStyle.catch("short"),
+  hairColor: HairColor.catch("brown"),
+  skinTone: SkinTone.catch("medium"),
+  glasses: Glasses.catch("none"),
+  facialHair: FacialHair.catch("none"),
+  accessory: Accessory.catch("none"),
+  outfit: Outfit.catch("jacket"),
+  leftHand: HeldItem.catch("none"),
+  rightHand: HeldItem.catch("none"),
+  wrist: Wristwear.catch("none"),
+  accentColor: AccentColor.catch("cyan"),
+  vehicle: Vehicle.catch("none"),
+  deskProps: z
+    .array(z.unknown())
+    .catch([])
+    .transform((a) =>
+      [...new Set(a.filter((x): x is DeskProp => DeskProp.safeParse(x).success))].slice(
+        0,
+        MAX_DESK_PROPS,
+      ),
+    ),
+  deskMess: DeskMess.catch(0),
+});
+
 /** Everything a GenUI provider may choose from, as plain id lists (handy for prompts). */
 export const AVATAR_CATALOG = {
   hairStyles: HairStyle.options,

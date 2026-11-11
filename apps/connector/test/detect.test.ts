@@ -9,7 +9,15 @@ import { Detector, projectName, sessionKeyFor } from "../src/detect/index.ts";
 import { encodePiCwd, normalizePi } from "../src/detect/pi.ts";
 import { parseJsonl, readHead, TailReader } from "../src/detect/tail.ts";
 import { agentDirs } from "../src/paths.ts";
-import { classifyArgv, fakeProcesses, type ProcInfo, parseLsof, parsePs } from "../src/proc.ts";
+import {
+  agentProcesses,
+  classifyArgv,
+  fakeProcesses,
+  type ProcInfo,
+  parseLsof,
+  parsePs,
+  parseStatPpid,
+} from "../src/proc.ts";
 import { type FakeHome, makeHome, P, RAW_IDS } from "./helpers.ts";
 
 let h: FakeHome;
@@ -109,6 +117,84 @@ describe("detectors on fixtures/home", () => {
       cwds: { 777: "/Users/anna/elsewhere" },
     }).poll();
     expect(none).toEqual([]);
+  });
+
+  test("an agent hosted inside another agent (Pi's Claude bridge) is not a second desk", async () => {
+    h = makeHome();
+    // pid 12345 is the agent-office Claude pid file; here it runs under pi 778
+    const cwds = { 778: "/Users/anna/code/pi-proj" };
+    let procs: ProcInfo[] = [
+      { pid: 778, agent: "pi" },
+      { pid: 12345, agent: "claude", hostPid: 778 },
+    ];
+    const d = new Detector({
+      dirs: agentDirs({}, h.home),
+      clientId: "c_test",
+      shareProjectNames: true,
+      processes: { list: async () => procs, cwds: () => fakeProcesses([], cwds).cwds([778]) },
+    });
+    let sessions = await d.poll();
+    expect(sessions.map((s) => `${s.agent}:${s.project}`)).toEqual(["pi:pi-proj"]);
+    // after the hosted process exits its transcript is still fresh: still hidden, even though
+    // an unrelated real Claude now runs (which keeps the other fresh Claude session live)
+    procs = [
+      { pid: 778, agent: "pi" },
+      { pid: 999, agent: "claude" },
+    ];
+    sessions = await d.poll();
+    expect(sessions.map((s) => `${s.agent}:${s.project}`).sort()).toEqual([
+      "claude:website",
+      "pi:pi-proj",
+    ]);
+    // resumed natively (`claude --resume <id>`): a top-level pid owns it -> visible again
+    procs = [
+      { pid: 778, agent: "pi" },
+      { pid: 12345, agent: "claude" },
+    ];
+    sessions = await d.poll();
+    expect(byProject(sessions)["agent-office"]?.agent).toBe("claude");
+    // a standalone Claude on the same pid file is a desk as usual
+    sessions = await detector({ procs: [{ pid: 12345, agent: "claude" }] }).poll();
+    expect(byProject(sessions)["agent-office"]?.agent).toBe("claude");
+  });
+
+  test("hosted helpers (purrness workers) are robots of the host's desk and keep it busy", async () => {
+    h = makeHome();
+    h.age(P.pi, 5 * 60_000); // Pi writes nothing while it waits for the subagent tool
+    const host = { pid: 778, agent: "pi" as const };
+    const cwds = { 778: "/Users/anna/code/pi-proj" };
+    const sdk = { agent: "claude" as const, backend: true };
+    const busy = await detector({
+      procs: [
+        host,
+        { pid: 801, ...sdk, hostPid: 778 }, // the host's own bridge backend: no robot
+        { pid: 810, agent: "pi", hostPid: 778 }, // worker
+        { pid: 811, ...sdk, hostPid: 810 }, // the worker's backend: no robot
+        { pid: 820, agent: "pi", hostPid: 810 }, // nested worker
+        { pid: 830, agent: "pi", hostPid: 778 }, // worker
+      ],
+      cwds,
+    }).poll();
+    expect(busy).toHaveLength(1);
+    expect(busy[0]).toMatchObject({
+      agent: "pi",
+      project: "pi-proj",
+      activity: "typing",
+      subagents: 3,
+    });
+    // only the backend runs: busy, no robots
+    const turn = await detector({ procs: [host, { pid: 801, ...sdk, hostPid: 778 }], cwds }).poll();
+    expect(turn[0]).toMatchObject({ activity: "typing", subagents: 0 });
+    // nothing hosted: the quiet transcript is idle again
+    const idle = await detector({ procs: [host], cwds }).poll();
+    expect(idle[0]).toMatchObject({ activity: "idle", subagents: 0 });
+    // a long-lived hosted process (e.g. `claude mcp serve`) keeps it busy for 10 min at most
+    h.age(P.pi, 11 * 60_000);
+    const stale = await detector({
+      procs: [host, { pid: 810, agent: "pi", hostPid: 778 }],
+      cwds,
+    }).poll();
+    expect(stale[0]).toMatchObject({ activity: "idle", subagents: 0 });
   });
 
   test("subagents older than 60 s are not counted", async () => {
@@ -238,6 +324,22 @@ describe("activity mapping", () => {
     for (const t of ["Task", "TodoWrite", "mcp__github__get_me", "whatever"]) {
       expect(toolActivity(t)).toBe("thinking");
     }
+    for (const t of [
+      "AskUserQuestion",
+      "request_user_input",
+      "purrness_ask_question",
+      "mcp__custom-tools__purrness_ask_question",
+    ]) {
+      expect(toolActivity(t)).toBe("waiting");
+    }
+    for (const t of [
+      "ask_questions_later",
+      "task",
+      "ask_question",
+      "mcp__deepwiki__ask_question",
+    ]) {
+      expect(toolActivity(t)).toBe("thinking");
+    }
   });
 
   test("events + time", () => {
@@ -345,10 +447,59 @@ describe("helpers", () => {
     expect(classifyArgv(["/Applications/Claude.app/Contents/MacOS/Claude"])).toBeNull();
     expect(classifyArgv(["vim", "claude.md"])).toBeNull();
     expect(classifyArgv([])).toBeNull();
-    expect(parsePs("  123 claude --resume\n 456 /bin/zsh\n789 node /x/bin/pi\n")).toEqual([
+    expect(
+      parsePs("  123     1 claude --resume\n 456 1 /bin/zsh\n789 456 node /x/bin/pi\n"),
+    ).toEqual([
       { pid: 123, agent: "claude" },
       { pid: 789, agent: "pi" },
     ]);
+    // Pi's Claude bridge: pi -> (sh) -> Agent SDK claude binary
+    const sdk = "/x/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude";
+    expect(
+      parsePs(
+        `10 1 /bin/zsh\n20 10 pi\n25 20 /bin/sh -c x\n30 25 ${sdk} --output-format stream-json\n`,
+      ),
+    ).toEqual([
+      { pid: 20, agent: "pi" },
+      { pid: 30, agent: "claude", hostPid: 20, backend: true },
+    ]);
+    // a purrness worker is a hosted pi, not a backend; native claude is never a backend
+    expect(
+      parsePs("20 1 pi\n40 20 pi --mode json --print\n50 1 /Users/a/.local/bin/claude\n"),
+    ).toEqual([
+      { pid: 20, agent: "pi" },
+      { pid: 40, agent: "pi", hostPid: 20 },
+      { pid: 50, agent: "claude" },
+    ]);
+    // npm Codex: `node …/bin/codex` and its vendored native binary are one agent, not a host
+    // + hosted helper; an agent below the native binary is hosted by the launcher
+    const vendored = "/x/@openai/codex/vendor/aarch64-apple-darwin/codex/codex";
+    expect(
+      parsePs(
+        `60 1 node /opt/homebrew/bin/codex\n61 60 ${vendored} --sandbox\n62 61 /bin/zsh -c x\n63 62 claude -p hi\n`,
+      ),
+    ).toEqual([
+      { pid: 60, agent: "codex" },
+      { pid: 63, agent: "claude", hostPid: 60 },
+    ]);
+    // a JS-run pi worker under a JS-run pi (Linux argv) is still a hosted helper
+    expect(parsePs("70 1 node /x/bin/pi\n71 70 node /x/bin/pi --mode json\n")).toEqual([
+      { pid: 70, agent: "pi" },
+      { pid: 71, agent: "pi", hostPid: 70 },
+    ]);
+    // parent cycles and missing parents never hang
+    expect(
+      agentProcesses([
+        { pid: 1, ppid: 2, agent: null },
+        { pid: 2, ppid: 1, agent: null },
+        { pid: 3, ppid: 1, agent: "claude" },
+        { pid: 4, ppid: 99, agent: "codex" },
+      ]),
+    ).toEqual([
+      { pid: 3, agent: "claude" },
+      { pid: 4, agent: "codex" },
+    ]);
+    expect(parseStatPpid("4242 (my (odd) proc) S 17 4242 4242 0 -1")).toBe(17);
     expect(parseLsof("p123\nfcwd\nn/Users/a/x\np456\nfcwd\nn/tmp\n")).toEqual(
       new Map([
         [123, "/Users/a/x"],

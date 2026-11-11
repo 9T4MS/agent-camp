@@ -1,5 +1,5 @@
 /** Shared games use the office login and existing viewer socket; no background requests. */
-import { type PartyAction, type PartyMutation, PartyState } from "@agent-office/protocol";
+import { type PartyAction, type PartyMutation, ViewerPartyState } from "@agent-office/protocol";
 import { loginIfLoggedOut } from "./net/viewer.ts";
 import type { OfficeModel } from "./state/officeModel.ts";
 import "./ui/party.css";
@@ -254,7 +254,7 @@ export class PartyPanel {
         }
         // State arrives over the existing socket. Validate the HTTP acknowledgement only,
         // so a delayed response cannot overwrite a newer socket state.
-        PartyState.parse(data);
+        ViewerPartyState.parse(data);
       }
       this.notice.textContent = "Party move sent!";
       this.until = Date.now() + 1500;

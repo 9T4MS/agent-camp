@@ -535,3 +535,83 @@ describe("hub: same name on two machines = one persona", () => {
     expect(hub2.onConnectorMessage("c", hello("martin", "devbox"), 2).avatarJob).toBeUndefined();
   });
 });
+
+describe("hub: custom looks", () => {
+  const custom = {
+    ...avatarFromSeed("tom"),
+    accessory: "cap-mint",
+    outfit: "flannel",
+    leftHand: "beer",
+    rightHand: "joint",
+  } as const;
+  const join = (hub: Hub, desc?: string, sock = "s1") => {
+    const r = hub.onConnectorMessage(
+      sock,
+      hello("Tom", "mac", desc ? { selfDescription: desc } : {}),
+      1_000,
+    );
+    if (r.avatarJob) hub.setAvatar("tom", avatarFromSeed("tom"), r.avatarJob.key, 1_000);
+    return r;
+  };
+
+  test("an edited look is persisted and survives a restart (hibernation)", () => {
+    const { hub, store } = setup();
+    join(hub);
+    const r = hub.setCustomAvatar("tom", custom, 2_000)!;
+    expect(types(r.events)).toEqual(["avatar.updated"]);
+    expect(JSON.parse(store.kvGet("hub.state")!).people[0].avatar).toEqual(custom);
+
+    const hub2 = new Hub(CFG, store);
+    hub2.restore(3_000, [{ socketId: "s1", binding: hub.bindingOf("s1")! }]);
+    expect(hub2.snapshot(3_000).data.people[0]!.avatar).toEqual(custom);
+    // and a reconnect after the restart neither replaces it nor asks GenUI
+    const again = hub2.onConnectorMessage("s2", hello("Tom", "mac"), 4_000);
+    expect(again.avatarJob).toBeUndefined();
+    expect(hub2.snapshot(4_000).data.people[0]!.avatar).toEqual(custom);
+  });
+
+  test("restore repairs persisted state written before the edit", () => {
+    const { hub, store } = setup();
+    join(hub);
+    const stale = store.kvGet("hub.state")!;
+    hub.setCustomAvatar("tom", custom, 2_000);
+    store.kvPut("hub.state", stale);
+    const hub2 = new Hub(CFG, store);
+    hub2.restore(3_000);
+    expect(hub2.snapshot(3_000).data.people[0]!.avatar).toEqual(custom);
+  });
+
+  test("Automatic restores the kept automatic look without a GenUI job", () => {
+    const { hub, store } = setup();
+    join(hub, "curly hair");
+    const auto = store.getAvatar("tom")!;
+    hub.setCustomAvatar("tom", custom, 2_000);
+    expect(store.getAvatar("tom")).toEqual(auto); // the automatic row is untouched
+    const back = hub.setCustomAvatar("tom", null, 3_000)!;
+    expect(back.avatarJob).toBeUndefined();
+    expect(back.avatar).toEqual(auto.avatar);
+    expect(types(back.events)).toEqual(["avatar.updated"]);
+    expect(hub.isCustomLook("tom")).toBe(false);
+  });
+
+  test("a new description while custom: no job now, one job on Automatic", () => {
+    const { hub } = setup();
+    join(hub, "curly hair");
+    hub.setCustomAvatar("tom", custom, 2_000);
+    const r = join(hub, "blue mohawk", "s2");
+    expect(r.avatarJob).toBeUndefined();
+    expect(hub.snapshot(2_500).data.people[0]!.avatar).toEqual(custom);
+    const back = hub.setCustomAvatar("tom", null, 3_000)!;
+    expect(back.avatarJob?.selfDescription).toBe("blue mohawk");
+  });
+
+  test("GenUI results while custom fill the automatic row but don't show", () => {
+    const { hub, store } = setup();
+    const r = hub.onConnectorMessage("s1", hello("Tom", "mac", { selfDescription: "x" }), 1_000);
+    hub.setCustomAvatar("tom", custom, 1_500);
+    const generated = { ...avatarFromSeed("someone"), outfit: "jacket" } as const;
+    expect(hub.setAvatar("tom", generated, r.avatarJob!.key, 2_000)).toEqual([]);
+    expect(store.getAvatar("tom")!.avatar).toEqual(generated);
+    expect(hub.setCustomAvatar("tom", null, 3_000)!.avatar).toEqual(generated);
+  });
+});

@@ -6,7 +6,8 @@
  *   ?season=winter|spring|summer|autumn  force the season (default: the local month)
  *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
  *   ?key=...      viewer key passed through to /ws/viewer
- *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour)
+ *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour,
+ *                 reloads itself after a deploy)
  *   ?recorder=1   upload a timelapse PNG every 15 min (&recordEvery=ms to override)
  *   ?nohud=1      hide all DOM overlays     ?zoom=fit|<n>  initial zoom
  *   ?hour=0..24   force the time of day     ?gallery=1     art gallery (dev)
@@ -32,7 +33,7 @@ import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
-import { keepAwake } from "./kiosk.ts";
+import { keepAwake, reloadOnNewBuild } from "./kiosk.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
 import { registerServiceWorker } from "./pwa.ts";
@@ -515,7 +516,15 @@ async function boot() {
     );
     feed.start();
   } else {
-    connectViewer({ key, onMessage: ingest, onStatus: (s) => hud.setStatus(s) });
+    const checkBuild = kiosk ? reloadOnNewBuild() : null;
+    connectViewer({
+      key,
+      onMessage: ingest,
+      onStatus: (s) => {
+        hud.setStatus(s);
+        if (s === "open") checkBuild?.();
+      },
+    });
   }
 
   const focusPerson = (personId: string, zoom = 3) => {

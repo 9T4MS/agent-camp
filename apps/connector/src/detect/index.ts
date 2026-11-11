@@ -8,6 +8,14 @@
  *      (stays live as `idle`), or
  *   3. its transcript was written < TRANSCRIPT_LIVE_MS ago and some process of that agent runs.
  * With `assumeProcesses` every agent counts as running and every pid in a pid file as alive.
+ *
+ * An agent process running inside another agent (`ProcInfo.hostPid`, e.g. the Claude Agent SDK
+ * binary that Pi's Claude bridge spawns as its model backend) is not a session of its own: it
+ * never counts as running, and a session its pid file ties it to is hidden for good, so the
+ * host's session is the only desk. Hosted agents that are not model backends (e.g. purrness
+ * subagent workers, `pi` under `pi`) are the host session's helpers (robots), and any live
+ * hosted process keeps the host session from going idle while its transcript is quiet, for at
+ * most HOSTED_BUSY_MAX_MS. A hidden session shows again once a top-level pid owns it.
  */
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
@@ -51,9 +59,14 @@ export function projectName(cwd: string | undefined): string | undefined {
 
 const MAX_SESSIONS = 200;
 
+/** Hosted processes keep a quiet desk busy for at most this much transcript silence. */
+export const HOSTED_BUSY_MAX_MS = 10 * 60_000;
+
 export class Detector {
   private tail = new TailReader();
   private metaCache: MetaCache = new Map();
+  /** `agent:rawId` of sessions owned by an agent hosted inside another agent */
+  private hostedIds = new Set<string>();
   private readonly now: () => number;
 
   constructor(private readonly opts: DetectorOptions) {
@@ -72,14 +85,35 @@ export class Detector {
         procs = [];
       }
     }
-    const candidates = [
+    const scanned = [
       ...safe(() => scanClaude(dirs.claude, this.metaCache)),
       ...safe(() => scanCodex(dirs.codex, this.metaCache)),
       ...safe(() => scanPi(dirs.pi, this.metaCache)),
     ];
 
+    // 0. agents hosted inside another agent: their sessions belong to the host's desk
+    const allProcs = procs;
+    const hosted = allProcs.filter((p) => p.hostPid !== undefined);
+    const hostedPids = new Set(hosted.map((p) => p.pid));
+    procs = allProcs.filter((p) => p.hostPid === undefined);
+    const idOf = (c: Candidate) => `${c.agent}:${c.rawId}`;
+    for (const c of scanned) {
+      const topLevel = c.pids.some((pid) =>
+        procs.some((p) => p.pid === pid && p.agent === c.agent),
+      );
+      // a top-level pid owning it (e.g. `claude --resume <id>`) makes the session visible again
+      if (topLevel) this.hostedIds.delete(idOf(c));
+      else if (c.pids.some((pid) => hostedPids.has(pid))) this.hostedIds.add(idOf(c));
+    }
+    // remembered after the hosted process exits: its transcript stays fresh for a while
+    const present = new Set(scanned.map(idOf));
+    for (const id of this.hostedIds) if (!present.has(id)) this.hostedIds.delete(id);
+    const candidates = scanned.filter((c) => !this.hostedIds.has(idOf(c)));
+
     const running = (agent: AgentKind) => assumeProcesses || procs.some((p) => p.agent === agent);
     const live = new Set<Candidate>();
+    /** top-level agent pid -> the session it owns (rules 1 and 2) */
+    const owner = new Map<number, Candidate>();
 
     // 1. pid files
     const tiedPids = new Set<number>();
@@ -89,6 +123,7 @@ export class Detector {
         if (alive) {
           live.add(c);
           tiedPids.add(pid);
+          if (!assumeProcesses) owner.set(pid, c);
         }
       }
     }
@@ -110,7 +145,10 @@ export class Detector {
           if (best && best.mtimeMs >= c.mtimeMs) continue;
           if (safe(() => c.matchesCwd(cwd), false)) best = c;
         }
-        if (best) live.add(best);
+        if (best) {
+          live.add(best);
+          owner.set(p.pid, best);
+        }
       }
     }
     // 3. recently written transcripts
@@ -118,11 +156,28 @@ export class Detector {
       if (c.transcript && now - c.mtimeMs < TRANSCRIPT_LIVE_MS && running(c.agent)) live.add(c);
     }
 
+    // hosted processes -> helpers / busy flag of the session their top-level host owns
+    const byPid = new Map(allProcs.map((p) => [p.pid, p]));
+    const helpers = new Map<Candidate, number>();
+    const busy = new Set<Candidate>();
+    for (const h of hosted) {
+      let top: ProcInfo | undefined = h;
+      const seen = new Set<number>();
+      while (top?.hostPid !== undefined && !seen.has(top.pid)) {
+        seen.add(top.pid);
+        top = byPid.get(top.hostPid);
+      }
+      const c = top && top.hostPid === undefined ? owner.get(top.pid) : undefined;
+      if (!c) continue;
+      if (now - c.mtimeMs < HOSTED_BUSY_MAX_MS) busy.add(c);
+      if (!h.backend) helpers.set(c, (helpers.get(c) ?? 0) + 1);
+    }
+
     const sessions: SessionInfo[] = [];
     const keep = new Set<string>();
     for (const c of live) {
       try {
-        sessions.push(this.describe(c, now));
+        sessions.push(this.describe(c, now, busy.has(c), helpers.get(c) ?? 0));
         if (c.transcript) keep.add(c.transcript);
       } catch {
         // skip a session we can't describe rather than crash
@@ -134,21 +189,26 @@ export class Detector {
     return sessions.slice(0, MAX_SESSIONS);
   }
 
-  private describe(c: Candidate, now: number): SessionInfo {
+  /**
+   * `busy`: a hosted process (backend or helper) still runs, so the turn is in progress even if
+   * the transcript is quiet (e.g. Pi waiting minutes for a subagent tool call).
+   * `helpers`: hosted helper processes, added to the transcript-based subagent count.
+   */
+  private describe(c: Candidate, now: number, busy = false, helpers = 0): SessionInfo {
     const meta = c.meta();
     let activity: SessionInfo["activity"];
     let context: number | undefined;
     if (c.transcript) {
       const entries = this.tail.read(c.transcript);
       const events = entries.map((e) => safe(() => c.normalize(e), null));
-      activity = deriveActivity(events, c.mtimeMs, now);
+      activity = deriveActivity(events, busy ? now : c.mtimeMs, now);
       context = roundContext(safe(() => c.context?.(entries), undefined));
     } else {
       // pid file but nothing typed yet
       activity = now - (meta.startedAt ?? now) >= IDLE_AFTER_MS ? "idle" : "waiting";
     }
     const startedAt = Math.max(0, Math.min(now, Math.floor(meta.startedAt ?? c.mtimeMs ?? now)));
-    const subagents = activity === "idle" ? 0 : safe(() => c.subagents?.(now) ?? 0, 0);
+    const subagents = activity === "idle" ? 0 : safe(() => c.subagents?.(now) ?? 0, 0) + helpers;
     const info: SessionInfo = {
       sessionKey: sessionKeyFor(this.opts.clientId, c.agent, c.rawId),
       agent: c.agent,

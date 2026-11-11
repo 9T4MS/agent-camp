@@ -96,3 +96,22 @@ test("sqlite: avatar rows from before outfits get the new fields' defaults", () 
   );
   expect(store.getAvatar("anna")?.avatar).toEqual(avatarFromSeed("anna"));
 });
+
+for (const [name, make] of [
+  ["memory", () => new MemoryStore()],
+  ["sqlite", sqlite],
+] as [string, () => Store][]) {
+  test(`${name}: custom look lives next to the automatic one`, () => {
+    const s = make();
+    const auto = avatarFromSeed("tom");
+    const custom = { ...auto, outfit: "flannel", leftHand: "beer" } as const;
+    s.putAvatar("tom", auto, "k", "");
+    expect(s.getCustomAvatar("tom")).toBeNull();
+    s.putCustomAvatar("tom", custom);
+    expect(s.getCustomAvatar("tom")).toEqual(custom);
+    expect(s.getAvatar("tom")?.avatar).toEqual(auto);
+    s.putCustomAvatar("tom", null);
+    expect(s.getCustomAvatar("tom")).toBeNull();
+    expect(s.getAvatar("tom")?.avatar).toEqual(auto);
+  });
+}
