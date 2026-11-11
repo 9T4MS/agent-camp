@@ -1304,7 +1304,9 @@ export class Hud {
     if (!chip) return;
     const p = this.me ? this.model.people.get(this.me) : undefined;
     // the portrait is redrawn only when the look changes
-    const key = this.me ? `${this.me}|${p?.name ?? ""}|${JSON.stringify(p?.avatar ?? null)}` : "";
+    const key = this.me
+      ? `${this.me}|${p?.name ?? ""}|${JSON.stringify(p?.avatar ?? null)}`
+      : "spectator";
     if (key === this.meChipKey && chip.childElementCount > 0) return;
     this.meChipKey = key;
     if (!this.me) {
@@ -1317,6 +1319,8 @@ export class Hud {
     const name = p?.name ?? "You";
     chip.innerHTML = `<span class="me-name">${esc(name)}</span>`;
     const portrait = this.miniPortrait(this.me);
+    // my character may not be drawn yet (right after a reload): try again on the next update
+    if (!portrait) this.meChipKey = "";
     chip.prepend(portrait ?? el("span", "me-q", "&#9786;"));
     chip.title = `You are ${name} on this device`;
     chip.setAttribute("aria-label", `Me: ${name}`);

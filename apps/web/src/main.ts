@@ -348,7 +348,6 @@ async function boot() {
     partyWorld.setState(model.party);
     games?.refresh();
     messagesPanel?.refresh();
-    hud.refreshMe();
     ensureCapacity();
     colony.sync(catCount(model.people.size));
     for (const ch of changes) {
@@ -373,6 +372,8 @@ async function boot() {
     hud.setStats(model.stats());
     if (hud.panelOpen && changes.some((change) => change.kind !== "partyChanged")) hud.refresh();
     living.poke();
+    // after the characters are in: the chip shows my portrait
+    hud.refreshMe();
     afterIngest();
   };
 
