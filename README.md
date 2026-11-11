@@ -28,17 +28,23 @@ it up for you.
 Paste this into Claude Code (or Codex / Pi), with the two values filled in:
 
 ```text
-Set up Agent Office on this Mac for me.
+Set up Agent Office on this Mac for me (only the connector, no server).
 Server: https://<server-url>
 Password: <password>
 Follow the "Instructions for coding agents" section in
 https://github.com/MrGatzi/agent-camp/blob/main/README.md
+When I'm connected, open the office in my browser.
 ```
 
 Your agent will ask you a few quick questions (your name, how you look, a name for this
-machine), install the connector, and check that you show up in the office. Approve the
-network and `launchctl` commands when it asks. Then open the server URL in your browser and
-find yourself.
+machine), install the connector, check that you show up in the office and open it in your
+browser. Approve the network and `launchctl` commands when it asks. The office asks for the
+same password the first time you open it.
+
+Paste it where Claude can run commands on your Mac: the **Code** tab of the Claude desktop
+app, or Claude Code in a terminal or IDE. A normal chat or Claude Design can't install it. The
+office shows sessions of Claude Code, Codex and Pi running on your Mac; Claude Design and
+claude.ai chats run in the cloud and don't appear.
 
 ### By hand
 
@@ -93,7 +99,8 @@ you a server URL and a password. Do this:
    rejected password means a typo; a connection error usually means a wrong URL (use the
    `https://` address of the office).
 6. If `~/.local/bin` is not on their `PATH`, offer to add it to `~/.zshrc`.
-7. Tell the human it worked and that they can watch at the server URL in any browser.
+7. Open the office for them: `open '<server-url>'` (it asks for the same password once).
+   Tell the human it worked and that they can watch at the server URL in any browser.
    Don't echo the password back in your summary.
 
 The connector only reads agent transcript metadata and never sends prompts, code or file
