@@ -316,7 +316,7 @@ async function boot() {
         const label = newVersionLabel(seenRelease, officeVersion());
         if (celebrate) {
           celebrate = false;
-          celebration.show({ heading: "New version!", version: label, section: CHANGELOG[0] });
+          celebration.show({ heading: "New version!", version: label });
         } else if (label && celebration.open) celebration.setVersion(label);
         saveSeen({ build: __BUILD__, version: officeVersion() ?? seenRelease?.version, notes });
       }
