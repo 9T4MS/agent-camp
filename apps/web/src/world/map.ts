@@ -217,6 +217,7 @@ export const FOOTPRINTS = {
   lampPost: { w: 1, h: 1, solid: true },
   parasol: { w: 2, h: 1, solid: true },
   printer: { w: 1, h: 1, solid: true },
+  serverRack: { w: 1, h: 1, solid: true },
   bush: { w: 1, h: 1, solid: true },
   doormat: { w: 2, h: 1, solid: false },
 } as const;
@@ -292,6 +293,7 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("plant", 32, 27, 1),
   o("cooler", 1, 15),
   o("printer", 32, 9),
+  o("serverRack", 32, 15),
   o("floorLamp", 1, 9),
   o("floorLamp", 32, 21),
   o("doormat", 16, 27),

@@ -1,16 +1,22 @@
 name: Release
 
-# Merge to main -> GitHub Release (connector binaries + install.sh) -> wrangler deploy.
-# Kept lean for "merge -> live in < 5 min": no e2e/screenshots here; ci.yml ran them on the PR.
+# Merge to main -> GitHub Release (connector binaries + install.sh). Kept lean for
+# "merge -> live in < 5 min": no e2e/screenshots here; ci.yml ran them on the PR.
 #
-# One-time setup:
-#   - Repo secrets (Settings -> Secrets and variables -> Actions):
-#       CLOUDFLARE_API_TOKEN   token with "Edit Cloudflare Workers" permissions
-#       CLOUDFLARE_ACCOUNT_ID  the Cloudflare account id
-#     Without them the deploy job prints a notice and skips (the release still happens).
-#   - Server secrets live in Cloudflare, not GitHub. Set once from apps/server:
-#       bunx wrangler secret put CONNECTOR_PASSWORD
-#     (optional: VIEWER_KEY, ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY). `wrangler deploy` keeps them.
+# The release job needs NO secrets: it uses the built-in GITHUB_TOKEN.
+#
+# The server is deployed by Cloudflare Workers Builds (Cloudflare's own Git integration, see
+# README "Deploy"), which builds and deploys every push to main itself, so no Cloudflare keys
+# live in GitHub. The server finds the newest connector release on its own
+# (LATEST_CONNECTOR_VERSION = "auto" in wrangler.toml).
+#
+# Optional, instead of Workers Builds: deploy from GitHub Actions by adding the repo secrets
+# CLOUDFLARE_API_TOKEN ("Edit Cloudflare Workers") and CLOUDFLARE_ACCOUNT_ID. Without them the
+# deploy job prints a notice and skips (the release still happens). Do not use both, or every
+# push deploys twice.
+#
+# Server secrets (CONNECTOR_PASSWORD, optional VIEWER_KEY, ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY)
+# live in Cloudflare, never in GitHub; deploys keep them.
 
 on:
   push:
@@ -72,9 +78,11 @@ jobs:
               --latest
           fi
 
+  # Optional: deploy from GitHub Actions instead of Workers Builds. Skips (green) unless the
+  # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repo secrets exist.
   deploy:
-    name: Deploy to Cloudflare
-    needs: release # order matters: binaries must exist before the server advertises the version
+    name: "Optional: deploy from GitHub Actions instead of Workers Builds"
+    needs: release # pins the version only after its binaries are downloadable
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -88,7 +96,7 @@ jobs:
         id: secrets
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::notice::Cloudflare secrets missing — skipping deploy (set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repo secrets)"
+            echo "::notice::No Cloudflare secrets: skipping (expected when Cloudflare Workers Builds deploys the server; it auto-detects the connector version)"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -110,6 +118,8 @@ jobs:
         if: steps.secrets.outputs.ok == 'true'
         run: bun run --filter @agent-office/web build
 
+      # Pinning LATEST_CONNECTOR_VERSION here is optional (the server could auto-detect it), but it
+      # announces the new version on the very first reconnect, without a GitHub lookup.
       - name: wrangler deploy (LATEST_CONNECTOR_VERSION=${{ env.VERSION }})
         if: steps.secrets.outputs.ok == 'true'
         working-directory: apps/server

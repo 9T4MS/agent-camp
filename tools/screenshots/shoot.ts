@@ -171,7 +171,7 @@ const want = (name: string) => !ONLY || name.includes(ONLY);
 // ---- scenes -----------------------------------------------------------------------------------
 
 const BUSY = { people: 6, sessions: 11 };
-const GIF_FRAMES = 36;
+const GIF_FRAMES = 48;
 
 async function sceneSimple(
   name: string,
@@ -356,6 +356,139 @@ async function sceneAgentCard() {
   }
 }
 
+type SessionInfo = {
+  sessionId: string;
+  personId: string;
+  agent: string;
+  project?: string;
+  activity: string;
+  subagents: number;
+  startedAt: number;
+  machine?: string;
+};
+
+/** Inject a viewer event client-side (the busy scenario holds still on purpose). */
+async function inject(page: Page, type: string, data: Record<string, unknown>) {
+  await page.evaluate(
+    ([t, d]) =>
+      window.__office.injectEvent({
+        v: 1,
+        type: t,
+        id: `shot-${Math.random().toString(36).slice(2)}`,
+        ts: Date.now(),
+        data: d,
+      }),
+    [type, data] as const,
+  );
+}
+
+async function sessionsOf(page: Page): Promise<SessionInfo[]> {
+  return (await page.evaluate(() => [
+    ...window.__office.model.sessions.values(),
+  ])) as unknown as SessionInfo[];
+}
+
+/** Make the office lively: a few people go idle (coffee, chats, games), helpers burst to 11. */
+async function livenUp(page: Page) {
+  const all = await sessionsOf(page);
+  const byPerson = new Map<string, SessionInfo[]>();
+  for (const x of all) byPerson.set(x.personId, [...(byPerson.get(x.personId) ?? []), x]);
+  // one session of every person but Martin and the waiting one takes a break
+  for (const [personId, list] of byPerson) {
+    if (personId === "martin") continue;
+    const x = list.find((y) => y.activity !== "waiting" && y.activity !== "idle");
+    if (!x || list.some((y) => y.activity === "waiting")) continue;
+    await inject(page, "session.activityChanged", {
+      personId,
+      sessionId: x.sessionId,
+      activity: "idle",
+      previous: x.activity,
+    });
+  }
+  const m = all.filter((x) => x.personId === "martin").sort((a, b) => b.subagents - a.subagents)[0];
+  if (m) {
+    for (let n = m.subagents + 1; n <= 11; n++) {
+      await inject(page, "subagent.spawned", {
+        personId: "martin",
+        sessionId: m.sessionId,
+        count: n,
+      });
+    }
+  }
+}
+
+/**
+ * 12: office life at lunch time (`?lively=1` = party speed): idle people grab coffee, chat,
+ * play, the pizza drone delivers, Martin's 11 helpers throw a party in the game corner.
+ */
+async function sceneOfficeLife() {
+  const name = "12-office-life";
+  if (!want(name)) return;
+  log(name);
+  const o = await office("busy");
+  try {
+    const page = await openOffice(
+      "laptop",
+      `${o.http}/?hour=12.4&lively=1&weather=clouds`,
+      BUSY.people,
+      BUSY.sessions,
+      800,
+    );
+    await livenUp(page);
+    await page.evaluate(() => window.__office.camera.focusArea("all"));
+    await sleep(14_000);
+    await page.evaluate(() => window.__office.setSpeed(0));
+    await shoot(page, `${name}-laptop`);
+    await page.close();
+  } finally {
+    o.stop();
+  }
+}
+
+/** 13: a `/clear` (end + restart a second later): the old character gets zapped. */
+async function sceneCleared() {
+  const name = "13-cleared-session";
+  if (!want(name)) return;
+  log(name);
+  const o = await office("busy");
+  try {
+    const page = await openOffice(
+      "laptop",
+      `${o.http}/?hour=15&zoom=3`,
+      BUSY.people,
+      BUSY.sessions,
+      1500,
+    );
+    const all = await sessionsOf(page);
+    const felix = all.filter((x) => x.personId === "felix" && x.activity !== "idle");
+    const x = felix.sort((a, b) => a.startedAt - b.startedAt)[0] ?? all[0];
+    if (!x) throw new Error("no session to clear");
+    await page.evaluate((p) => window.__office.camera.focusPerson(p, 4), x.personId);
+    await sleep(600);
+    await inject(page, "session.ended", { personId: x.personId, sessionId: x.sessionId });
+    await sleep(900);
+    await inject(page, "session.started", {
+      personId: x.personId,
+      session: {
+        sessionId: `${x.sessionId.split(":")[0]}:cleared${Date.now().toString(36)}`,
+        agent: x.agent,
+        project: x.project,
+        activity: "thinking",
+        subagents: 0,
+        startedAt: Date.now(),
+        ...(x.machine ? { machine: x.machine } : {}),
+      },
+    });
+    // freeze the world clock mid-zap (screenshots take a while under SwiftShader)
+    await sleep(250);
+    await page.evaluate(() => window.__office.setSpeed(0));
+    await shoot(page, `${name}-laptop`);
+    await page.close();
+  } finally {
+    o.stop();
+  }
+}
+
 async function sceneStats() {
   const name = "07-stats";
   if (!want(name)) return;
@@ -456,10 +589,14 @@ async function busyGif() {
     // an explicit zoom holds the auto-pilot, so the camera stays put while we capture
     const page = await openOffice(
       "laptop",
-      `${o.http}/?hour=15&zoom=2`,
+      `${o.http}/?hour=12.4&zoom=2&lively=1`,
       BUSY.people,
       BUSY.sessions,
+      800,
     );
+    // people on the move: breaks, coffee, chats, a helper burst and the pizza drone
+    await livenUp(page);
+    await sleep(3500);
     const pngs: Buffer[] = [];
     // CDP screencast pushes frames as the compositor produces them (page.screenshot() takes
     // ~1.5 s per frame under SwiftShader), at full size (downscaled below, nearest neighbour)
@@ -562,6 +699,8 @@ async function main() {
     await sceneTimelapse();
     await sceneSidePanel();
     await sceneAgentCard();
+    await sceneOfficeLife();
+    await sceneCleared();
     await sceneTerminal();
   } finally {
     await browser.close();
@@ -585,6 +724,7 @@ declare global {
       snapshotPng(): Promise<string | null>;
       injectEvent(msg: unknown): boolean;
       openSession(sessionId: string): boolean;
+      setSpeed(k: number): void;
     };
   }
 }

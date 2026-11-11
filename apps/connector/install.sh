@@ -13,10 +13,11 @@
 #                   (default ~/.local/bin), AO_NONINTERACTIVE=1 (never prompt).
 set -eu
 
-# The server serving this script replaces one of these placeholders with its own origin.
+# The server serving this script replaces this placeholder with its own origin; the copy on
+# GitHub Releases keeps it, so there is no default and the installer asks for the URL.
 DEFAULT_SERVER="__AGENT_OFFICE_SERVER__"
 case "$DEFAULT_SERVER" in
-  __*) DEFAULT_SERVER="__SERVER_URL__" ;;
+  __*) DEFAULT_SERVER="" ;;
 esac
 case "$DEFAULT_SERVER" in
   __*) DEFAULT_SERVER="" ;;

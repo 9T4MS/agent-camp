@@ -1,6 +1,9 @@
 /**
  * Office renderer entry. URL params:
- *   ?demo=busy|one|empty|join (or 1)  local fake feed, no server; &seed=, &people=, &sessions=
+ *   ?demo=busy|one|empty|join|party (or 1)  local fake feed, no server; &seed=, &people=, &sessions=
+ *                 (party: office life moments fast: chats, coffee, /clear zap, records, pizza)
+ *   ?weather=sun|clouds|rain  force the window weather (default: seeded by the local date)
+ *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
  *   ?key=...      viewer key passed through to /ws/viewer
  *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour)
  *   ?recorder=1   upload a timelapse PNG every 15 min (&recordEvery=ms to override)
@@ -16,6 +19,7 @@ import {
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
+import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
 import { Camera } from "./camera.ts";
 import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
@@ -28,6 +32,7 @@ import { Minimap } from "./ui/minimap.ts";
 import { OfficeCat } from "./world/cat.ts";
 import { CharacterManager } from "./world/characters.ts";
 import { Effects } from "./world/effects.ts";
+import { OfficeLife } from "./world/life.ts";
 import { Living } from "./world/living.ts";
 import {
   type AreaName,
@@ -56,6 +61,8 @@ type OfficeApi = {
   openSession(sessionId: string): boolean;
   snapshotPng(): Promise<string | null>;
   characters(): number;
+  /** slow down / freeze the world clock (screenshots of short moments); 1 = normal */
+  setSpeed(k: number): void;
 };
 declare global {
   interface Window {
@@ -104,8 +111,50 @@ async function boot() {
   app.stage.addChild(scene.root);
   const effects = new Effects(scene.fx);
   const chars = new CharacterManager(scene, model, effects);
-  const cat = new OfficeCat(scene.objects, scene.fx, scene.map, () => chars.idleSpots());
-  const living = new Living(scene, model, hourParam !== null ? Number(hourParam) : null);
+  const party = demo === "party" || flag("lively");
+  // the party demo runs the waiting thresholds 10x faster and starts at lunch time
+  if (party) {
+    chars.timeScale = 10;
+    chars.chatChance = 0.8;
+    chars.dwell = 0.4;
+  }
+  const cat = new OfficeCat(
+    scene.objects,
+    scene.fx,
+    scene.map,
+    () => chars.idleSpots(),
+    effects,
+    () => chars.catWaitSpots(),
+  );
+  chars.catEats = (sprite, x, y) => cat.tryEat(sprite, x, y);
+  if (party) {
+    cat.eatChance = 0.6;
+    cat.eatRange = 900;
+  }
+  const hourValue = hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : null;
+  const living = new Living(scene, model, hourValue);
+  const weatherParam = params.get("weather");
+  const life = new OfficeLife(
+    scene,
+    model,
+    effects,
+    {
+      hour: () => living.hour,
+      people: () => chars.positions(),
+      pongMatch: () => chars.pongMatch(),
+      inMeeting: () => chars.inArea("meeting"),
+      longWaiters: () => chars.chefWaitSpots(),
+      onPizza: () => chars.pizzaArrived(),
+    },
+    {
+      weather:
+        weatherParam === "sun" || weatherParam === "clouds" || weatherParam === "rain"
+          ? weatherParam
+          : null,
+      ...(party ? { droneDelay: demo === "party" ? 6 : 3 } : {}),
+    },
+  );
+  chars.pizzaActive = () => life.pizzaOnTable;
   const hud = new Hud(host, model, { kiosk });
   const topInset = nohud ? 0 : kiosk ? 46 : 36;
   const camera = new Camera(
@@ -134,6 +183,7 @@ async function boot() {
     if (need <= scene.map.podRows * POD_COLS) return;
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     cat.setMap(scene.map);
+    life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
     chars.syncSlots();
     camera.worldChanged();
@@ -163,7 +213,12 @@ async function boot() {
     if (m.kind === "joined") camera.notify(m.x, m.y, { zoom: 3, hold: 10, rush: true });
     else if (m.kind === "arrived") {
       hud.showJoin(m.name, m.personId ? hud.portrait(m.personId) : null);
-    } else camera.notify(m.x, m.y);
+    } else if (m.kind === "record") {
+      hud.showBanner(`${m.name}: ${m.count} agents at once!`, "new personal record", {
+        portrait: trophyCanvas(),
+      });
+    } else if (m.kind === "ended") life.graveyard.add();
+    else camera.notify(m.x, m.y);
   };
 
   /** Agent card + ease the camera to the character (clear of the side panel). */
@@ -190,6 +245,10 @@ async function boot() {
   };
 
   camera.onTap = (wx, wy) => {
+    if (cat.hit(wx, wy)) {
+      cat.meow();
+      return;
+    }
     const c = chars.pick(wx, wy);
     if (c) {
       openSession(c.sessionId);
@@ -270,6 +329,7 @@ async function boot() {
 
   // ---- frame loop ---------------------------------------------------------------------------
   let time = 0;
+  let speed = 1;
   let frames = 0;
   let fpsWindowStart = performance.now();
   let fps = 0;
@@ -286,11 +346,12 @@ async function boot() {
   };
   app.ticker.add((ticker) => {
     const t0 = performance.now();
-    const dt = Math.min(0.1, ticker.deltaMS / 1000);
+    const dt = Math.min(0.1, ticker.deltaMS / 1000) * speed;
     time += dt;
     scene.update(time, dt);
     chars.update(dt, time);
     cat.update(dt, time);
+    life.update(dt, time);
     effects.update(dt);
     living.update(dt);
     camera.update(dt);
@@ -338,6 +399,9 @@ async function boot() {
       });
     },
     characters: () => chars.chars.size,
+    setSpeed: (k) => {
+      speed = Math.max(0, k);
+    },
     openSession,
   };
   window.__office = api;

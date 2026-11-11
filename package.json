@@ -15,7 +15,8 @@
     "test": "bun test",
     "test:e2e": "AGENT_OFFICE_E2E=1 bun test tests/e2e",
     "sim": "bun run tools/sim/src/main.ts",
-    "screenshots": "bun run tools/screenshots/shoot.ts"
+    "screenshots": "bun run tools/screenshots/shoot.ts",
+    "deploy": "bun run --filter @agent-office/web build && cd apps/server && wrangler deploy"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",

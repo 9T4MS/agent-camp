@@ -14,13 +14,15 @@ for everyone.
 ## Join the office (teammates)
 
 ```sh
-curl -fsSL https://<your-server>/install.sh | sh
+curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/install.sh | sh
 ```
 
-It asks five things: **server URL** (already filled in), the **shared password**, your
-**name**, an optional **description** of yourself ("curly hair, round glasses") that
-shapes your avatar, and a **name for this machine** (defaults to its short hostname). Done: the connector runs in the background (launchd) and starts at login.
+It asks five things: the **server URL** and **shared password** (whoever runs the office gives
+you both), your **name**, an optional **description** of yourself ("curly hair, round
+glasses") that shapes your avatar, and a **name for this machine** (defaults to its short
+hostname). Done: the connector runs in the background (launchd) and starts at login.
 Re-run the same line any time to change answers. It updates itself.
+`curl -fsSL https://<your-server>/install.sh | sh` does the same with the URL already filled in.
 
 ```sh
 agent-office status      # connected? which sessions does it see?
@@ -39,6 +41,14 @@ sit side by side in your pod. The description only needs to be set on one machin
 without one never changes your look, and the last description you set wins. The machine
 name (`agent-office configure --machine-name devbox`, or `AO_MACHINE=` for the installer)
 shows up on the agent card so you can tell the sessions apart.
+
+### How do I look?
+
+The server picks your look. With AI off it comes from a hash of your name; with AI on it is
+chosen from your one-line description, but only from a fixed catalog of hair, glasses,
+clothes and props, so everyone stays in the same pixel style. Your jacket colour shows
+which agent a session runs (Claude, Codex, Pi). Every extra session is a sibling of you
+with tiny variations, and your pod has one desk per running session (at least 2, up to 6).
 
 ### Privacy
 
@@ -71,6 +81,16 @@ server needed). If the server sets `VIEWER_KEY`, add `?key=…`.
 | ----- | --------- |
 | ![Stats](screenshots/07-stats-laptop.png) | ![Timelapse](screenshots/08-timelapse-laptop.png) |
 
+## Try it locally in Chrome
+
+```sh
+bun install && bun run dev            # then open http://localhost:5173
+bun run sim -- --scenario busy        # in a second terminal: 6 fake teammates walk in
+```
+
+No server at all: `bun run --filter @agent-office/web dev` and open
+http://localhost:5173/?demo=busy.
+
 ## Developing
 
 Bun monorepo: `packages/protocol` (zod wire schemas), `apps/connector` (Bun-compiled CLI),
@@ -97,21 +117,53 @@ bun run screenshots   # builds web, real server + simulator, Playwright -> scree
 `bun run screenshots` needs Chromium for Playwright (`bunx playwright install chromium`
 once). It writes laptop (1440×900) and iPad (1180×820) shots plus `03-busy.gif`.
 
-## Deploying
+## Deploy / setup
 
-Pushing to `main` releases connector binaries (GitHub Release `v0.1.N`) and then deploys the
-Worker. One-time setup:
+You need a (free) Cloudflare account. GitHub builds the connector releases with its own
+built-in token and Cloudflare builds the server itself, so no Cloudflare keys ever live in
+GitHub.
 
-1. GitHub repo secrets `CLOUDFLARE_API_TOKEN` (Workers edit rights) and
-   `CLOUDFLARE_ACCOUNT_ID`. Without them the deploy job skips itself and stays green.
-2. The shared password, once, from `apps/server`:
-   `bunx wrangler secret put CONNECTOR_PASSWORD`
-3. Optional: `VIEWER_KEY` (require `?key=` to watch), and AI avatars from descriptions with
-   `GENUI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`, or `GENUI_PROVIDER=jev` +
-   `AI_GATEWAY_API_KEY` (Vercel AI Gateway). Everything works with `GENUI_PROVIDER=off`.
+**1. Connect the repo (once).** Cloudflare dashboard → **Workers & Pages** → **Create** →
+**Import a repository** → pick `MrGatzi/agent-camp`, then set:
 
-Then share `curl -fsSL https://<worker-url>/install.sh | sh` with the team, and open
-`https://<worker-url>/?kiosk=1&recorder=1` on the office iPad.
+| Field            | Value |
+| ---------------- | ----- |
+| Project name     | `agent-office` (must match `name` in `apps/server/wrangler.toml`) |
+| Root directory   | leave empty (repo root) |
+| Build command    | `bun install --frozen-lockfile && bun run --filter @agent-office/web build` |
+| Deploy command   | `cd apps/server && npx wrangler deploy` |
+| Build variable   | `BUN_VERSION` = `1.4.4` (same Bun as the lockfile) |
+
+From then on every push to `main` deploys the office (Cloudflare) and publishes new connector
+binaries (GitHub Release `v0.1.N`). Connectors update themselves: the server looks up the newest
+GitHub release when they connect, and each connector also checks GitHub every 5 minutes. If the
+build ever complains about Bun, use the npm-only build command
+`npx -y bun@1.4.4 install --frozen-lockfile && npx -y bun@1.4.4 run --filter @agent-office/web build`.
+
+**2. Set the connector password (once).** Dashboard → your `agent-office` Worker →
+**Settings** → **Variables and Secrets** → **Add** → type *Secret*, name `CONNECTOR_PASSWORD`,
+any value. (Or from `apps/server`: `npx wrangler secret put CONNECTOR_PASSWORD`.)
+
+**3. Invite the team.** Share the Worker URL (`https://agent-office.<you>.workers.dev`) and the
+password. Teammates run
+`curl -fsSL https://github.com/MrGatzi/agent-camp/releases/latest/download/install.sh | sh`.
+Open `https://<worker-url>/?kiosk=1&recorder=1` on the office iPad.
+
+**4. Optional extras** (same Variables and Secrets page): `VIEWER_KEY` (secret; watching then
+needs `?key=…`), and AI avatars from descriptions with `GENUI_PROVIDER=anthropic` +
+secret `ANTHROPIC_API_KEY`, or `GENUI_PROVIDER=jev` + secret `AI_GATEWAY_API_KEY` (Vercel AI
+Gateway); `GENUI_PROVIDER` is a plain *Text* variable. Everything works without them (AI off).
+Deploys keep what you add there; only the variables listed in `apps/server/wrangler.toml` are
+reset to its values.
+
+**Other ways to deploy**
+
+- *From your laptop, no token:* `npx wrangler login` (opens the browser), then
+  `bun install && bun run deploy`. Good for a first try; connector releases still come from
+  GitHub on every push to `main`.
+- *From GitHub Actions:* add repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
+  the optional `deploy` job in `release.yml` then deploys after each release (it skips while
+  they are missing). Use this *or* Workers Builds, not both.
 
 ## More
 

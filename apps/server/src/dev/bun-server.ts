@@ -11,7 +11,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { CLOSE_BAD_MESSAGE } from "@agent-office/protocol";
 import type { ServerWebSocket } from "bun";
-import { type AppEnv, OfficeApp, viewerAllowed } from "../core/app.ts";
+import { type AppEnv, OfficeApp, serverVersion, viewerAllowed } from "../core/app.ts";
 import { SqlStore } from "../core/store.ts";
 
 type WsData = { role: "connector" | "viewer"; socketId: string };
@@ -80,8 +80,7 @@ const server = Bun.serve<WsData>({
   async fetch(req, srv) {
     const url = new URL(req.url);
     const path = url.pathname;
-    if (path === "/healthz")
-      return Response.json({ ok: true, version: env.LATEST_CONNECTOR_VERSION });
+    if (path === "/healthz") return Response.json({ ok: true, version: serverVersion(env) });
     if (path === "/install.sh") {
       const text = existsSync(INSTALL_SH)
         ? readFileSync(INSTALL_SH, "utf8")

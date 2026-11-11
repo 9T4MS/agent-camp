@@ -48,11 +48,22 @@ export function deskTexture(w = 32): Texture {
 export const MONITOR = {
   off: [0],
   code: [1, 2],
-  run: [3, 4],
+  run: [3, 11, 4, 12],
   wait: [5, 6],
   idle: [7, 8],
-  read: [9, 10],
+  read: [9, 9, 9, 13, 14, 10, 10, 10, 13, 14],
+  think: [1, 2, 1, 2, 15, 16, 15, 16, 17, 17],
 } as const;
+/** Screen frames per second by state (running scrolls fast, reading flips pages). */
+export const MONITOR_FPS: Record<MonitorState, number> = {
+  off: 1,
+  code: 2,
+  run: 6,
+  wait: 2,
+  idle: 2,
+  read: 3,
+  think: 2,
+};
 export type MonitorState = keyof typeof MONITOR;
 let monitorFrames: Texture[] | null = null;
 /** 18x16 monitor frames (+2 px pad). */
@@ -60,7 +71,7 @@ export function monitorTextures(): Texture[] {
   if (monitorFrames) return monitorFrames;
   const fw = 20;
   const fh = 18;
-  const n = 11;
+  const n = 18;
   const pc = new PixelCanvas(fw * n, fh);
   for (let i = 0; i < n; i++) {
     pc.at(i * fw + 1, 1);
@@ -98,8 +109,62 @@ export function monitorTextures(): Texture[] {
         break;
       case 3:
       case 4:
-        lines(C.pine, [C.leaf, C.lemon, C.leaf], i - 3);
-        pc.set(sx + 12, sy + 7, i === 3 ? C.white : C.leaf);
+      case 11:
+      case 12: {
+        // terminal output scrolling up one row per frame
+        const shift = i < 11 ? i - 3 : i - 9;
+        lines(C.pine, [C.leaf, C.lemon, C.leaf], shift);
+        pc.set(sx + 12, sy + 7, shift % 2 === 0 ? C.white : C.leaf);
+        break;
+      }
+      case 13:
+      case 14: {
+        // page turning: the right page lifts and swings over
+        pc.rect(sx, sy, sw, sh, C.cream);
+        pc.vline(sx + 7, sy, sh, C.tan);
+        for (let r = 0; r < 4; r++) pc.hline(sx + 1, sy + 1 + r * 2, 5, C.grey);
+        if (i === 13) {
+          pc.rect(sx + 8, sy, 4, sh - 1, C.white);
+          pc.vline(sx + 12, sy + 1, sh - 2, C.silver);
+        } else {
+          pc.rect(sx + 5, sy, 3, sh - 1, C.white);
+          pc.vline(sx + 4, sy + 1, sh - 2, C.silver);
+          for (let r = 0; r < 4; r++) pc.hline(sx + 9, sy + 1 + r * 2, 4, C.grey);
+        }
+        break;
+      }
+      case 15:
+      case 16: {
+        // a little turning gear
+        pc.rect(sx, sy, sw, sh, C.navy);
+        const gx = sx + 5;
+        const gy = sy + 2;
+        pc.rect(gx, gy, 4, 4, C.silver);
+        pc.set(gx + 1, gy + 1, C.navy);
+        pc.set(gx + 2, gy + 2, C.navy);
+        pc.set(gx + 1, gy + 2, C.navy);
+        pc.set(gx + 2, gy + 1, C.navy);
+        if (i === 15) {
+          pc.hline(gx + 1, gy - 1, 2, C.silver);
+          pc.hline(gx + 1, gy + 4, 2, C.silver);
+          pc.vline(gx - 1, gy + 1, 2, C.silver);
+          pc.vline(gx + 4, gy + 1, 2, C.silver);
+        } else {
+          pc.set(gx - 1, gy - 1, C.silver);
+          pc.set(gx + 4, gy - 1, C.silver);
+          pc.set(gx - 1, gy + 4, C.silver);
+          pc.set(gx + 4, gy + 4, C.silver);
+        }
+        pc.hline(sx + 1, sy + 7, 3, C.cyan);
+        break;
+      }
+      case 17:
+        // thought cloud
+        pc.rect(sx, sy, sw, sh, C.navy);
+        pc.round(sx + 4, sy + 1, 8, 4, C.white);
+        pc.set(sx + 3, sy + 5, C.white);
+        pc.set(sx + 2, sy + 6, C.white);
+        pc.set(sx + 7, sy + 2, C.lemon);
         break;
       case 5:
       case 6:
@@ -114,7 +179,8 @@ export function monitorTextures(): Texture[] {
         pc.set(sx + (i === 7 ? 3 : 9), sy + (i === 7 ? 2 : 5), C.lemon);
         pc.set(sx + (i === 7 ? 10 : 5), sy + (i === 7 ? 6 : 3), C.cyan);
         break;
-      default:
+      case 9:
+      case 10:
         pc.rect(sx, sy, sw, sh, C.cream);
         for (let r = 0; r < 4; r++)
           pc.hline(sx + 2, sy + 1 + r * 2, 10 - ((r + i) % 3) * 2, C.grey);

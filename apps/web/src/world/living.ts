@@ -54,6 +54,8 @@ export class Living {
   private history: number[] = [];
   private lastSample = 0;
   private acc = 99;
+  /** office-local hour (0..24) as of the last tick */
+  hour = 12;
 
   constructor(
     private readonly scene: OfficeScene,
@@ -71,8 +73,10 @@ export class Living {
     if (this.acc < 2) return;
     this.acc = 0;
     const hour = this.hourOverride ?? localHour(this.model.timezone);
+    this.hour = hour;
     const d = daylight(hour);
     this.scene.setDaylight(d.night, d.sky, d.tint, d.alpha);
+    this.scene.setHour(hour);
     const st = this.model.stats();
     const now = Date.now();
     if (this.history.length === 0 || now - this.lastSample > 5 * 60_000) {
