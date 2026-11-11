@@ -18,16 +18,15 @@ import {
   seededRandom,
   sessionVariation,
 } from "@agent-office/protocol";
-import { Sprite, type Texture } from "pixi.js";
+import { Sprite, Texture } from "pixi.js";
 import {
   type AnimName,
   CHAR_H,
-  CHARACTER_SHEET_CACHE_LIMIT,
   type CharacterSheet,
   characterSheet,
-  characterSheetCacheSize,
   lookFor,
-  pruneCharacterSheets,
+  releaseSheet,
+  retainSheet,
 } from "../art/characters.ts";
 import type { MonitorState } from "../art/desk.ts";
 import {
@@ -376,7 +375,13 @@ export class CharacterManager {
         for (const c of this.chars.values()) {
           if (c.personId !== p.personId) continue;
           const s = this.model.sessions.get(c.sessionId);
-          if (s) c.sheet = this.sheetFor(p, s);
+          if (!s) continue;
+          // swap to the new sheet right away (same frame), then free the old one
+          const old = c.sheet;
+          c.sheet = this.sheetFor(p, s);
+          const i = old.frames.indexOf(c.sprite.texture);
+          c.sprite.texture = c.sheet.frames[Math.max(0, i)]!;
+          releaseSheet(old);
         }
         this.syncSlots();
         break;
@@ -565,8 +570,10 @@ export class CharacterManager {
     };
     this.recentEnds.push(entry);
     if (c.hasDesk) {
+      // the ghost holds its own sheet reference (the character releases its one when it leaves)
+      retainSheet(c.sheet);
       this.endedDesks.push({ pod: c.pod, desk: c.desk, day: dayKey(now), at: now, sheet: c.sheet });
-      if (this.endedDesks.length > 60) this.endedDesks.shift();
+      if (this.endedDesks.length > 60) this.dropGhosts([this.endedDesks.shift()!]);
     }
     this.onMoment({ kind: "ended", x: c.x, y: c.y, name: this.nameOf(c.personId) });
     const age = sessionAgeMs(c.startedAt, this.model.clockSkew, now);
@@ -681,6 +688,7 @@ export class CharacterManager {
     return this.model.people.get(personId)?.name ?? personId;
   }
 
+  /** Holds one sheet reference: release it when the character drops or replaces it. */
   private sheetFor(p: PersonState, s: SessionState): CharacterSheet {
     const variation = s.desk === 0 ? null : sessionVariation(s.sessionId);
     return characterSheet(lookFor(p.avatar, s.agent, variation));
@@ -801,6 +809,7 @@ export class CharacterManager {
       c.splat,
     ])
       sp.destroy();
+    releaseSheet(c.sheet);
     this.chars.delete(c.sessionId);
     const { moved, promoted } = this.fillDeskGaps(c.personId);
     this.syncSlots(moved);
@@ -1404,12 +1413,22 @@ export class CharacterManager {
     }
   }
 
+  /** Forget ended desks: give back their sheet references (`ghosts` is re-picked from the rest). */
+  private dropGhosts(gone: Ghost[]) {
+    if (!gone.length) return;
+    // no ghost sprite may keep showing a texture that is about to be freed (re-set next update)
+    for (const sp of this.ghostSprites) sp.texture = Texture.EMPTY;
+    this.ghosts = this.ghosts.filter((g) => !gone.includes(g));
+    for (const g of gone) releaseSheet(g.sheet);
+  }
+
   /** At night today's ended sessions haunt their free desks. */
   private updateGhosts(dt: number, time: number) {
     this.ghostCheck -= dt;
     if (this.ghostCheck <= 0) {
       this.ghostCheck = 2;
       const day = dayKey(Date.now());
+      this.dropGhosts(this.endedDesks.filter((g) => g.day !== day));
       this.endedDesks = this.endedDesks.filter((g) => g.day === day);
       const occupied = (pod: number, desk: number) =>
         !this.scene.desk(pod, desk) ||
@@ -1593,19 +1612,6 @@ export class CharacterManager {
     this.updateCraters(dt);
     this.scene.doorWanted = doorBusy;
     this.updateSelection(time);
-    if (characterSheetCacheSize() > CHARACTER_SHEET_CACHE_LIMIT) {
-      const retained = new Set<CharacterSheet>();
-      const displayed: Texture[] = [];
-      for (const c of this.chars.values()) {
-        retained.add(c.sheet);
-        // Avatar changes replace c.sheet before setAnim necessarily switches its sprite.
-        displayed.push(c.sprite.texture);
-      }
-      for (const ghost of this.endedDesks) retained.add(ghost.sheet);
-      for (const ghost of this.ghosts) retained.add(ghost.sheet);
-      for (const sprite of this.ghostSprites) displayed.push(sprite.texture);
-      pruneCharacterSheets(retained, displayed);
-    }
   }
 
   /** Session whose agent card is open: gets a bouncing arrow over its head. */

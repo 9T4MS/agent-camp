@@ -6,6 +6,7 @@ import {
   type PartyState,
 } from "@agent-office/protocol";
 import { Graphics, Sprite, Texture } from "pixi.js";
+import { CHAR_RES } from "../art/characters.ts";
 import { accentHex } from "../art/costumes.ts";
 import { drawText } from "../art/font.ts";
 import { C, hexNum } from "../art/palette.ts";
@@ -304,6 +305,8 @@ export class PartyWorld {
         ),
       );
       m.vehicle.anchor.set(0.5, 0.75);
+      // the portrait has 2 texels per world px (HD character)
+      m.vehicle.scale.set(1 / CHAR_RES);
       m.vehicle.eventMode = "none";
       this.scene.fx.addChild(m.vehicle);
       amount = 10;

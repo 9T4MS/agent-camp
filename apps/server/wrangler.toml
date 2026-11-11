@@ -34,8 +34,18 @@ new_sqlite_classes = ["Office"]
 [vars]
 OFFICE_NAME = "Agent Office"
 OFFICE_TIMEZONE = "Europe/Vienna"
-# GENUI_PROVIDER is unset here (= "off") so it can be set in the dashboard: anthropic | jev
-GENUI_MAX_CALLS_PER_DAY = "200"
+# GENUI_PROVIDER is unset here (= "off") so it can be set in the dashboard: anthropic | jev.
+# With a provider on, a person's self-description (up to 8000 chars) becomes a detailed look:
+# anthropic defaults to claude-haiku-4-5 (structured outputs, no thinking, max_tokens 8000),
+# jev to openai/gpt-4o-mini; GENUI_MODEL overrides either. GENUI_MODEL=claude-opus-5-5 is the
+# explicit, pricier choice for more faithful looks (adaptive thinking, GENUI_EFFORT default
+# "low", server-side refusal fallbacks, max_tokens 16000). People without a description never
+# trigger a call, and a provider switch or a deploy without the API key keeps every generated
+# look. One call per description change (and once per look-format revision, e.g. right after
+# a deploy that bumps it), at most 2 in flight, 120 s timeout. Rough cost per call (~3-8k input
+# + ~4-6k output tokens): claude-haiku-4-5 about $0.02-0.04, so the cap below bounds a day at
+# roughly $1-2; claude-opus-5-5 at effort low about $0.10-0.15 and 30-90 s, roughly $5-8 a day.
+GENUI_MAX_CALLS_PER_DAY = "50"
 # "auto": the server asks GitHub for the latest release of GITHUB_REPO when a connector says
 # hello (cached 5 min). A fixed version (e.g. --var LATEST_CONNECTOR_VERSION:0.1.42) wins.
 LATEST_CONNECTOR_VERSION = "auto"
@@ -48,4 +58,11 @@ MIN_CONNECTOR_VERSION = "0.0.0"
 #                        login page uses CONNECTOR_PASSWORD
 #   ANTHROPIC_API_KEY    for GENUI_PROVIDER=anthropic
 #   AI_GATEWAY_API_KEY   for GENUI_PROVIDER=jev
-# Optional vars: GENUI_MODEL, SERVER_VERSION, DEV_MODE ("1" = password defaults to "devpass")
+# Optional vars: GENUI_MODEL (anthropic default claude-haiku-4-5, e.g. claude-opus-5-5; or a
+#                gateway id like openai/gpt-4o-mini for jev), GENUI_EFFORT (anthropic models
+#                with effort, e.g. claude-opus-5-5: low | medium | high | xhigh | max; higher =
+#                more faithful but slower and pricier; ignored for claude-haiku-4-5),
+#                SERVER_VERSION,
+#                DEV_MODE ("1" = password defaults to "devpass")
+# Try a description against the real API without deploying:
+#   ANTHROPIC_API_KEY=... bun apps/server/scripts/genui-try.ts <description.md>

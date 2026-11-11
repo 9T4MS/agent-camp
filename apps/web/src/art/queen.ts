@@ -5,7 +5,7 @@
  * in, so the roses and the pager can stick out), drawn with the shared head painter.
  */
 import { Rectangle, Texture } from "pixi.js";
-import { drawHead, type Look, type View } from "./characters.ts";
+import { drawHead, type Look, type View } from "./legacyDoll.ts";
 import { C } from "./palette.ts";
 import { PixelCanvas } from "./pixel.ts";
 

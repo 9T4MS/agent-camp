@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { avatarFromSeed } from "@agent-office/protocol";
+import { avatarFromSeed, MAX_SELF_DESCRIPTION } from "@agent-office/protocol";
+import { LOOK_FIXTURES } from "@agent-office/protocol/fixtures";
 import { MemoryStore, SqlStore, type Store } from "../../src/core/store.ts";
 
 const sqlite = () => {
@@ -57,6 +58,16 @@ for (const [name, make] of [
       expect(s.listSnapshots()).toEqual([{ id, ts: 5, size: 4 }]);
       expect([...(s.getSnapshot(id) ?? [])]).toEqual([137, 80, 78, 71]);
       expect(s.getSnapshot(999)).toBeNull();
+    });
+    test("avatars: detailed look and a max-length description roundtrip unchanged", () => {
+      const s = make();
+      const desc = "x".repeat(MAX_SELF_DESCRIPTION);
+      s.putAvatar("t", LOOK_FIXTURES.tracht, "anthropic:L1:abc", desc);
+      expect(s.getAvatar("t")).toEqual({
+        avatar: LOOK_FIXTURES.tracht,
+        key: "anthropic:L1:abc",
+        selfDescription: desc,
+      });
     });
   });
 }

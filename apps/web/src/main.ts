@@ -10,11 +10,13 @@
  *   ?lively=1     office life at party speed (chattier, waits count 10x, pizza drone in 3 s)
  *   ?key=...      viewer key passed through to /ws/viewer
  *   ?kiosk=1      iPad kiosk (no cursor, big text, no panels, wake lock, 30 fps, auto-tour,
- *                 reloads itself after a deploy)
+ *                 reloads itself right after a deploy)
  *   ?recorder=1   upload a timelapse PNG every 15 min (&recordEvery=ms to override)
  *   ?nohud=1      hide all DOM overlays     ?zoom=fit|<n>  initial zoom
  *   ?hour=0..24   force the time of day     ?gallery=1     art gallery (dev)
  *   ?focus=<personId>  start focused on that person's desk pod
+ *   ?look=tracht|b64:<base64url AvatarSpec JSON>  demo: the first person wears this avatar
+ *   ?gallery=look[&look=…][&gscale=N]  detailed-look gallery (sets window.__galleryReady)
  */
 import "./ui/theme.css";
 import "./ui/office.css";
@@ -31,23 +33,33 @@ import {
   type ServerToViewer,
 } from "@agent-office/protocol";
 import { Application, TextureStyle } from "pixi.js";
-import { lookFor, lookPreview } from "./art/characters.ts";
+import { CHAR_H, CHAR_RES, CHAR_W, lookFor, lookPreview } from "./art/characters.ts";
 import { fitText } from "./art/font.ts";
 import { trophyCanvas } from "./art/fun.ts";
 import { C } from "./art/palette.ts";
 import { avatarPortrait } from "./art/party.ts";
 import { setArtSeason } from "./art/seasons.ts";
 import { Camera } from "./camera.ts";
-import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
+import { CHANGELOG } from "./changelog.ts";
+import { DemoFeed, parseDemoMode, parseLookParam } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
-import { keepAwake, reloadOnNewBuild } from "./kiosk.ts";
+import { keepAwake, reloadInto, watchForNewBuild } from "./kiosk.ts";
 import { MessagesClient } from "./net/messages.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
 import { registerServiceWorker } from "./pwa.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
+import {
+  loadSeen,
+  mayAutoReload,
+  newVersionLabel,
+  notesKey,
+  saveSeen,
+  shouldCelebrate,
+} from "./release.ts";
 import { MessageModel } from "./state/messageModel.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
+import { Celebration } from "./ui/celebration.ts";
 import { MessagesPanel, storedMessageRead } from "./ui/messages.ts";
 import { Minimap } from "./ui/minimap.ts";
 import { OfficeCat } from "./world/cat.ts";
@@ -220,6 +232,16 @@ async function boot() {
   chars.onCoffee = (personId) =>
     life.coffeeDrunk(personId, model.people.get(personId)?.name ?? personId);
   const hud = new Hud(host, model, { kiosk });
+  const celebration = new Celebration(host);
+  const seenRelease = loadSeen();
+  const notes = notesKey(CHANGELOG[0]);
+  let celebrate = !demo && !nohud && shouldCelebrate(seenRelease, __BUILD__, notes);
+  hud.onWhatsNew = () =>
+    celebration.show({
+      heading: "What's new",
+      version: model.version ? `v${model.version.replace(/^v/, "")}` : null,
+      section: CHANGELOG[0],
+    });
   // the top bar is 36 px (46 in kiosk) plus the notch inset in an installed app
   const hudTop = host.querySelector<HTMLElement>(".hud-top");
   const fallbackInset = kiosk ? 46 : 36;
@@ -309,6 +331,14 @@ async function boot() {
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
       hud.setVersion(model.version, __BUILD__);
+      if (!demo) {
+        const label = newVersionLabel(seenRelease, model.version);
+        if (celebrate) {
+          celebrate = false;
+          celebration.show({ heading: "New version!", version: label, section: CHANGELOG[0] });
+        } else if (label && celebration.open) celebration.setVersion(label);
+        saveSeen({ build: __BUILD__, version: model.version ?? seenRelease?.version, notes });
+      }
       chars.syncSlots();
     }
     hud.setStats(model.stats());
@@ -684,11 +714,19 @@ async function boot() {
     canvas.height = 96;
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(src, frame.frame.x, frame.frame.y, 16, 24, 0, 0, 64, 96);
+    const r = CHAR_RES;
+    ctx.drawImage(src, frame.frame.x * r, frame.frame.y * r, CHAR_W * r, CHAR_H * r, 0, 0, 64, 96);
     return canvas;
   };
 
   if (demo) {
+    const lookRaw = params.get("look");
+    // fixture names (`?look=tracht`) load the fixtures chunk only when asked for
+    const fixtures =
+      lookRaw && !lookRaw.startsWith("b64:")
+        ? (await import("@agent-office/protocol/fixtures")).LOOK_FIXTURES
+        : {};
+    const lookParam = parseLookParam(lookRaw, fixtures);
     const feed = new DemoFeed(
       {
         mode: demo,
@@ -696,6 +734,7 @@ async function boot() {
         ...(params.get("people") ? { people: Number(params.get("people")) } : {}),
         ...(params.get("sessions") ? { sessions: Number(params.get("sessions")) } : {}),
         ...(params.get("speed") ? { speed: Number(params.get("speed")) } : {}),
+        ...(lookParam ? { look: lookParam } : {}),
       },
       (msg) => {
         // round-trip through the real parser so demo data is schema-checked too
@@ -723,14 +762,38 @@ async function boot() {
       messagesPanel.refresh();
     }
   } else {
-    const checkBuild = kiosk ? reloadOnNewBuild() : null;
+    let newBuild: string | null = null;
+    let lastInput = performance.now();
+    for (const ev of ["pointerdown", "pointermove", "keydown", "wheel"] as const)
+      window.addEventListener(ev, () => (lastInput = performance.now()), {
+        capture: true,
+        passive: true,
+      });
+    const typing = () =>
+      document.activeElement?.matches("input, textarea, select, [contenteditable]");
+    const reloadWhenIdle = () => {
+      if (!newBuild) return;
+      const ok = mayAutoReload({
+        kiosk,
+        hidden: document.visibilityState === "hidden",
+        busy: hud.lookEditorOpen || (messagesPanel?.hasDraft ?? false) || !!typing(),
+        idleMs: performance.now() - lastInput,
+      });
+      if (ok) reloadInto(newBuild);
+    };
+    const checkBuild = watchForNewBuild((served) => {
+      newBuild = served;
+      hud.setUpdateReady(true);
+      reloadWhenIdle();
+    });
+    setInterval(reloadWhenIdle, 15_000);
     connectViewer({
       key,
       onMessage: ingest,
       onStatus: (s) => {
         hud.setStatus(s);
         if (s === "open") {
-          checkBuild?.();
+          checkBuild();
           void messagesClient?.sync(true);
         } else if (messagesClient) {
           messagesClient.status = "Reconnecting — saved messages remain readable.";

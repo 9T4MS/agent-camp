@@ -9,6 +9,11 @@ export const CLOSE_TOO_OLD = 4002;
 /** Malformed / schema-invalid message (not in PLAN, but handy). */
 export const CLOSE_BAD_MESSAGE = 4003;
 
+/** Look description: `selfDescription` carries the first 200 chars (all servers accept it). */
+export const SHORT_SELF_DESCRIPTION = 200;
+/** Look description: the full text (`lookDescription`, newer servers), and the config limit. */
+export const MAX_SELF_DESCRIPTION = 8000;
+
 /** WebSocket paths. */
 export const WS_CONNECTOR_PATH = "/ws/connector";
 export const WS_VIEWER_PATH = "/ws/viewer";

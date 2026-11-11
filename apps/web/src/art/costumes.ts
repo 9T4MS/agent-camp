@@ -1,6 +1,9 @@
-/** Costume details inside the existing 16×24 directional paper doll. */
+/**
+ * Costume details, novelty headwear and accent colours, painted at 1× (16×24 frame
+ * coordinates). The HD painter doubles them onto its 32×48 frames (art/avatar/extras.ts); the
+ * 1× queen head uses them as they are.
+ */
 import type { AvatarSpec } from "@agent-office/protocol";
-import type { Look } from "./characters.ts";
 import { C } from "./palette.ts";
 import type { PixelCanvas } from "./pixel.ts";
 
@@ -15,7 +18,14 @@ const ACCENTS = {
 } as const;
 export const accentHex = (color: AvatarSpec["accentColor"]) => ACCENTS[color];
 
-export function costumeHead(p: PixelCanvas, look: Look, view: View, dy: number): void {
+/** What the costume painters read: the catalog ids plus the accent colour as hex. */
+export type CostumeLook = {
+  outfit: AvatarSpec["outfit"];
+  accessory: AvatarSpec["accessory"];
+  accent: string;
+};
+
+export function costumeHead(p: PixelCanvas, look: CostumeLook, view: View, dy: number): void {
   if (look.outfit === "cat" && view !== "up") {
     if (view === "down") {
       p.set(7, 9 + dy, C.pink);
@@ -36,8 +46,8 @@ export function costumeHead(p: PixelCanvas, look: Look, view: View, dy: number):
   }
 }
 
-export function costumeAccessory(p: PixelCanvas, look: Look, view: View, dy: number): void {
-  const color = accentHex(look.accentColor);
+export function costumeAccessory(p: PixelCanvas, look: CostumeLook, view: View, dy: number): void {
+  const color = look.accent;
   const a = look.accessory;
   const ear = (x: number, height: number, fur: string) => {
     p.vline(x, dy, height, fur);
@@ -92,12 +102,12 @@ export function costumeAccessory(p: PixelCanvas, look: Look, view: View, dy: num
 
 export function costumeTorso(
   p: PixelCanvas,
-  look: Look,
+  look: CostumeLook,
   view: View,
   top: number,
   rows: number,
 ): void {
-  const color = accentHex(look.accentColor);
+  const color = look.accent;
   const side = view === "left";
   const x = side ? 5 : 4,
     w = side ? 6 : 8;

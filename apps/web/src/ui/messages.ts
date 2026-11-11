@@ -291,6 +291,10 @@ export class MessagesPanel {
   get expanded(): boolean {
     return !this.panel.hidden;
   }
+  /** Fullscreen release auto-reload must not discard a draft even after focus moves away. */
+  get hasDraft(): boolean {
+    return this.text.value.length > 0 || this.busy || !!this.uncertain;
+  }
   open(focus = true): void {
     this.origin =
       document.activeElement instanceof HTMLElement ? document.activeElement : this.launcher;

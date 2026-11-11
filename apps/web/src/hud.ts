@@ -12,6 +12,7 @@ import {
   AGENT_PALETTES,
   type AgentKind,
   type AvatarSpec,
+  catalogAvatar,
   DESK_MESS_LEVELS,
   DESK_PROPS,
   FACIAL_HAIR,
@@ -216,6 +217,11 @@ export class Hud {
   private name: HTMLElement;
   private chips: HTMLElement;
   private clock: HTMLElement;
+  private refreshBtn: HTMLButtonElement | null = null;
+  /** the refresh button was pressed */
+  onRefresh: () => void = () => location.reload();
+  /** "What's new" in the menu */
+  onWhatsNew: (() => void) | null = null;
   private banner: HTMLElement;
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
   private bannerQueue: {
@@ -291,7 +297,20 @@ export class Hud {
     this.menu = el("div", "hud-menu pixel-box");
     this.chips = el("div", "chips");
     this.clock = el("div", "clock");
-    top.append(this.name, this.chips, this.clock);
+    top.append(this.name, this.chips);
+    if (!opts.kiosk) {
+      this.refreshBtn = el(
+        "button",
+        "refresh",
+        `<span class="icon" aria-hidden="true">&#8635;</span><span class="label">New version</span>`,
+      );
+      this.refreshBtn.type = "button";
+      this.refreshBtn.title = "Refresh";
+      this.refreshBtn.setAttribute("aria-label", "Refresh");
+      this.refreshBtn.addEventListener("click", () => this.onRefresh());
+      top.append(this.refreshBtn);
+    }
+    top.append(this.clock);
     this.banner = el("div", "hud-banner pixel-box");
     this.panel = el("div", "hud-panel pixel-box");
     this.reconnect = el(
@@ -370,6 +389,7 @@ export class Hud {
       ${this.onMessages ? '<button type="button" class="pixel-btn open-messages" role="menuitem">Messages</button>' : ""}
       <a class="pixel-btn" role="menuitem" href="./stats${q}">Stats</a>
       <a class="pixel-btn" role="menuitem" href="./timelapse${q}">Timelapse</a>
+      ${this.onWhatsNew ? `<button type="button" class="pixel-btn whats-new" role="menuitem">What's new</button>` : ""}
       ${install}
       <form method="post" action="/api/logout"><button class="pixel-btn" type="submit" role="menuitem">Log out</button></form>`;
     this.menu.querySelector(".open-messages")?.addEventListener("click", () => {
@@ -377,6 +397,10 @@ export class Hud {
       this.onMessages?.();
     });
     this.menu.querySelector("form")?.addEventListener("submit", () => this.onLogout());
+    this.menu.querySelector(".whats-new")?.addEventListener("click", () => {
+      this.closeMenu();
+      this.onWhatsNew?.();
+    });
     this.menu.querySelector(".install")?.addEventListener("click", () => {
       this.closeMenu();
       void promptInstall();
@@ -410,6 +434,13 @@ export class Hud {
     if (!v) return;
     v.textContent = version && version !== "0.0.0" ? `v${version.replace(/^v/, "")}` : build;
     v.title = `server ${version ?? "?"} · web build ${build}`;
+  }
+
+  /** A newer build is deployed: the refresh button says so. */
+  setUpdateReady(ready: boolean) {
+    if (!this.refreshBtn) return;
+    this.refreshBtn.classList.toggle("ready", ready);
+    this.refreshBtn.title = ready ? "A new version is out: refresh" : "Refresh";
   }
 
   setStats(st: OfficeStats) {
@@ -677,7 +708,9 @@ export class Hud {
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.setAttribute("aria-label", `${p.name}'s look`);
-    const draft: AvatarSpec = structuredClone(p.avatar);
+    // catalog ids only: a saved custom look is drawn from them (a detailed GenUI look is not
+    // kept), so the preview shows exactly what Save gives
+    const draft: AvatarSpec = structuredClone(catalogAvatar(p.avatar));
     const agent = this.model.sessionsOf(p.personId)[0]?.agent ?? "claude";
 
     // desk props are three slots of their own; empty ones are dropped when saving
@@ -810,7 +843,7 @@ export class Hud {
       say(r.message, r.ok);
       if (r.ok && r.avatar && !avatar) {
         // back to automatic: show the look the server picked
-        Object.assign(draft, r.avatar);
+        Object.assign(draft, structuredClone(catalogAvatar(r.avatar)));
         for (const i of slotIdx) slots[i] = draft.deskProps[i] ?? "none";
         paintAll();
       }

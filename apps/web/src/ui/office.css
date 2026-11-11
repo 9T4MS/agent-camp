@@ -1082,3 +1082,173 @@ body.kiosk .hud-reconnect {
     flex-wrap: wrap;
   }
 }
+
+/* ---- refresh button (top bar) ------------------------------------------------------------- */
+.hud-top .refresh {
+  flex: none;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  color: var(--grey);
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  cursor: pointer;
+}
+.hud-top .refresh:hover {
+  background: var(--ink);
+  color: var(--cream);
+  box-shadow: inset 0 0 0 2px var(--dusk);
+}
+.hud-top .refresh:focus-visible {
+  outline: 2px solid var(--lemon);
+}
+.hud-top .refresh .icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.hud-top .refresh .label {
+  display: none;
+}
+.hud-top .refresh.ready {
+  background: var(--rust);
+  color: var(--white);
+  box-shadow: inset 0 -2px 0 var(--wine);
+  animation: refresh-pulse 1.6s steps(2) infinite;
+}
+.hud-top .refresh.ready .label {
+  display: inline;
+}
+@keyframes refresh-pulse {
+  50% {
+    background: var(--orange);
+  }
+}
+@media (max-width: 640px) {
+  .hud-top .refresh.ready .label {
+    display: none;
+  }
+}
+
+/* ---- release celebration (full screen) ----------------------------------------------------- */
+.celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: max(16px, var(--safe-t)) max(16px, var(--safe-r)) max(16px, var(--safe-b))
+    max(16px, var(--safe-l));
+  background: rgba(24, 20, 37, 0.78);
+  overflow: hidden;
+  animation: celebration-in 0.3s ease-out;
+}
+@keyframes celebration-in {
+  from {
+    opacity: 0;
+  }
+}
+.celebration .confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.celebration .confetti i {
+  position: absolute;
+  top: -20px;
+  width: 8px;
+  height: 12px;
+  animation-name: confetti-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes confetti-fall {
+  to {
+    transform: translate(var(--drift), 110vh) rotate(720deg);
+  }
+}
+.celebration .card {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 28px 28px 22px;
+  text-align: center;
+  color: var(--cream);
+  animation: celebration-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes celebration-pop {
+  from {
+    transform: scale(0.6);
+  }
+}
+.celebration .kicker {
+  margin: 0;
+  font-family: var(--font-pixel);
+  font-size: 20px;
+  color: var(--lemon);
+}
+.celebration .version {
+  margin: 6px 0 14px;
+  font-family: var(--font-pixel);
+  font-size: clamp(44px, 12vw, 88px);
+  line-height: 1;
+  color: var(--amber);
+  text-shadow:
+    4px 4px 0 var(--wine),
+    0 0 24px rgba(254, 174, 52, 0.5);
+}
+.celebration .since {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--grey);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.celebration ul {
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.celebration li {
+  padding: 5px 0 5px 18px;
+  position: relative;
+}
+.celebration li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  width: 6px;
+  height: 6px;
+  background: var(--amber);
+}
+.celebration code {
+  font-size: 0.9em;
+  color: var(--cyan);
+}
+.celebration .go {
+  padding: 10px 22px;
+}
+body.kiosk .celebration .card {
+  width: min(760px, 100%);
+}
+body.kiosk .celebration ul {
+  font-size: 22px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .celebration,
+  .celebration .card {
+    animation: none;
+  }
+  .celebration .confetti {
+    display: none;
+  }
+}

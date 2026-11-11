@@ -1,14 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { envelope, PersonDayResponse } from "@agent-office/protocol";
+import {
+  type AvatarSpec,
+  envelope,
+  PersonDayResponse,
+  parseViewerMessage,
+  resolveLook,
+} from "@agent-office/protocol";
+import { LOOK_FIXTURES } from "@agent-office/protocol/fixtures";
 import { OfficeApp, SNAPSHOT_MAX_BYTES, SNAPSHOT_MIN_INTERVAL_MS } from "../../src/core/app.ts";
 import { MemoryStore } from "../../src/core/store.ts";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 
-function setup(env: Record<string, string> = { CONNECTOR_PASSWORD: "pw" }) {
+function setup(
+  env: Record<string, string> = { CONNECTOR_PASSWORD: "pw" },
+  fetch?: typeof globalThis.fetch,
+) {
   let now = 1_000_000;
   const sent: string[] = [];
   const alarms: (number | null)[] = [];
+  /** background work (avatar jobs) */
+  const pending: Promise<unknown>[] = [];
   /** messages the app sent to single connector sockets (pokes, claim codes) */
   const toConnector: { socketId: string; data: string }[] = [];
   const app = new OfficeApp(
@@ -21,10 +33,11 @@ function setup(env: Record<string, string> = { CONNECTOR_PASSWORD: "pw" }) {
         toConnector.push({ socketId, data });
         return true;
       },
+      waitUntil: (p) => pending.push(p),
     },
-    { now: () => now, log: () => {} },
+    { now: () => now, log: () => {}, ...(fetch ? { fetch } : {}) },
   );
-  return { app, sent, alarms, toConnector, advance: (ms: number) => (now += ms) };
+  return { app, sent, alarms, toConnector, pending, advance: (ms: number) => (now += ms) };
 }
 const req = (path: string, init?: RequestInit) => new Request(`http://x${path}`, init);
 
@@ -195,6 +208,62 @@ describe("OfficeApp", () => {
     const { app } = setup();
     expect((await app.handleHttp(req("/api/nope")))!.status).toBe(404);
     expect(await app.handleHttp(req("/stats"))).toBeNull();
+  });
+});
+
+describe("OfficeApp detailed looks", () => {
+  test("anthropic look for a long description reaches viewers as avatar.updated", async () => {
+    const desc = "Tracht: Janker, lederhosen, panto glasses. ".repeat(40);
+    const bodies: Record<string, unknown>[] = [];
+    const sent: string[] = [];
+    const pending: Promise<unknown>[] = [];
+    const app = new OfficeApp(
+      {
+        CONNECTOR_PASSWORD: "pw",
+        GENUI_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "k",
+        LATEST_CONNECTOR_VERSION: "1.0.0",
+      },
+      new MemoryStore(),
+      {
+        broadcast: (d) => sent.push(d),
+        scheduleAlarm: () => {},
+        waitUntil: (p) => pending.push(p),
+      },
+      {
+        log: () => {},
+        fetch: async (_url, init) => {
+          bodies.push(JSON.parse(String(init.body)));
+          return Response.json({
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: JSON.stringify(LOOK_FIXTURES.tracht) }],
+          });
+        },
+      },
+    );
+    app.connectorMessage(
+      "s1",
+      JSON.stringify(
+        envelope("connector.hello", {
+          name: "Thomas",
+          password: "pw",
+          clientId: "c",
+          connectorVersion: "1.0.0",
+          selfDescription: desc.slice(0, 200),
+          lookDescription: desc,
+        }),
+      ),
+    );
+    await Promise.all(pending);
+    expect(bodies).toHaveLength(1);
+    expect(JSON.stringify(bodies[0]!.messages)).toContain(desc.trim());
+    const updated = sent
+      .map((d) => parseViewerMessage(d))
+      .find((m) => m.ok && m.msg.type === "avatar.updated");
+    expect(updated?.ok && updated.msg.type === "avatar.updated" && updated.msg.data.avatar).toEqual(
+      LOOK_FIXTURES.tracht,
+    );
+    expect(app.store.getAvatar("thomas")?.avatar).toEqual(LOOK_FIXTURES.tracht);
   });
 });
 
@@ -372,6 +441,69 @@ describe("OfficeApp look editor", () => {
     expect(body.custom).toBe(false);
     expect(body.avatar.outfit).toBe("jacket");
     expect(app.hub.isCustomLook("tom")).toBe(false);
+  });
+
+  test("a custom look wins over GenUI: its look comes from the picked ids", async () => {
+    // GenUI on (mocked Anthropic answering with the detailed tracht look)
+    const bodies: unknown[] = [];
+    const t = setup(
+      {
+        CONNECTOR_PASSWORD: "pw",
+        GENUI_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "k",
+        LATEST_CONNECTOR_VERSION: "1.0.0",
+      },
+      (async (_url: unknown, init: RequestInit) => {
+        bodies.push(init.body);
+        return Response.json({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: JSON.stringify(LOOK_FIXTURES.tracht) }],
+        });
+      }) as unknown as typeof globalThis.fetch,
+    );
+    const { app, sent, pending, advance } = t;
+    app.connectorMessage("s1", hello("Tom", "Tracht: Janker and lederhosen"));
+    await Promise.all(pending);
+    expect(bodies).toHaveLength(1);
+    expect(app.hub.state().people[0]!.avatar.look).toEqual(LOOK_FIXTURES.tracht.look);
+
+    // the editor sends the avatar it was opened with (detailed look included) + a flannel and a
+    // beer: the look is dropped, the picked ids are what everybody sees
+    me = await claim(t, "tom");
+    const edited = {
+      ...LOOK_FIXTURES.tracht,
+      outfit: "flannel",
+      leftHand: "beer",
+      rightHand: "none",
+      accessory: "cap-mint",
+    };
+    const r = (await put(app, "tom", { avatar: edited }))!;
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { avatar: AvatarSpec };
+    expect(body.avatar.look).toBeUndefined();
+    const ev = parseViewerMessage(sent.at(-1)!);
+    if (!ev.ok || ev.msg.type !== "avatar.updated") throw new Error("no avatar.updated");
+    expect(ev.msg.data.avatar.look).toBeUndefined();
+    const look = resolveLook(ev.msg.data.avatar as AvatarSpec);
+    expect(look.outer.pattern.kind).toBe("plaid");
+    expect(look.extras?.leftHand).toBe("beer");
+    expect(look.headwear).toMatchObject({ style: "cap", logo: "#ffffff" });
+
+    // a new description: no AI call, nothing replaces the custom look
+    const before = sent.length;
+    const again = app.connectorMessage("s2", hello("Tom", "Now a red hoodie and a beanie"));
+    expect(again.reply?.type).toBe("connector.welcomed");
+    await Promise.all(pending);
+    expect(bodies).toHaveLength(1);
+    expect(sent.slice(before).some((s) => JSON.parse(s).type === "avatar.updated")).toBe(false);
+    expect(app.hub.state().people[0]!.avatar).toEqual(body.avatar);
+
+    // Automatic: GenUI runs for the new description and its detailed look shows again
+    advance(2_000);
+    const back = (await put(app, "tom", { avatar: null }))!;
+    expect(((await back.json()) as { custom: boolean }).custom).toBe(false);
+    expect(bodies).toHaveLength(2);
+    expect(app.hub.state().people[0]!.avatar.look).toEqual(LOOK_FIXTURES.tracht.look);
   });
 
   test("validates, rate limits and needs the person in the office", async () => {

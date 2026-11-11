@@ -11,7 +11,12 @@ export type PersonDef = {
 export const PEOPLE: readonly PersonDef[] = [
   {
     name: "Anna",
-    description: "curly red hair, round glasses, always in a hoodie",
+    // deliberately longer than 200 chars: exercises the detailed-look path (lookDescription)
+    description:
+      "Curly copper-red hair to the shoulders, round gold-rimmed glasses, a few freckles and a " +
+      "big smile. Always in an oversized mustard-yellow hoodie with the sleeves pushed up, dark " +
+      "green cargo trousers with a rolled hem, mismatched striped socks and scuffed white " +
+      "high-top sneakers. Usually has a pencil tucked behind one ear.",
     projects: ["agent-office", "website"],
   },
   {

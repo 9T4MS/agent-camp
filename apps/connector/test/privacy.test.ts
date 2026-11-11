@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseConnectorMessage } from "@agent-office/protocol";
+import { helloDescription } from "../src/cli.ts";
 import { Daemon } from "../src/daemon.ts";
 import { Detector } from "../src/detect/index.ts";
 import { silent } from "../src/log.ts";
@@ -12,6 +13,12 @@ import { agentDirs } from "../src/paths.ts";
 import { fakeProcesses } from "../src/proc.ts";
 import { type FakeServer, fakeServer, waitFor } from "./fake-server.ts";
 import { type FakeHome, makeHome, RAW_IDS, SECRET } from "./helpers.ts";
+
+/** A detailed (>200 chars) look description, as typed by the user. */
+const LOOK =
+  "Slim, slicked-back medium brown hair, round tortoiseshell panto glasses with light " +
+  "blue-lilac lenses, open charcoal Janker with a forest-green stand-up collar, tan " +
+  "lederhosen with green vine embroidery, white sneakers with navy heel tabs.";
 
 let h: FakeHome;
 let srv: FakeServer;
@@ -63,7 +70,7 @@ describe("privacy", () => {
         clientId: "c_privacy",
         connectorVersion: "0.1.0",
         platform: "linux-x64",
-        selfDescription: "round glasses",
+        ...helloDescription(LOOK),
         machine: "devbox",
       }),
       detector,
@@ -89,8 +96,11 @@ describe("privacy", () => {
         "password",
         "platform",
         "selfDescription",
+        "lookDescription",
       ].sort(),
     );
+    expect(helloMsg.data.lookDescription).toBe(LOOK);
+    expect((helloMsg.data.selfDescription as string).length).toBe(200);
     expect(helloMsg.data.machine).toBe("devbox");
     const snap = srv.of("presence.snapshot")[0]!;
     expect((snap.data.sessions as unknown[]).length).toBe(4);

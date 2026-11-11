@@ -10,7 +10,7 @@
  */
 import { z } from "zod";
 import { ViewerAvatar } from "./catalog.ts";
-import { PROTOCOL_VERSION } from "./constants.ts";
+import { MAX_SELF_DESCRIPTION, PROTOCOL_VERSION, SHORT_SELF_DESCRIPTION } from "./constants.ts";
 import { MessageRecord } from "./officeMessages.ts";
 import { ViewerPartyState } from "./party.ts";
 
@@ -108,8 +108,10 @@ export const ConnectorHello = msg(
     password: z.string().max(256),
     clientId: ClientId,
     connectorVersion: z.string().min(1).max(32),
-    /** free-text look description for GenUI, e.g. "curly hair, round glasses" */
-    selfDescription: z.string().max(200).optional(),
+    /** free-text look description for GenUI, e.g. "curly hair, round glasses" (first 200 chars) */
+    selfDescription: z.string().max(SHORT_SELF_DESCRIPTION).optional(),
+    /** full look description when longer than 200 chars; older servers ignore it */
+    lookDescription: z.string().max(MAX_SELF_DESCRIPTION).optional(),
     /** e.g. "darwin-arm64" */
     platform: z.string().max(40).optional(),
     /** user-chosen machine label shown on the agent card; older connectors omit it */
