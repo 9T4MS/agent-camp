@@ -3,6 +3,7 @@ export * from "./avatarLook.ts";
 export * from "./catalog.ts";
 export * from "./constants.ts";
 export * from "./envelope.ts";
+export * from "./games/index.ts";
 export * from "./giphy.ts";
 export * from "./hash.ts";
 export * from "./look.ts";
