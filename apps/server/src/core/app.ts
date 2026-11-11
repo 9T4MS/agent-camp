@@ -16,6 +16,7 @@ import { z } from "zod";
 import { type AvatarService, createAvatarService, type FetchLike, type GenuiEnv } from "./genui.ts";
 import { type Binding, Hub, type HubResult } from "./hub.ts";
 import { isAutoVersion, LatestVersion } from "./latest.ts";
+import { Party, readPartyBody } from "./party.ts";
 import { computeOfficeDay, computePersonDay, computeStats, historyToCsv } from "./stats.ts";
 import type { Store } from "./store.ts";
 
@@ -98,6 +99,7 @@ export class OfficeApp {
   readonly timezone: string;
   private lastInteract = new Map<string, number>();
   private lastPoke = new Map<string, number>();
+  readonly party: Party;
 
   constructor(
     private env: AppEnv,
@@ -105,6 +107,7 @@ export class OfficeApp {
     private transport: Transport,
     private opts: { now?: () => number; fetch?: FetchLike; log?: (line: string) => void } = {},
   ) {
+    this.party = new Party(store);
     const log = opts.log ?? ((l: string) => console.log(l));
     this.timezone = env.OFFICE_TIMEZONE || "Europe/Vienna";
     this.genui = createAvatarService(env, store, {
@@ -233,6 +236,27 @@ export class OfficeApp {
     if (path === "/api/me" && method === "GET") return json({ ok: true });
 
     if (path === "/api/interact" && method === "POST") return this.interact(req);
+    if (path === "/api/party") {
+      if (method === "GET") {
+        if (!viewerAllowed(url, this.env))
+          return json({ error: "viewer key required" }, { status: 401 });
+        return json(this.party.state(this.now()));
+      }
+      if (method === "POST") {
+        if (!bearerOk(req, this.env)) return json({ error: "unauthorized" }, { status: 401 });
+        const body = await readPartyBody(req);
+        if (body.status)
+          return json(
+            { error: body.status === 413 ? "too large" : "invalid JSON" },
+            { status: body.status },
+          );
+        const online = new Set(this.hub.state().people.map((p) => p.personId));
+        const result = this.party.mutate(body.value, online, this.now());
+        return json(result.body, { status: result.status });
+      }
+      return json({ error: "method not allowed" }, { status: 405 });
+    }
+
 
     if (path === "/api/stats" && method === "GET") {
       const days = Number(url.searchParams.get("days") ?? 0);
