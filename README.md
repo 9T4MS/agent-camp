@@ -143,11 +143,27 @@ project folder name, subagent counts), never content.
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
 
+### On your phone or iPad
+
+The office installs as an app (it opens full screen, stays logged in while you use it, and
+still opens offline):
+
+- **Android / Chrome / Edge:** tap the logo (top left) → **Install app**, or use the
+  browser's own "Install app" entry.
+- **iPhone / iPad:** open it in Safari, tap **Share** → **Add to Home Screen** (the logo menu
+  shows the same hint).
+- **Wall iPad:** open `/?kiosk=1` first and add *that* page to the home screen: it installs
+  the full-screen kiosk with the timelapse recorder.
+
+The logo menu also has Stats, Timelapse and Log out, since an installed app has no address
+bar.
+
 Other handy params: `?zoom=fit`, `?hour=22` (preview night), `?nohud=1`, `?demo=busy` (no
 server needed).
 
 Everything is behind the office password (the same one as the connector's): the first visit
-shows a login page and the browser stays logged in for 30 days. If the server also sets
+shows a login page and the browser stays logged in for 30 days; opening the office during the
+last 15 of those days starts a fresh 30. If the server also sets
 `VIEWER_KEY`, `?key=…` links (handy for the kiosk iPad) skip the login.
 
 When a Mac goes to sleep or loses its network, its agents fade out with their screens off

@@ -98,7 +98,22 @@ function icon(size) {
   });
 }
 
+// Android "maskable" icon: no frame, the art kept inside the center safe zone (any mask shape
+// leaves it whole), whole-pixel cells so it stays crisp
+function maskable(size) {
+  const cell = Math.floor((size * 0.55) / 16);
+  const off = Math.floor((size - cell * 16) / 2);
+  return png(size, (x, y) => {
+    const ax = Math.floor((x - off) / cell);
+    const ay = Math.floor((y - off) / cell);
+    const ch = x >= off && y >= off ? ART[ay]?.[ax] : undefined;
+    return rgb(ch && COLORS[ch] ? COLORS[ch] : BG);
+  });
+}
+
 mkdirSync(OUT, { recursive: true });
+writeFileSync(join(OUT, "icon-maskable-512.png"), maskable(512));
+console.log("wrote icon-maskable-512.png");
 for (const [name, size] of [
   ["icon-192.png", 192],
   ["icon-512.png", 512],

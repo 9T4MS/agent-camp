@@ -4,6 +4,9 @@
  */
 import "./theme.css";
 import "./pages.css";
+import { registerServiceWorker } from "../pwa.ts";
+
+registerServiceWorker();
 
 export const esc = (s: string) =>
   s.replace(

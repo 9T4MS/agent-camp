@@ -6,7 +6,12 @@
     <title>Agent Office</title>
     <meta name="description" content="A cozy pixel-art office where every teammate and every coding agent shows up live." />
     <meta name="theme-color" content="#181425" />
-    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="manifest" id="manifest" href="./manifest.webmanifest" />
+    <script>
+      // the wall iPad installs the kiosk variant (fullscreen, landscape, recorder on)
+      if (/[?&]kiosk=(1|true)(&|$)/.test(location.search))
+        document.getElementById("manifest").href = "./manifest-kiosk.webmanifest";
+    </script>
     <link rel="icon" type="image/png" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

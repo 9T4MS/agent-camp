@@ -27,6 +27,7 @@ import { DemoFeed, parseDemoMode } from "./demo/demoFeed.ts";
 import { Hud, type PokeRequest, type PokeResult } from "./hud.ts";
 import { keepAwake } from "./kiosk.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
+import { registerServiceWorker } from "./pwa.ts";
 import { captureSnapshot, startRecorder } from "./recorder.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
 import { Minimap } from "./ui/minimap.ts";
@@ -80,6 +81,8 @@ const demo = parseDemoMode(params.get("demo"));
 const zoomParam = params.get("zoom");
 const hourParam = params.get("hour");
 const key = params.get("key");
+
+registerServiceWorker();
 
 async function boot() {
   TextureStyle.defaultOptions.scaleMode = "nearest";
@@ -157,7 +160,10 @@ async function boot() {
   );
   chars.pizzaActive = () => life.pizzaOnTable;
   const hud = new Hud(host, model, { kiosk });
-  const topInset = nohud ? 0 : kiosk ? 46 : 36;
+  // the top bar is 36 px (46 in kiosk) plus the notch inset in an installed app
+  const hudTop = host.querySelector<HTMLElement>(".hud-top");
+  const fallbackInset = kiosk ? 46 : 36;
+  const topInset = nohud ? 0 : () => hudTop?.offsetHeight || fallbackInset;
   const camera = new Camera(
     scene.root,
     () => app.screen,

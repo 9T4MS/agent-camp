@@ -120,6 +120,9 @@ async function context(vp: Viewport): Promise<BrowserContext> {
     timezoneId: TIMEZONE,
     locale: "en-GB",
     extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
+    // every scene's server is a new origin, so each would keep its own service worker alive
+    // for the rest of the run; shots never need the offline cache
+    serviceWorkers: "block",
   });
   return contexts[vp];
 }

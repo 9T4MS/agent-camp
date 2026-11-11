@@ -3,7 +3,9 @@ import {
   gate,
   isAuthorized,
   makeSessionToken,
+  renewedSessionCookie,
   SESSION_COOKIE,
+  SESSION_RENEW_BELOW_MS,
   SESSION_TTL_MS,
   safeNext,
   verifySessionToken,
@@ -36,6 +38,9 @@ describe("viewer gate", () => {
       "/install.sh",
       "/fonts/a.woff2",
       "/icons/x.png",
+      "/manifest.webmanifest",
+      "/manifest-kiosk.webmanifest",
+      "/sw.js",
     ])
       expect(await gate(req(path), ENV, NOW)).toBeNull();
     const page = await gate(req("/login"), ENV, NOW);
@@ -99,5 +104,27 @@ describe("viewer gate", () => {
     expect(safeNext("https://evil.test")).toBe("/");
     expect(safeNext("/\\evil.test")).toBe("/");
     expect(safeNext(null)).toBe("/");
+  });
+
+  test("a page load renews a cookie that runs out within 15 days", async () => {
+    const token = await makeSessionToken("pw", NOW);
+    const page = (headers: Record<string, string>) =>
+      req("/", { headers: { ...html, ...headers } });
+    const cookie = { cookie: `${SESSION_COOKIE}=${token}` };
+    // fresh cookie: nothing to do
+    expect(await renewedSessionCookie(page(cookie), ENV, NOW + 1000)).toBeNull();
+    // under 15 days left: a new 30-day cookie
+    const later = NOW + SESSION_TTL_MS - SESSION_RENEW_BELOW_MS + 1000;
+    const renewed = await renewedSessionCookie(page(cookie), ENV, later);
+    expect(renewed).toContain("Max-Age=2592000");
+    const fresh = renewed!.split(";")[0]!.split("=")[1]!;
+    expect(await verifySessionToken("pw", fresh, later + SESSION_TTL_MS - 1)).toBe(true);
+    // not for API calls, expired cookies, bearer auth or a missing cookie
+    expect(
+      await renewedSessionCookie(req("/api/state", { headers: cookie }), ENV, later),
+    ).toBeNull();
+    expect(await renewedSessionCookie(page(cookie), ENV, NOW + SESSION_TTL_MS)).toBeNull();
+    expect(await renewedSessionCookie(page({ authorization: "Bearer pw" }), ENV, later)).toBeNull();
+    expect(await renewedSessionCookie(page({}), ENV, later)).toBeNull();
   });
 });

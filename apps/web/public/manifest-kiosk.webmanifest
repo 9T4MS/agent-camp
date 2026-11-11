@@ -1,0 +1,22 @@
+{
+  "id": "/?kiosk=1",
+  "name": "Agent Office Wall",
+  "short_name": "Office Wall",
+  "description": "Agent Office as a wall display: big text, auto camera tour, timelapse recorder.",
+  "start_url": "/?kiosk=1&recorder=1",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#181425",
+  "theme_color": "#181425",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -5,7 +5,7 @@
  */
 import installScript from "../../connector/install.sh";
 import { serverVersion } from "./core/app.ts";
-import { gate } from "./core/auth.ts";
+import { gate, withRenewedSession } from "./core/auth.ts";
 import type { Env } from "./office.ts";
 
 export { Office } from "./office.ts";
@@ -42,6 +42,6 @@ export default {
       return stub.fetch(request);
     }
 
-    return env.ASSETS.fetch(request);
+    return withRenewedSession(request, env, await env.ASSETS.fetch(request));
   },
 } satisfies ExportedHandler<Env>;
