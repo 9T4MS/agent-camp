@@ -18,6 +18,7 @@ import {
   type HelperSkin,
   hashString,
   type LookGenerator,
+  type LookMacState,
   type MessageData,
   type MessageOf,
   PERSON_GRACE_MS,
@@ -544,6 +545,22 @@ export class Hub {
     const c = b && this.connectors.get(b.clientId);
     if (!c || c.socketId !== socketId || c.personId !== personId || this.isStale(c, now)) return [];
     return [...(c.lookGenerators ?? [])];
+  }
+
+  /**
+   * Whether a Generate from a browser that proved `socketId` can go to the person's Mac, and
+   * if not, what would fix it (see LookMacState). Only says which kind of Mac is live; it never
+   * hands out another socket (lookGeneratorsOf stays the only door to one).
+   */
+  macLookState(personId: string, socketId: string | undefined, now: number): LookMacState {
+    if (this.lookGeneratorsOf(personId, socketId, now).length > 0) return "ready";
+    let live = false;
+    for (const c of this.connectors.values()) {
+      if (c.personId !== personId || !c.socketId || this.isStale(c, now)) continue;
+      if (c.lookGenerators?.length) return "reconfirm";
+      live = true;
+    }
+    return live ? "enable" : "offline";
   }
 
   /** Open sockets of a person's connectors that are still heartbeating. */

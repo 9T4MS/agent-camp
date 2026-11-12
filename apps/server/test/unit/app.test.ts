@@ -1456,6 +1456,97 @@ describe("OfficeApp look editor", () => {
       expect(String(bodies[0])).toContain("blue mohawk");
       expect(app.hub.state().people[0]!.avatar.look).toEqual(LOOK_FIXTURES.tracht.look);
     });
+
+    const lookInfo = async (app: OfficeApp, cookie = me) =>
+      (await (await app.handleHttp(
+        req("/api/people/tom/avatar", { headers: { cookie } }),
+      ))!.json()) as Record<string, unknown>;
+
+    test("studio: says why the Mac cannot draw (a new code, turn it on, offline), not 'ask the admin'", async () => {
+      const t = setup();
+      const { app, pending, advance } = t;
+      app.connectorMessage("s1", helloLocal("Tom"));
+      await Promise.all(pending);
+      me = await claimOn(t, "tom", "s1");
+      expect(await lookInfo(app)).toMatchObject({ mac: "ready", serverLooks: false });
+
+      // the connector reconnects (sleep, restart, update): the browser's proof is for the old
+      // socket, so a new code is the fix, and Generate says so
+      app.connectorClosed("s1");
+      app.connectorMessage("s2", helloLocal("Tom"));
+      expect(await lookInfo(app)).toMatchObject({ mac: "reconfirm", localLooks: [] });
+      const r = (await describeLook(app, "tom", "blue mohawk"))!;
+      expect(await r.json()).toMatchObject({ ok: false, result: "off", mac: "reconfirm" });
+      advance(31_000);
+      me = await claimOn(t, "tom", "s2");
+      expect(await lookInfo(app)).toMatchObject({ mac: "ready" });
+
+      // a Mac without a local AI (look_generator off, Claude Code not found)
+      app.connectorClosed("s2");
+      app.connectorMessage("s3", helloLocal("Tom", undefined, []));
+      expect(await lookInfo(app)).toMatchObject({ mac: "enable" });
+
+      // no Mac heard from lately (the person is still in the office, within the grace time)
+      advance(46_000);
+      expect(await lookInfo(app)).toMatchObject({ mac: "offline" });
+
+      // only the owner's browser learns about their Macs
+      expect(await lookInfo(app, "")).not.toHaveProperty("mac");
+    });
+
+    test("studio: how a Generate on the Mac ended, with the Mac's error", async () => {
+      const t = setup();
+      const { app, toConnector, pending, advance, sent } = t;
+      /** what every viewer heard: that it ended, never the Mac's error */
+      const generated = () =>
+        sent
+          .map((d) => JSON.parse(d) as { type: string; data: unknown })
+          .filter((m) => m.type === "look.generated")
+          .map((m) => m.data);
+      app.connectorMessage("s1", helloLocal("Tom"));
+      await Promise.all(pending);
+      me = await claimOn(t, "tom", "s1");
+      expect(await (await describeLook(app, "tom", "blue mohawk"))!.json()).toMatchObject({
+        result: "pending",
+      });
+      expect(await lookInfo(app)).not.toHaveProperty("lastGenerate"); // still drawing
+      expect(generated()).toEqual([]);
+      const ask = lookRequests(toConnector).at(-1)!;
+      app.connectorMessage(
+        "s1",
+        answer(ask.msg.data.requestId, { error: "exit 1: Invalid API key · Please run /login" }),
+      );
+      await Promise.all(pending);
+      expect(await lookInfo(app)).toMatchObject({
+        lastGenerate: {
+          result: "off",
+          by: "server",
+          macError: "exit 1: Invalid API key · Please run /login",
+        },
+      });
+      expect(generated()).toEqual([{ personId: "tom", result: "off", by: "server" }]);
+
+      // the next Generate starts over, and a look drawn on the Mac says so
+      advance(21_000);
+      app.connectorMessage("s1", beat);
+      await describeLook(app, "tom", "green mohawk");
+      expect(await lookInfo(app)).not.toHaveProperty("lastGenerate");
+      const again = lookRequests(toConnector).at(-1)!;
+      app.connectorMessage(
+        "s1",
+        answer(again.msg.data.requestId, { avatar: LOOK_FIXTURES.tracht }),
+      );
+      await Promise.all(pending);
+      const info = await lookInfo(app);
+      expect(info.lastGenerate).toEqual({ result: "ai", by: "mac" });
+      expect(generated().at(-1)).toEqual({ personId: "tom", result: "ai", by: "mac" });
+      expect((info.avatar as { look?: unknown }).look).toEqual(LOOK_FIXTURES.tracht.look);
+
+      // saving parts afterwards: that Generate is no longer the newest, nothing to report
+      advance(2_000);
+      expect((await put(app, "tom", { avatar: tomLook }))!.status).toBe(200);
+      expect(await lookInfo(app)).not.toHaveProperty("lastGenerate");
+    });
   });
 
   test("claim codes: sent only to that person's Macs, single use, limited tries", async () => {

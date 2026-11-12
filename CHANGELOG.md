@@ -7,6 +7,8 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- 🎨 Customize look is simpler: one tab to describe your look (a new AI look goes live right away, nothing to save) and one to pick parts (with its own Save). Saving no longer quietly swaps your AI look for a rough copy, and reopening shows the look you actually wear
+- When your Mac can't draw your look, the studio now says why and how to fix it (e.g. "your Mac reconnected: confirm it's you again", right there with a new code) instead of "ask the office admin"; if Claude Code fails on your Mac you see its error within seconds, not after a silent 5-minute wait
 - 🗂️ Kurt moved in: he has his own office next to the game corner. Now and then someone walks in to ask for their Klima ticket or contract; it's hard, he's doing this and that, and it will take time. He also keeps coming out of his office to ask people at their desks: "WHERE IS THE WIFI?!"
 - 🔥 Richard, the IT guy, moved into the wooden server cabin in the garden: in crocs and shorts he puts out the cabin whenever it catches fire again, and when an agent runs out of room he brings the dev a fresh RAM stick for the server rack (click him!)
 - 🐈 Kiwi and Eloy moved in: Kiwi has the zoomies and races from one end of the office to the other, and Eloy goes from desk to desk and won't stop meowing at the devs

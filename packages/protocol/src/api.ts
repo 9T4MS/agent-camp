@@ -21,6 +21,7 @@ import {
   InteractionKind,
   InteractionText,
   isCatInteraction,
+  LookGenerated,
   LookGenerator,
   needsSpot,
   PersonId,
@@ -59,6 +60,25 @@ export const AvatarEditRequest = z.object({
 });
 export type AvatarEditRequest = z.infer<typeof AvatarEditRequest>;
 
+/**
+ * Whether a Generate from this browser can go to the person's own Mac, and if not, why:
+ * ready = the Mac this browser proved is live and has a local AI; reconfirm = a Mac of theirs
+ * with a local AI is live, but not the one this browser proved (it reconnected since "This is
+ * me", or the browser never proved one): a new code fixes it; enable = their live Macs have no
+ * local AI (look_generator off or Claude Code not found); offline = no Mac of theirs is live.
+ */
+export const LookMacState = z.enum(["ready", "reconfirm", "enable", "offline"]);
+export type LookMacState = z.infer<typeof LookMacState>;
+
+/** How the newest studio Generate drawn on a Mac ended (by = who drew the look). */
+export const GenerateOutcome = z.object({
+  result: LookGenerated.shape.data.shape.result,
+  by: LookGenerated.shape.data.shape.by,
+  /** why the Mac did not draw it (its error, no answer, reconnected meanwhile) */
+  macError: z.string().max(300).optional(),
+});
+export type GenerateOutcome = z.infer<typeof GenerateOutcome>;
+
 export const AvatarEditResponse = z.object({
   ok: z.boolean(),
   /** the look now shown (for a reset: the current one until the new automatic look lands) */
@@ -66,10 +86,16 @@ export const AvatarEditResponse = z.object({
   custom: z.boolean(),
   /** whether a description can become a look (a local AI on their Mac or GENUI_PROVIDER) */
   aiLooks: z.boolean().optional(),
+  /** whether the office server itself draws looks (GENUI_PROVIDER is set) */
+  serverLooks: z.boolean().optional(),
   /** local AI tools on this person's live Macs that draw looks on their own subscription */
   localLooks: z.array(LookGenerator).optional(),
   /** the person's look description; only sent to that person's own browser */
   description: z.string().optional(),
+  /** own browser only: can its Generate go to their Mac (see LookMacState) */
+  mac: LookMacState.optional(),
+  /** own browser only: how the newest Generate sent to their Mac ended (absent while drawing) */
+  lastGenerate: GenerateOutcome.optional(),
 });
 export type AvatarEditResponse = z.infer<typeof AvatarEditResponse>;
 
@@ -99,6 +125,8 @@ export const LookDescribeResponse = z.object({
    */
   result: z.enum(["ai", "off", "failed", "pending", "superseded"]),
   generator: LookGenerator.optional(),
+  /** when the Mac did not take it: why (see LookMacState), so the studio can say how to fix it */
+  mac: LookMacState.optional(),
 });
 export type LookDescribeResponse = z.infer<typeof LookDescribeResponse>;
 

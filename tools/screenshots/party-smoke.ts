@@ -179,7 +179,7 @@ try {
     const response = page.waitForResponse(
       (r) => r.request().method() === "PUT" && r.url().includes("/avatar"),
     );
-    await page.getByRole("button", { name: "Save look", exact: true }).click();
+    await page.getByRole("button", { name: "Save parts", exact: true }).click();
     assert.equal((await response).status(), 200);
   };
   /** Look studio rows are arrow carousels: click "next" until the row shows `value`. */
@@ -248,6 +248,8 @@ try {
     await page.locator(".me-chip").click();
     await page.getByRole("button", { name: "Customize look", exact: false }).click();
     await page.locator(".look-studio").waitFor();
+    // the carousels live on the "Pick parts" tab (an AI look opens on "Describe it")
+    await page.getByRole("tab", { name: "Pick parts", exact: false }).click();
   };
   await page.locator(".me-chip").click();
   await page.screenshot({ path: `${out}/me-menu-desktop.png` });

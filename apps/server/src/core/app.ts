@@ -8,6 +8,7 @@ import {
   AvatarEditRequest,
   type AvatarEditResponse,
   envelope,
+  type GenerateOutcome,
   HistoryRow,
   InteractRequest,
   type InteractResponse,
@@ -128,6 +129,14 @@ type PendingClaim = { codes: ClaimCode[]; exp: number; tries: number };
  * look replaces a picked look only for that one, so a late answer never undoes a newer choice.
  */
 const studioKey = (personId: string) => `look.studio.${personId}`;
+/**
+ * How a studio Generate that went to the person's Mac ended (`GenerateOutcome` plus the
+ * `studio` token it answered): a `look.generated` broadcast tells the studio it is there, so a
+ * Mac that failed (not logged in, timed out, ...) is reported at once instead of after a
+ * silent five-minute wait.
+ */
+const outcomeKey = (personId: string) => `look.outcome.${personId}`;
+type StoredOutcome = GenerateOutcome & { studio: string };
 
 const POKE_TEXT = {
   wave: "waved at you 👋",
@@ -399,17 +408,71 @@ export class OfficeApp {
     }
     this.store.kvPut(pendingLookKey(g.personId), "");
     const by = `local ${g.generator}`;
-    let res =
+    const res =
       fromMac && g.avatar !== undefined ? this.genui.accept(g.avatar, pending.job, by) : null;
-    if (res) this.hub.log(`genui ${by} ${g.personId} drew a new look`);
-    else if (!fromMac) res = await this.serverLook(pending.job, pending.studio);
-    else {
-      this.hub.log(
-        `look ${g.personId}: their Mac could not draw it (${g.error ?? "unusable answer"}), trying the server`,
-      );
-      res = await this.serverLook(pending.job, pending.studio);
+    if (res) {
+      this.hub.log(`genui ${by} ${g.personId} drew a new look`);
+      this.finishMacLook(pending, res);
+      return;
     }
-    this.applyLook(pending.job, res, pending.studio);
+    const macError = !fromMac
+      ? "your Mac reconnected while drawing"
+      : g.error
+        ? g.error
+        : g.avatar !== undefined
+          ? "its look did not fit the catalog"
+          : "it gave no look";
+    if (fromMac)
+      this.hub.log(
+        `look ${g.personId}: their Mac could not draw it (${macError}), trying the server`,
+      );
+    this.finishMacLook(pending, await this.serverLook(pending.job, pending.studio), macError);
+  }
+
+  /**
+   * Apply the answer to a Generate that went to the person's Mac and remember how it ended for
+   * the studio (outcomeKey). `macError` set = the Mac did not draw it, `res` is the server's.
+   */
+  private finishMacLook(pending: PendingLook, res: AvatarResult, macError?: string): void {
+    const shown = this.applyLook(pending.job, res, pending.studio);
+    if (!pending.studio) return;
+    const outcome: StoredOutcome = {
+      studio: pending.studio,
+      by: macError === undefined ? "mac" : "server",
+      result: this.generateResult(shown, res),
+      ...(macError !== undefined ? { macError: macError.slice(0, 300) } : {}),
+    };
+    this.store.kvPut(outcomeKey(pending.job.personId), JSON.stringify(outcome));
+    // the studio waits for this instead of polling; it then GETs the details (macError) once.
+    // A Generate already replaced (newer one, saved parts) has nothing to report (lastGenerate)
+    if (this.store.kvGet(studioKey(pending.job.personId)) !== pending.studio) return;
+    const done: MessageOf<"look.generated"> = envelope("look.generated", {
+      personId: pending.job.personId,
+      result: outcome.result,
+      by: outcome.by,
+    });
+    this.transport.broadcast(JSON.stringify(done));
+  }
+
+  /** The studio's word for how a Generate ended (see LookDescribeResponse.result). */
+  private generateResult(shown: boolean, res: AvatarResult): GenerateOutcome["result"] {
+    if (shown) return "ai";
+    if (res.source === "ai") return "superseded";
+    return this.genui.providerId === "off" ? "off" : "failed";
+  }
+
+  /** How the newest studio Generate sent to the person's Mac ended; null while still drawing. */
+  private lastGenerate(personId: string): GenerateOutcome | null {
+    try {
+      const o = JSON.parse(
+        this.store.kvGet(outcomeKey(personId)) || "null",
+      ) as StoredOutcome | null;
+      if (!o || o.studio !== this.store.kvGet(studioKey(personId))) return null;
+      const { studio: _s, ...outcome } = o;
+      return outcome;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -424,7 +487,7 @@ export class OfficeApp {
     this.store.kvPut(pendingLookKey(personId), "");
     if (pending.studio && this.requestLocalLook(pending.job, pending.studio, pending.mac)) return;
     const p = this.serverLook(pending.job, pending.studio)
-      .then((res) => this.applyLook(pending.job, res, pending.studio))
+      .then((res) => this.finishMacLook(pending, res, "your Mac did not answer"))
       .catch((err) => console.error("avatar job failed", err));
     this.transport.waitUntil?.(p);
   }
@@ -651,13 +714,21 @@ export class OfficeApp {
         const mine = proof?.personId === personId;
         // the Mac this browser proved, the only one its Generate goes to
         const localLooks = mine ? this.hub.lookGeneratorsOf(personId, proof.mac, this.now()) : [];
+        const lastGenerate = mine ? this.lastGenerate(personId) : null;
         return json({
           ok: true,
           avatar: p.avatar,
           custom: this.hub.isCustomLook(personId),
           aiLooks: this.genui.providerId !== "off" || localLooks.length > 0,
+          serverLooks: this.genui.providerId !== "off",
           localLooks,
-          ...(mine ? { description: this.hub.descriptionOf(personId) } : {}),
+          ...(mine
+            ? {
+                description: this.hub.descriptionOf(personId),
+                mac: this.hub.macLookState(personId, proof.mac, this.now()),
+                ...(lastGenerate ? { lastGenerate } : {}),
+              }
+            : {}),
         } satisfies AvatarEditResponse);
       }
       if (method === "PUT") {
@@ -1064,18 +1135,19 @@ export class OfficeApp {
         } satisfies LookDescribeResponse);
     }
 
+    // why their Mac did not take it, read before the server's AI call (the Mac may come and go)
+    const macState = this.hub.macLookState(personId, proven, now);
     const res = await this.serverLook(job, studio);
     // a new AI look replaces a look picked in the editor: that is what "Generate" asked for
     const shown = this.applyLook(job, res, studio);
     const avatar = current() ?? res.avatar;
-    const result = shown
-      ? "ai"
-      : res.source === "ai"
-        ? "superseded"
-        : this.genui.providerId === "off"
-          ? "off"
-          : "failed";
-    return json({ ok: result === "ai", avatar, result } satisfies LookDescribeResponse);
+    const result = this.generateResult(shown, res);
+    return json({
+      ok: result === "ai",
+      avatar,
+      result,
+      mac: macState,
+    } satisfies LookDescribeResponse);
   }
 
   private async interact(req: Request): Promise<Response> {
