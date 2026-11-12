@@ -563,7 +563,7 @@ describe("OfficeApp interactions", () => {
     const { post } = withPerson();
     expect((await post({ kind: "feed", catId: 1 }))!.status).toBe(400);
     expect((await post({ kind: "laser", x: 10, y: 99_999 }))!.status).toBe(400);
-    expect((await post({ kind: "pet", catId: 12 }))!.status).toBe(400);
+    expect((await post({ kind: "pet", catId: 14 }))!.status).toBe(400);
   });
 
   test("rate limits per viewer and per poked person", async () => {

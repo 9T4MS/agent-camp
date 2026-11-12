@@ -1199,6 +1199,16 @@ export class CharacterManager {
     return out;
   }
 
+  /** Every seated, online person at a desk, whatever their agent is doing (Eloy meows at them). */
+  devs(): WaitSpot[] {
+    const out: WaitSpot[] = [];
+    for (const c of this.chars.values()) {
+      if (c.mode !== "seated" || this.isOffline(c) || !c.sprite.visible) continue;
+      out.push({ x: c.x, y: c.y, id: c.sessionId });
+    }
+    return out;
+  }
+
   /** A paged person answers from their chair. */
   answerPage(sessionId: string, text: string) {
     const c = this.chars.get(sessionId);

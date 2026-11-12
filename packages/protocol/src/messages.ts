@@ -339,10 +339,10 @@ export function needsSpot(kind: InteractionKind): boolean {
 /** At most this many office cats (one more for every two people, see the web client). */
 export const MAX_CATS = 10;
 /**
- * Cats who live in the office whoever is in (Cece and Jess, see the web client). They take the
- * cat ids right after the MAX_CATS colony slots.
+ * Cats who live in the office whoever is in (Cece, Jess, Kiwi and Eloy, see the web client).
+ * They take the cat ids right after the MAX_CATS colony slots.
  */
-export const RESIDENT_CATS = 2;
+export const RESIDENT_CATS = 4;
 /** Every cat id there is: the colony slots, then the residents. */
 export const CAT_SLOTS = MAX_CATS + RESIDENT_CATS;
 /** Which office cat (slot 0 is the original one, MAX_CATS.. are the residents). */

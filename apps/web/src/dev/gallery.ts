@@ -176,7 +176,7 @@ export function showGallery(app: Application) {
       });
     });
   });
-  // the resident cats (Cece and Jess) below the colony coats
+  // the resident cats (Cece, Jess, Kiwi, Eloy) below the colony coats
   Object.values(RESIDENT_COATS).forEach((coat, k) => {
     catTextures(coat).forEach((t, i) => {
       const s = new Sprite(t);

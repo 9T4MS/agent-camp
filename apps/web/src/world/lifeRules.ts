@@ -339,6 +339,57 @@ export function catAnswer(meal: CatMeal | null, cat: string, r1: number, r2: num
   return { give, text: lines[Math.min(lines.length - 1, Math.floor(r2 * lines.length))]! };
 }
 
+// ---- Kiwi (the zoomies) and Eloy (never stops meowing) ------------------------------------
+const pick = <T>(lines: readonly T[], r: number): T =>
+  lines[Math.min(lines.length - 1, Math.floor(Math.max(0, r) * lines.length))]!;
+
+/** How fast Kiwi zooms compared to a cat on an errand (40 px/s). */
+export const KIWI_ZOOM_SPEED = 160;
+/** Kiwi only zooms to spots at least this many tiles away, else it would barely be a zoom. */
+export const KIWI_MIN_ZOOM_TILES = 12;
+
+/** Is this tile far enough from Kiwi (both in tiles) for a proper zoom? */
+export function kiwiZoomWorthy(from: { x: number; y: number }, to: { x: number; y: number }) {
+  return Math.hypot(to.x - from.x, to.y - from.y) >= KIWI_MIN_ZOOM_TILES;
+}
+
+const KIWI_SHOUTS = ["ZOOM!", "NYOOM", "WHEEE!", "BRRRM", "GOTTA GO FAST", "ZOOMIES!"] as const;
+/** What Kiwi yells while racing past. */
+export function kiwiShout(r: number): string {
+  return pick(KIWI_SHOUTS, r);
+}
+
+const ELOY_MEOWS = ["MIAU!", "MIAU!", "MIAAAU", "MIAU?", "MIAU MIAU", "MRRAU!", "MEOW!"] as const;
+/** One of Eloy's meows: `r` in [0, 1). */
+export function eloyMeow(r: number): string {
+  return pick(ELOY_MEOWS, r);
+}
+
+/** What the cat card says Eloy is up to. */
+export function eloyLabel(who: string): string {
+  return `meowing at ${who}`;
+}
+
+/**
+ * How a dev answers Eloy's meowing (`cat` = its name): mostly worn down, now and then they
+ * meow back. `r` in [0, 1).
+ */
+export function eloyAnswer(cat: string, r: number): string {
+  const name = cat.toUpperCase();
+  return pick(
+    [
+      `${name}, PLEASE`,
+      "SHHH, I'M ON A CALL",
+      `YES ${name}. MIAU.`,
+      "I CAN'T HEAR MY AGENT",
+      `WHAT IS IT, ${name}?`,
+      "OK OK, PETS",
+      "NOISE-CANCELLING: ON",
+    ],
+    r,
+  );
+}
+
 /** The cat holds a meeting: Fridays 17:00-17:45 office time. */
 export function catBossWindow(dayKey: string, hour: number): boolean {
   return weekdayOf(dayKey) === 5 && hour >= 17 && hour < 17.75;

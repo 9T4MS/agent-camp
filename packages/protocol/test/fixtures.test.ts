@@ -263,8 +263,9 @@ describe("cat interactions", () => {
   });
   test("cat ids and spots are bounded", () => {
     expect(ok({ kind: "pet", catId: CAT_SLOTS })).toBe(false);
-    // the resident cats (Cece and Jess) come right after the colony slots
+    // the resident cats (Cece, Jess, Kiwi, Eloy) come right after the colony slots
     expect(ok({ kind: "pet", catId: MAX_CATS })).toBe(true);
+    expect(CAT_SLOTS).toBe(MAX_CATS + 4);
     expect(ok({ kind: "feed", catId: CAT_SLOTS - 1, x: 10, y: 10 })).toBe(true);
     expect(ok({ kind: "pet", catId: -1 })).toBe(false);
     expect(ok({ kind: "pet", catId: 1.5 })).toBe(false);

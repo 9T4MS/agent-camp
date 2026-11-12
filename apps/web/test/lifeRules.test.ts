@@ -8,12 +8,18 @@ import {
   catBegLine,
   catCount,
   catMealFor,
+  eloyAnswer,
+  eloyLabel,
+  eloyMeow,
   findClearedSession,
   forcedSky,
   happyHour,
   hourSky,
   isClearRestart,
   isFullMoon,
+  KIWI_MIN_ZOOM_TILES,
+  kiwiShout,
+  kiwiZoomWorthy,
   monthOf,
   moonAge,
   parseForcedEvent,
@@ -90,6 +96,22 @@ describe("office life rules", () => {
     expect(catAnswer(null, "Jess", 0, 0)).toEqual({ give: true, text: "OK, ONE TREAT" });
     expect(catAnswer(null, "Cece", 0.99, 0)).toEqual({ give: false, text: "CECE, YOU JUST ATE!" });
     expect(catAnswer("lunch", "Cece", 0, 0).text).toBe("LUNCH, COMING UP");
+  });
+  test("Kiwi only zooms to far spots and yells about it", () => {
+    expect(kiwiZoomWorthy({ x: 10, y: 10 }, { x: 12, y: 11 })).toBe(false);
+    expect(kiwiZoomWorthy({ x: 10, y: 10 }, { x: 10 + KIWI_MIN_ZOOM_TILES, y: 10 })).toBe(true);
+    expect(kiwiZoomWorthy({ x: 30, y: 5 }, { x: 40, y: 20 })).toBe(true);
+    expect(kiwiShout(0)).toBe("ZOOM!");
+    expect(kiwiShout(0.999999).length).toBeGreaterThan(0);
+  });
+  test("Eloy meows at everyone and they answer", () => {
+    expect(eloyMeow(0)).toBe("MIAU!");
+    for (const r of [0, 0.5, 0.999999, 1]) {
+      expect(eloyMeow(r)).toMatch(/MIA|MEOW|MRRAU/);
+      expect(eloyAnswer("Eloy", r).length).toBeGreaterThan(0);
+    }
+    expect(eloyAnswer("Eloy", 0)).toBe("ELOY, PLEASE");
+    expect(eloyLabel("Anna")).toBe("meowing at Anna");
   });
   test("tombstone label", () => {
     expect(ripLabel("web", 42 * 60_000)).toBe("web 42M");

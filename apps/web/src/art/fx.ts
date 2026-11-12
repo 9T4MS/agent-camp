@@ -237,6 +237,8 @@ export type CatCoat = {
   tabby?: boolean;
   /** a lighter head than the body (its tabby stripes then come in `main`) */
   head?: string;
+  /** just a white muzzle, chin and a dab on the chest (no white legs, unlike `bib`) */
+  muzzle?: string;
 };
 /** Coats of the office cats; slot 0 (the original cat) is the orange tabby. */
 export const CAT_COATS: readonly CatCoat[] = [
@@ -280,10 +282,12 @@ export const CAT_COATS: readonly CatCoat[] = [
 ];
 
 /**
- * The two resident cats, always in the office and always hungry (drawn from photos of them):
- * Cece, a mottled brown tabby with a lighter head, a white V up her face, white chest, belly
- * and paws and a ringed tail; Jess, jet black with a white muzzle and chest, white front legs
- * and tall white hind socks.
+ * The resident cats, always in the office (drawn from photos of them): Cece, a mottled brown
+ * tabby with a lighter head, a white V up her face, white chest, belly and paws and a ringed
+ * tail; Jess, jet black with a white muzzle and chest, white front legs and tall white hind
+ * socks; Kiwi, a young light brown tabby who is mostly white underneath (a white face under a
+ * tabby cap, white chest, belly and all four paws); Eloy, a grey-brown mackerel tabby with
+ * just a white muzzle and chin.
  */
 export const RESIDENT_COATS = {
   cece: {
@@ -305,6 +309,26 @@ export const RESIDENT_COATS = {
     belly: C.white,
     eye: C.leaf,
     bib: { color: C.white, blaze: false, belly: false, socks: 2 },
+  },
+  kiwi: {
+    id: "kiwi",
+    label: "tabby & white",
+    main: C.tan,
+    stripe: C.bark,
+    belly: C.white,
+    eye: C.lemon,
+    bib: { color: C.white, blaze: true, belly: true, socks: 2 },
+    tabby: true,
+  },
+  eloy: {
+    id: "eloy",
+    label: "grey-brown tabby",
+    main: C.slate,
+    stripe: C.cocoa,
+    belly: C.grey,
+    eye: C.amber,
+    tabby: true,
+    muzzle: C.white,
   },
 } as const satisfies Record<string, CatCoat>;
 
@@ -328,6 +352,7 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
   const tabby = coat.tabby === true;
   const H = coat.head ?? O;
   const HS = coat.head ? O : S;
+  const M = coat.muzzle;
   const drawWalk = (f: number) => {
     const step = f % 2;
     pc.rect(5, 5, 9, 4, O); // body
@@ -380,6 +405,13 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
       pc.vline(11 + step, 12 - socks, socks, W);
       pc.vline(13 - step, 12 - socks, socks, W);
     }
+    if (M) {
+      // white muzzle and chin, a dab on the chest
+      pc.set(2, 5, M);
+      pc.set(4, 5, M);
+      pc.rect(2, 6, 3, 1, M);
+      pc.set(5, 7, M);
+    }
   };
   for (let f = 0; f < 6; f++) {
     pc.at(f * fw + 1, 1);
@@ -413,6 +445,7 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
         pc.set(7, 10, W);
         if (blaze) pc.set(3, 7, W);
       }
+      if (M) pc.hline(2, 9, 3, M);
       pc.hline(2, 8, 1, C.night);
       pc.hline(4, 8, 1, C.night);
       pc.hline(8, 11, 6, S);
@@ -457,6 +490,13 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
         pc.set(8, 3, W);
         if (blaze) pc.rect(6, 1, 2, 2, W);
         pc.rect(5, 8, 4, 4, W);
+      }
+      if (M) {
+        pc.hline(5, 4, 4, M);
+        pc.set(5, 3, M);
+        pc.set(8, 3, M);
+        pc.set(6, 5, M);
+        pc.set(7, 6, M);
       }
       if (f === 2) {
         pc.rect(10, 10, 4, 2, O);
@@ -528,6 +568,12 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
       pc.set(5, 11, W);
       pc.vline(6, 12 - socks, socks, W);
       pc.vline(9, 12 - socks, socks, W);
+    }
+    if (M) {
+      pc.set(2, 3, M);
+      pc.set(4, 3, M);
+      pc.hline(2, 4, 3, M);
+      pc.set(4, 5, M);
     }
     if (open) pc.set(3, 4, C.red); // "MEOW!"
     // front legs reaching for the treat, up higher while meowing

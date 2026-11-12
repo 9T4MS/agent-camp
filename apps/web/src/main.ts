@@ -209,6 +209,8 @@ async function boot() {
     },
     // Cece and Jess beg the people at working agents for treats and meals
     begTargets: () => chars.pageable(),
+    // Eloy meows at every dev at a desk
+    devs: () => chars.devs(),
     agentName: (sessionId) => {
       const personId = model.sessions.get(sessionId)?.personId;
       return (personId && model.people.get(personId)?.name) || "an agent";
@@ -673,7 +675,12 @@ async function boot() {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(src, frame.frame.x, frame.frame.y, 18, 14, 0, 0, 72, 56);
     }
-    const coat = cat.hungry ? `${cat.coat.label}, always hungry` : cat.coat.label;
+    const quirk = {
+      hungry: "always hungry",
+      zoomies: "has the zoomies",
+      chatty: "never stops meowing",
+    } as const;
+    const coat = cat.trait ? `${cat.coat.label}, ${quirk[cat.trait]}` : cat.coat.label;
     return { slot, name: cat.name, coat, status: cat.status(), portrait };
   };
   if (!kiosk)

@@ -1,18 +1,27 @@
 /**
  * The office cats: one, plus one for every two people (`catCount`), up to MAX_CATS. Every
  * viewer sees cat #k with the same name and coat; new cats walk in through the main door and
- * surplus cats walk out of it. On top of those live Cece and Jess (`RESIDENTS`, slots MAX_CATS
- * and up), always in, always hungry: they take turns begging working agents for treats and, at
- * mealtimes, for a proper meal. Also owns the cat toys viewers drop: food bowls, yarn balls
+ * surplus cats walk out of it. On top of those live the residents (`RESIDENTS`, slots MAX_CATS
+ * and up), always in: Cece and Jess, always hungry, take turns begging working agents for
+ * treats and, at mealtimes, for a proper meal; Kiwi has the zoomies; Eloy goes from dev to dev
+ * and meows at every one of them. Also owns the cat toys viewers drop: food bowls, yarn balls
  * and the laser dot.
  */
 import { CAT_SLOTS, MAX_CATS, seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
 import { bowlTextures, laserTextures, treatTexture, yarnTextures } from "../art/fun.ts";
 import { CAT_COATS, type CatCoat, RESIDENT_COATS } from "../art/fx.ts";
-import { OfficeCat, type Perch, type WaitSpot } from "./cat.ts";
+import { type CatTrait, OfficeCat, type Perch, type WaitSpot } from "./cat.ts";
 import type { Effects } from "./effects.ts";
-import { catAnswer, catBegLabel, catBegLine, catMealFor } from "./lifeRules.ts";
+import {
+  catAnswer,
+  catBegLabel,
+  catBegLine,
+  catMealFor,
+  eloyAnswer,
+  eloyLabel,
+  eloyMeow,
+} from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
 
 export const CAT_NAMES = [
@@ -43,10 +52,15 @@ const HOME_TILES: readonly Point[] = [
   { x: 54, y: 24 },
 ];
 
-/** The resident cats, in slot order from MAX_CATS; they hang around the fridge. */
-export const RESIDENTS: readonly { name: string; coat: CatCoat; home: Point }[] = [
-  { name: "Cece", coat: RESIDENT_COATS.cece, home: { x: 35, y: 5 } },
-  { name: "Jess", coat: RESIDENT_COATS.jess, home: { x: 36, y: 6 } },
+/**
+ * The resident cats, in slot order from MAX_CATS: Cece and Jess hang around the fridge, Kiwi
+ * in the game corner, Eloy in the lounge next to the desks.
+ */
+export const RESIDENTS: readonly { name: string; coat: CatCoat; home: Point; trait: CatTrait }[] = [
+  { name: "Cece", coat: RESIDENT_COATS.cece, home: { x: 35, y: 5 }, trait: "hungry" },
+  { name: "Jess", coat: RESIDENT_COATS.jess, home: { x: 36, y: 6 }, trait: "hungry" },
+  { name: "Kiwi", coat: RESIDENT_COATS.kiwi, home: { x: 43, y: 25 }, trait: "zoomies" },
+  { name: "Eloy", coat: RESIDENT_COATS.eloy, home: { x: 46, y: 9 }, trait: "chatty" },
 ];
 
 /** An agent a resident cat can beg from: a seated person with a working or waiting agent. */
@@ -62,6 +76,8 @@ export type ColonyHooks = {
   onVisit?: (personId: string) => void;
   /** agents the resident cats beg from (`id` = session id) */
   begTargets?: () => BegTarget[];
+  /** every dev at a desk (`id` = session id): Eloy meows at all of them, agent busy or not */
+  devs?: () => BegTarget[];
   /** who sits at that agent (for the cat card) */
   agentName?: (sessionId: string) => string;
   /** the agent's person answers a begging cat */
@@ -73,6 +89,10 @@ const BEG_GAP: readonly [number, number] = [10, 22];
 const BEG_GAP_REFUSED: readonly [number, number] = [5, 10];
 /** How long a resident cat sits up next to an agent before it answers. */
 const BEG_STAY: readonly [number, number] = [8, 13];
+/** Eloy: a meow every this many seconds at a dev, this long per dev, this long in between. */
+const ELOY_EVERY: readonly [number, number] = [1, 1.5];
+const ELOY_STAY: readonly [number, number] = [6, 10];
+const ELOY_GAP: readonly [number, number] = [2, 5];
 
 type Bowl = { sprite: Sprite; food: number; t: number; emptyAt: number | null };
 type Yarn = {
@@ -120,6 +140,9 @@ export class CatColony {
   private begIn = new Map<number, number>();
   /** resident slot -> the agent (session id) it begs from or just begged from */
   private begAt = new Map<number, string>();
+  /** Eloy: seconds until he walks over to the next dev, and the devs he meowed at this round */
+  private chatIn = new Map<number, number>();
+  private chatted = new Map<number, Set<string>>();
   /** office hour (mealtimes); main.ts wires the office clock */
   clock: () => number = () => 10;
 
@@ -131,9 +154,10 @@ export class CatColony {
     private readonly hooks: ColonyHooks,
   ) {
     this.spawn(0, false);
-    RESIDENTS.forEach((_, i) => {
+    RESIDENTS.forEach((r, i) => {
       this.spawn(MAX_CATS + i, false);
-      this.begIn.set(MAX_CATS + i, 6 + i * 7 + this.rand() * 6);
+      if (r.trait === "hungry") this.begIn.set(MAX_CATS + i, 6 + i * 7 + this.rand() * 6);
+      if (r.trait === "chatty") this.chatIn.set(MAX_CATS + i, 3 + this.rand() * 3);
     });
   }
 
@@ -192,7 +216,7 @@ export class CatColony {
         ? { x: t.x * TILE + 4, y: t.y * TILE + 12 }
         : { x: t.x * TILE + 8, y: t.y * TILE + 12 };
     const spec = resident
-      ? { slot, name: resident.name, coat: resident.coat, home, hungry: true }
+      ? { slot, name: resident.name, coat: resident.coat, home, trait: resident.trait }
       : { slot, name: CAT_NAMES[slot]!, coat: CAT_COATS[SLOT_COATS[slot]!]!, home };
     const cat = new OfficeCat(
       spec,
@@ -441,6 +465,61 @@ export class CatColony {
     this.dot = null;
   }
 
+  // ---- Eloy ---------------------------------------------------------------------------------
+  /** Eloy, when free and his break is over, walks to the next dev and meows at them. */
+  private updateChatter(dt: number) {
+    const devs = this.hooks.devs;
+    if (!devs) return;
+    for (const [slot, left] of this.chatIn) {
+      const cat = this.get(slot);
+      if (!cat || cat.busy || cat.guarding || cat.heading) continue;
+      if (left > 0) {
+        this.chatIn.set(slot, left - dt);
+        continue;
+      }
+      this.chatIn.set(slot, this.between(ELOY_GAP));
+      this.chatAt(cat, devs());
+    }
+  }
+
+  /** The next dev on Eloy's round (everyone once, then round again), not one a beggar is at. */
+  private chatAt(cat: OfficeCat, all: BegTarget[]) {
+    const taken = new Set<string>();
+    for (const [slot, id] of this.begAt) if (this.get(slot)?.busy) taken.add(id);
+    const free = all.filter((t) => !taken.has(t.id));
+    if (free.length === 0) return;
+    let done = this.chatted.get(cat.slot);
+    if (!done) {
+      done = new Set();
+      this.chatted.set(cat.slot, done);
+    }
+    let pool = free.filter((t) => !done.has(t.id));
+    if (pool.length === 0) {
+      // everyone heard him: a new round (just not the same dev twice in a row)
+      const last = this.begAt.get(cat.slot);
+      done.clear();
+      pool = free.length > 1 ? free.filter((t) => t.id !== last) : free;
+    }
+    const target = pool[Math.floor(this.rand() * pool.length)]!;
+    const who = this.hooks.agentName?.(target.id) ?? "a dev";
+    const ok = cat.assign({
+      kind: "beg",
+      seat: { x: target.x, y: target.y },
+      label: eloyLabel(who),
+      ask: () => eloyMeow(this.rand()),
+      every: ELOY_EVERY,
+      stay: this.between(ELOY_STAY),
+      still: () => (this.hooks.devs?.() ?? []).some((t) => t.id === target.id),
+      onDone: (c, asked) => {
+        if (asked) this.hooks.agentSays?.(target.id, eloyAnswer(c.name, this.rand()));
+      },
+    });
+    if (ok) {
+      done.add(target.id);
+      this.begAt.set(cat.slot, target.id);
+    }
+  }
+
   // ---- Cece and Jess ----------------------------------------------------------------------
   /** Free resident cats whose break is over go and beg the next agent. */
   private updateBegging(dt: number) {
@@ -515,6 +594,7 @@ export class CatColony {
 
   update(dt: number, time: number) {
     this.updateBegging(dt);
+    this.updateChatter(dt);
     for (const c of this.cats()) c.update(dt, time);
     for (let i = this.leaving.length - 1; i >= 0; i--) {
       const c = this.leaving[i]!;

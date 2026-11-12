@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- 🐈 Kiwi and Eloy moved in: Kiwi has the zoomies and races from one end of the office to the other, and Eloy goes from desk to desk and won't stop meowing at the devs
 - 🍳 The head of sales moved in: he cooks Eierspeis in the kitchen (grab a plate while he's at the stove) and runs out to his stand in the garden whenever a client shows up, to talk the price up
 - ⏱️ The head of development got her own head desk with a time clock: people punch their hours there, and she walks over to anyone who hasn't
 - 🙇 Every full hour all agents jump up, run to the head desk, line up and bow to her one by one

@@ -3,9 +3,11 @@
  * next to anyone waiting for 5+ minutes), meows and purrs hearts when clicked, and now and
  * then pounces on a finished helper bot (crunch). Viewers can also give it something to do
  * (`CatTask`): eat from a bowl, chase a laser dot or a yarn ball, or go and sit on someone's
- * desk. A `hungry` cat (the residents Cece and Jess) also sits up and begs next to working
- * agents, snaps up tossed treats and is never full for long. `CatColony` (colony.ts) owns all
- * the cats and the toys.
+ * desk. The resident cats have a `trait`: a `hungry` one (Cece, Jess) also sits up and begs
+ * next to working agents, snaps up tossed treats and is never full for long; `zoomies` (Kiwi)
+ * races from one end of the office to the other and hardly ever naps; `chatty` (Eloy) meows all
+ * the time and goes from dev to dev to meow at them. `CatColony` (colony.ts) owns all the cats
+ * and the toys.
  */
 import { seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
@@ -14,8 +16,10 @@ import { heartTexture, textBubbleTexture } from "../art/fun.ts";
 import { CAT, type CatCoat, catTextures, zzzTextures } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
 import type { Effects } from "./effects.ts";
+import { eloyMeow, KIWI_ZOOM_SPEED, kiwiShout, kiwiZoomWorthy } from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
 import { findPath } from "./pathing.ts";
+import { indoorTile } from "./portalRules.ts";
 
 export type WaitSpot = Point & { id: string };
 
@@ -46,10 +50,17 @@ export type CatTask =
       stay: number;
       still: () => boolean;
       onDone: (cat: OfficeCat, asked: boolean) => void;
+      /** seconds between two asks (default 2.6..3.8) */
+      every?: readonly [number, number];
     };
 
-/** `hungry`: one of the resident cats (Cece, Jess), never full for long. */
-export type CatSpec = { slot: number; name: string; coat: CatCoat; home: Point; hungry?: boolean };
+/**
+ * What makes a resident cat special: `hungry` (Cece, Jess) begs and is never full for long,
+ * `zoomies` (Kiwi) races around the office, `chatty` (Eloy) never stops meowing.
+ */
+export type CatTrait = "hungry" | "zoomies" | "chatty";
+
+export type CatSpec = { slot: number; name: string; coat: CatCoat; home: Point; trait?: CatTrait };
 
 type Mode = "sleep" | "sit" | "walk" | "pounce" | "smug" | "eat" | "perch" | "beg";
 
@@ -58,8 +69,8 @@ export class OfficeCat {
   readonly slot: number;
   readonly name: string;
   readonly coat: CatCoat;
-  /** always hungry: begs agents for treats and meals, and is never full for long */
-  readonly hungry: boolean;
+  /** a resident cat's quirk (null = an ordinary colony cat) */
+  readonly trait: CatTrait | null;
   private zzz: Sprite;
   x: number;
   y: number;
@@ -75,6 +86,14 @@ export class OfficeCat {
   private meowCooldown = 0;
   /** begging: seconds until the next "TREAT?" */
   private askT = 0;
+  /** begging: the gap that `askT` started from (the mouth stays open early on) */
+  private askGap = 3;
+  /** racing to a far spot (Kiwi) */
+  private zooming = false;
+  /** seconds until the next dust puff behind a zooming cat */
+  private dustT = 0;
+  /** seconds until a chatty cat meows again on its own */
+  private chatterT = 2;
   private tie: Sprite;
   /** Friday meeting: where the boss sits (null = an ordinary cat) */
   private boss: Point | null = null;
@@ -115,7 +134,7 @@ export class OfficeCat {
     this.slot = spec.slot;
     this.name = spec.name;
     this.coat = spec.coat;
-    this.hungry = spec.hungry === true;
+    this.trait = spec.trait ?? null;
     this.home = spec.home;
     // the first cat keeps the seed it always had
     this.rand = seededRandom(spec.slot === 0 ? "cat" : `cat-${spec.slot}`);
@@ -144,6 +163,11 @@ export class OfficeCat {
     this.map = map;
   }
 
+  /** always hungry: begs agents for treats and meals, and is never full for long */
+  get hungry() {
+    return this.trait === "hungry";
+  }
+
   destroy() {
     this.sprite.destroy();
     this.zzz.destroy();
@@ -160,6 +184,7 @@ export class OfficeCat {
     this.boss = spot;
     this.guarding = null;
     this.heading = null;
+    this.zooming = false;
     if (!spot) {
       this.effects.floater(textBubbleTexture("MEETING OVER."), this.x, this.y - 14, 2.5, 8);
       this.mode = "sit";
@@ -186,6 +211,7 @@ export class OfficeCat {
     this.guarding = null;
     this.heading = null;
     this.leaving = true;
+    this.zooming = false;
     if (!this.goTo(exit)) this.gone = true;
   }
 
@@ -200,6 +226,7 @@ export class OfficeCat {
     if (this.task?.kind === "visit")
       return this.mode === "perch" ? `sitting with ${this.task.who}` : `off to ${this.task.who}`;
     if (this.guarding || this.heading) return "keeping a waiting human company";
+    if (this.zooming) return "zooming around the office";
     if (this.mode === "smug") return "looking very pleased";
     if (this.mode === "sleep") return "napping";
     if (this.mode === "walk") return "on patrol";
@@ -216,6 +243,7 @@ export class OfficeCat {
     this.dropTask();
     this.guarding = null;
     this.heading = null;
+    this.zooming = false;
     this.task = task;
     this.path = [];
     this.repath = 0;
@@ -282,6 +310,7 @@ export class OfficeCat {
   }
 
   private pickTarget() {
+    this.zooming = false;
     if (this.boss) {
       if (Math.hypot(this.x - this.boss.x, this.y - this.boss.y) > 2 && this.goTo(this.boss))
         return;
@@ -300,6 +329,7 @@ export class OfficeCat {
       }
     }
     this.heading = null;
+    if (this.trait === "zoomies" && this.rand() < 0.85 && this.zoom()) return;
     const spots = this.idleSpots();
     let target = this.home;
     if (spots.length > 0 && this.rand() < 0.8) {
@@ -307,6 +337,27 @@ export class OfficeCat {
       target = this.beside(s) ?? this.home;
     }
     if (!this.goTo(target)) this.timer = 5;
+  }
+
+  /** Kiwi: race to a random spot on the office floor, far from here. */
+  private zoom(): boolean {
+    const from = { x: Math.floor(this.x / TILE), y: Math.floor((this.y - 2) / TILE) };
+    for (let i = 0; i < 40; i++) {
+      const t = {
+        x: Math.floor(this.rand() * this.map.width),
+        y: Math.floor(this.rand() * this.map.height),
+      };
+      if (!indoorTile(this.map, t.x, t.y) || !kiwiZoomWorthy(from, t)) continue;
+      if (!this.goTo({ x: t.x * TILE + 8, y: t.y * TILE + 12 })) continue;
+      this.zooming = true;
+      this.dustT = 0;
+      if (this.rand() < 0.4)
+        this.effects.after(0.3, () => {
+          if (this.zooming) this.say(kiwiShout(this.rand()), C.plum, 1.4);
+        });
+      return true;
+    }
+    return false;
   }
 
   private say(text: string, color: string = C.plum, life = 2.2) {
@@ -319,7 +370,11 @@ export class OfficeCat {
     this.meowCooldown = 1.2;
     const lines = this.hungry
       ? ["TREAT?", "FOOD?", "MEOW!", "SNACK?", "PRRR"]
-      : ["MRRP?", "MEOW!", "PRRR", "MRRRP"];
+      : this.trait === "chatty"
+        ? ["MIAU!", "MIAU MIAU", "MIAAAU!", "PRRRMIAU"]
+        : this.trait === "zoomies"
+          ? ["MRRP!", "PRRR", "ZOOM?", "MEOW!"]
+          : ["MRRP?", "MEOW!", "PRRR", "MRRRP"];
     this.say(lines[Math.floor(this.rand() * lines.length)]!);
     for (let i = 0; i < 3; i++) {
       this.effects.after(0.25 + i * 0.35, () =>
@@ -455,6 +510,19 @@ export class OfficeCat {
       this.timer = 2;
       return;
     }
+    if (this.zooming) {
+      // a skid, a breather, and off again (now and then a very short nap)
+      this.zooming = false;
+      this.effects.burst(this.x, this.y - 1, [C.silver, C.grey], {
+        count: 5,
+        speed: 22,
+        life: 0.6,
+        floor: this.y + 1,
+      });
+      this.mode = this.rand() < 0.1 ? "sleep" : "sit";
+      this.timer = this.mode === "sit" ? 1 + this.rand() * 2 : 6 + this.rand() * 4;
+      return;
+    }
     this.mode = this.rand() < 0.3 ? "sit" : "sleep";
     this.timer = this.mode === "sit" ? 5 + this.rand() * 5 : 18 + this.rand() * 25;
   }
@@ -546,9 +614,29 @@ export class OfficeCat {
       if (this.mode === "walk") {
         // errands (food, a visit, a waiting human) at a trot, strolls slowly
         const fast = task !== null || this.heading;
-        const speed = task?.kind === "chase" ? 70 : fast ? 40 : this.leaving ? 34 : 26;
+        const speed = this.zooming
+          ? KIWI_ZOOM_SPEED
+          : task?.kind === "chase"
+            ? 70
+            : fast
+              ? 40
+              : this.leaving
+                ? 34
+                : 26;
         this.stepPath(dt, speed * this.speedK);
-        this.sprite.texture = walkFrame(task?.kind === "chase" ? 10 : 6);
+        this.sprite.texture = walkFrame(this.zooming ? 18 : task?.kind === "chase" ? 10 : 6);
+        if (this.zooming) {
+          this.dustT -= dt;
+          if (this.dustT <= 0) {
+            this.dustT = 0.09;
+            this.effects.burst(this.x - this.dir * 6, this.y - 1, [C.silver, C.grey], {
+              count: 2,
+              speed: 12,
+              life: 0.45,
+              floor: this.y + 1,
+            });
+          }
+        }
         if (this.path.length === 0) this.arrived();
       }
       if (this.bounce > 0) {
@@ -587,7 +675,7 @@ export class OfficeCat {
       const task = this.task;
       this.askT -= dt;
       // the mouth stays open for a moment after every "TREAT?"
-      const meowing = this.askT > 1.9;
+      const meowing = this.askT > this.askGap - 0.7;
       this.sprite.texture = frames[meowing ? CAT.beg[1] : CAT.beg[Math.floor(time * 1.2) % 2]!]!;
       this.timer -= dt;
       if (task?.kind !== "beg") {
@@ -600,8 +688,10 @@ export class OfficeCat {
         this.timer = 3 + this.rand() * 3;
         task.onDone(this, asked);
       } else if (this.askT <= 0) {
-        this.askT = 2.6 + this.rand() * 1.2;
-        this.say(task.ask(), C.plum, 2);
+        const [lo, hi] = task.every ?? [2.6, 3.8];
+        this.askGap = lo + this.rand() * (hi - lo);
+        this.askT = this.askGap;
+        this.say(task.ask(), C.plum, Math.min(2, this.askGap + 0.4));
       }
     } else if (this.mode === "perch") {
       this.sprite.texture = frames[CAT.sit[Math.floor(time * 0.5) % 2]!]!;
@@ -630,7 +720,7 @@ export class OfficeCat {
             this.guarding = null;
             this.pickTarget();
           }
-        } else if (this.mode === "sit" && this.rand() < 0.5) {
+        } else if (this.mode === "sit" && this.trait !== "zoomies" && this.rand() < 0.5) {
           this.mode = "sleep";
           this.timer = 20;
         } else this.pickTarget();
@@ -640,6 +730,15 @@ export class OfficeCat {
           this.timer = 0.01;
       }
       if (this.mode === "smug" && this.timer <= 0) this.mode = "sit";
+    }
+    // Eloy: a meow every few seconds whatever he does (not in his sleep, not while begging,
+    // which has its own)
+    if (this.trait === "chatty" && this.mode !== "sleep" && this.mode !== "beg" && !this.boss) {
+      this.chatterT -= dt;
+      if (this.chatterT <= 0) {
+        this.chatterT = 2 + this.rand() * 1.5;
+        this.say(eloyMeow(this.rand()), C.plum, 1.6);
+      }
     }
     const moving = this.mode === "walk" || this.mode === "pounce" || this.hop !== null;
     this.sprite.scale.x = moving ? 1 : this.dir < 0 ? 1 : -1;
