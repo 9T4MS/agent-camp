@@ -60,8 +60,11 @@ export const GAME_NOTICE_RETRY_MS = 30_000;
 /** Finished games kept for the results list. */
 export const GAME_RESULTS_KEPT = 20;
 export const GAME_RATING_K = 24;
-/** One request per browser (IP) this often: moves are clicks, not a stream. */
-export const GAME_REQUEST_INTERVAL_MS = 250;
+/**
+ * Requests per second from one browser: moves are clicks, not a stream, but a click and the
+ * page's own "seen" often come together.
+ */
+export const GAME_REQUESTS_PER_SECOND = 5;
 const STORAGE_KEY = "games.v1";
 
 export const GAME_LABEL: Record<GameKind, string> = {
@@ -170,7 +173,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 export class Games {
   private data: Stored = { games: [], stats: {}, people: {} };
-  private requests = new Map<string, number>();
+  private requests = new Map<string, number[]>();
 
   constructor(
     private store: Store,
@@ -205,12 +208,15 @@ export class Games {
 
   /** Per-browser limiter, applied before a body is read. Seconds to wait, or null. */
   requestAllowed(requester: string, now: number): number | null {
-    for (const [key, at] of this.requests)
-      if (now - at >= GAME_REQUEST_INTERVAL_MS) this.requests.delete(key);
+    for (const [key, times] of this.requests)
+      if (now - times.at(-1)! >= 1000) this.requests.delete(key);
     const key = requester.slice(0, 128);
-    if (this.requests.has(key)) return 1;
-    if (this.requests.size >= 512) this.requests.delete(this.requests.keys().next().value!);
-    this.requests.set(key, now);
+    const recent = (this.requests.get(key) ?? []).filter((at) => now - at < 1000);
+    if (recent.length >= GAME_REQUESTS_PER_SECOND) return 1;
+    if (!this.requests.has(key) && this.requests.size >= 512)
+      this.requests.delete(this.requests.keys().next().value!);
+    recent.push(now);
+    this.requests.set(key, recent);
     return null;
   }
 

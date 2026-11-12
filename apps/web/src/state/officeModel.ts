@@ -12,6 +12,8 @@ import {
   type AgentKind,
   type AvatarSpec,
   avatarFromSeed,
+  type GameStats,
+  type GameSummary,
   type HelperSkin,
   type InteractionKind,
   type PartyState,
@@ -66,6 +68,8 @@ const ACTIVITY_LOG_MS = 60 * 60_000;
 
 export type ModelChange =
   | { kind: "partyChanged" }
+  /** a turn-based game changed; `before` is what it was (absent for a new game) */
+  | { kind: "gameChanged"; game: GameSummary; before?: GameSummary }
   | { kind: "officeRenamed"; name: string }
   | { kind: "personAdded"; personId: string; instant: boolean }
   | { kind: "personRemoved"; personId: string; instant: boolean }
@@ -124,6 +128,9 @@ function dayKey(ts: number): string {
 
 export class OfficeModel {
   party: PartyState = { events: [], scores: {} };
+  /** turn-based games: open ones and the latest results */
+  games: GameSummary[] = [];
+  gameStats: Record<string, GameStats> = {};
   officeName = "Agent Office";
   timezone: string | undefined;
   /** server clock minus local clock, from the last snapshot */
@@ -222,6 +229,8 @@ export class OfficeModel {
       case "office.snapshot": {
         const d = msg.data;
         this.party = d.party ?? { events: [], scores: {} };
+        this.games = d.games?.games ?? [];
+        this.gameStats = d.games?.stats ?? {};
         this.timezone = d.timezone;
         this.clockSkew = d.serverTime - this.now();
         if (d.officeName && d.officeName !== this.officeName) {
@@ -351,6 +360,16 @@ export class OfficeModel {
         this.party = msg.data.party;
         out.push({ kind: "partyChanged" });
         break;
+      case "game.updated": {
+        const game = msg.data.game;
+        const at = this.games.findIndex((g) => g.id === game.id);
+        const before = at >= 0 ? this.games[at] : undefined;
+        if (at >= 0) this.games[at] = game;
+        else this.games.push(game);
+        if (msg.data.stats) this.gameStats = msg.data.stats;
+        out.push({ kind: "gameChanged", game, ...(before ? { before } : {}) });
+        break;
+      }
       case "avatar.updated": {
         const p = this.people.get(msg.data.personId);
         if (p) {

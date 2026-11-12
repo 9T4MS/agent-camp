@@ -54,6 +54,7 @@ import { CrispView } from "./crisp.ts";
 import { DemoFeed, parseDemoMode, parseLookParam } from "./demo/demoFeed.ts";
 import { type CatAction, Hud, type PokeResult } from "./hud.ts";
 import { keepAwake, reloadInto, watchForNewBuild } from "./kiosk.ts";
+import { GamesClient } from "./net/games.ts";
 import { MessagesClient } from "./net/messages.ts";
 import { connectViewer, loginIfLoggedOut } from "./net/viewer.ts";
 import { PartyPanel } from "./partyPanel.ts";
@@ -67,9 +68,11 @@ import {
   saveSeen,
   shouldCelebrate,
 } from "./release.ts";
+import { GAME_NAME, resultLine } from "./state/gameText.ts";
 import { MessageModel } from "./state/messageModel.ts";
 import { type ModelChange, OfficeModel } from "./state/officeModel.ts";
 import { Celebration } from "./ui/celebration.ts";
+import { GamesUi } from "./ui/gamesUi.ts";
 import { MessagesPanel, storedMessageRead } from "./ui/messages.ts";
 import { Minimap } from "./ui/minimap.ts";
 import { CharacterManager } from "./world/characters.ts";
@@ -391,6 +394,14 @@ async function boot() {
 
   let snapshotSeen = false;
   let games: PartyPanel | null = null;
+  let gamesUi: GamesUi | null = null;
+  /** `?game=next` (a bookmark, an app shortcut): open the game that waits for me, once */
+  let nextGame = params.get("game") === "next";
+  const openNextGame = () => {
+    if (!nextGame || !snapshotSeen || !hud.me || !gamesUi) return;
+    nextGame = false;
+    gamesUi.openNext();
+  };
   let messagesPanel: MessagesPanel | null = null;
   let messagesClient: MessagesClient | null = null;
   const messageModel = new MessageModel(storedMessageRead(), () => Date.now() + model.clockSkew);
@@ -432,9 +443,29 @@ async function boot() {
       chars.handle(ch);
       if (ch.kind === "officeRenamed") hud.setOfficeName(ch.name);
       if (ch.kind === "interaction") react(ch);
+      if (ch.kind === "gameChanged") {
+        if (gamesUi) {
+          gamesUi.onChange(ch);
+          // the open nameplate's challenge box follows ("… : open")
+          hud.refresh();
+        } else if (
+          kiosk &&
+          ch.game.status === "over" &&
+          ch.before &&
+          ch.before.status !== "over" &&
+          ch.game.winner !== undefined
+        )
+          // the wall screen shows results only
+          hud.showBanner(
+            `${ch.game.names[ch.game.winner]} wins!`,
+            `${resultLine(ch.game)} · ${GAME_NAME[ch.game.kind]}`,
+          );
+      }
     }
     if (msg.type === "office.snapshot") {
       snapshotSeen = true;
+      gamesUi?.onSnapshot();
+      openNextGame();
       hud.setVersion(officeVersion(), __BUILD__);
       if (!demo) {
         const label = newVersionLabel(seenRelease, officeVersion());
@@ -779,7 +810,11 @@ async function boot() {
     }
   };
   // one "me" everywhere: the games drawer plays as the person this browser is confirmed to be
-  hud.onMeChange = (me) => games?.setMe(me);
+  hud.onMeChange = (me) => {
+    games?.setMe(me);
+    gamesUi?.setMe(me);
+    openNextGame();
+  };
   // ?key= viewers have no session cookie: without the key the server would not say who I am
   const keyQuery = key ? `?key=${encodeURIComponent(key)}` : "";
   if (demo) hud.editAnyLook = true;
@@ -896,7 +931,10 @@ async function boot() {
   };
   hud.onOpenSession = (id) => void openSession(id);
   camera.holdWhile = () =>
-    hud.panelOpen || hud.lookEditorOpen || (messagesPanel?.expanded ?? false);
+    hud.panelOpen ||
+    hud.lookEditorOpen ||
+    (gamesUi?.boardOpen ?? false) ||
+    (messagesPanel?.expanded ?? false);
   hud.onPanelChange = () => {
     if (hud.panelOpen && matchMedia("(max-width: 560px)").matches && messagesPanel?.expanded)
       messagesPanel.collapse(false);
@@ -1131,7 +1169,22 @@ async function boot() {
     hud.openPanel(id);
     void focusPerson(id);
   };
+  // turn-based games need the server (who I am, whose turn): not in the demo, not on the kiosk
+  if (!demo && !kiosk) {
+    gamesUi = new GamesUi(host, model, new GamesClient({ key }), {
+      claim: (why, after) => hud.openMeMenu({ why, after }),
+      banner: (title, sub) => hud.showBanner(title, sub),
+      // the board is fullscreen: the drawer steps aside
+      onBoard: (open) => {
+        if (open) games?.close();
+      },
+    });
+    gamesUi.onWaitingChange = () => hud.refreshMe();
+    gamesUi.setMe(hud.me);
+    hud.games = gamesUi;
+  }
   games = new PartyPanel(host, model, {
+    ...(gamesUi ? { games: gamesUi.list } : {}),
     demo: !!demo,
     key,
     focus: (id) => void focusPerson(id, 4),

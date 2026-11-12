@@ -211,6 +211,28 @@ describe("games: who may do what", () => {
   });
 });
 
+test("a browser may send a short burst (a move plus its 'seen'), not a stream", async () => {
+  const t = setup();
+  const burst = async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const res = (await t.app.handleHttp(
+        new Request("http://office/api/games", {
+          method: "POST",
+          body: "{}",
+          headers: { authorization: "Bearer pw", "cf-connecting-ip": "one-office" },
+        }),
+      ))!;
+      statuses.push(res.status);
+    }
+    return statuses;
+  };
+  // five get through to the "who are you" check, the sixth is told to slow down
+  expect(await burst()).toEqual([403, 403, 403, 403, 403, 429]);
+  t.advance(1000);
+  expect((await burst())[0]).toBe(403);
+});
+
 describe("games: playing", () => {
   test("four in a row: turns alternate, the board is public, a win counts for both records", async () => {
     const t = setup();

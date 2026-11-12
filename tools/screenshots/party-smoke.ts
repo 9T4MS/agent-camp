@@ -355,11 +355,12 @@ try {
   const me = await page.evaluate(async () => (await (await fetch("/api/me")).json()).personId);
   assert.equal(me, null, "the cookie is gone");
 
-  // The same IP cannot bypass limits by changing actor or using malformed payloads.
-  const malformed = await contexts[0]!.request.post(`${base}/api/party`, {
-    data: { personId: "player-one", action: "dance", item: "forged" },
+  // This browser is nobody now: the server refuses a move in anybody's name, and the same IP
+  // cannot get around the limit by changing the actor.
+  const nobody = await contexts[0]!.request.post(`${base}/api/party`, {
+    data: { personId: "player-one", action: "dance" },
   });
-  assert.equal(malformed.status(), 400);
+  assert.equal(nobody.status(), 403);
   const burst = await contexts[0]!.request.post(`${base}/api/party`, {
     data: { personId: "player-two", action: "wave" },
   });

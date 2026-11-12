@@ -866,7 +866,12 @@ export class OfficeApp {
     }
     if (path !== "/api/games" || method !== "POST")
       return json({ error: "method not allowed" }, { status: 405 });
-    const who = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+    // per address and claimed person: a whole office shares one address, and two colleagues
+    // playing each other must not trip over one limit (the name is not trusted here, it only
+    // picks the bucket)
+    const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+    const claimed = /(?:^|;\s*)ao_me=([^.;]{1,64})/.exec(req.headers.get("cookie") ?? "")?.[1];
+    const who = `${ip}|${claimed ?? ""}`;
     const retryAfter = this.games.requestAllowed(who, now);
     if (retryAfter !== null)
       return json(
