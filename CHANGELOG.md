@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- `agent-office status --json` now gives scripts a privacy-safe health snapshot, without config, project names or server credentials
 - 🚢 Schiffe versenken and Vier gewinnt: challenge a colleague from their nameplate and play a move whenever you get to it; your portrait in the top bar shows when it is your turn
 - 🎀 New looks for your character: a curved hairband (hidden from behind, unlike the straight headband), longer sweaters and shirts that hang down over the hips instead of looking like a crop top, and lots of colourful clips in the hair
 - 🎨 Customize look is simpler: one tab to describe your look (a new AI look goes live right away, nothing to save) and one to pick parts (with its own Save). Saving no longer quietly swaps your AI look for a rough copy, and reopening shows the look you actually wear

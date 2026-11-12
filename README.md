@@ -70,9 +70,20 @@ the connector reads only single-line values there, so use `configure --descripti
 
 ```sh
 agent-office status      # connected? which sessions does it see?
+agent-office status --json # machine-readable, privacy-safe health snapshot
 agent-office logs        # follow the log
 agent-office uninstall   # stop and remove everything
 ```
+
+`status --json` prints exactly one JSON object (`schemaVersion: 1`): `connectorVersion`
+(the CLI version), `daemonRunning`, `connected`, `updatedAt` (epoch milliseconds, or `null`
+when missing/invalid), and `sessions`. A daemon is running only with a live positive PID and
+a status update less than 10 seconds old (not future-dated); connected also requires an open
+socket and the server's welcome. Stale/dead daemons have no sessions. Sessions contain only
+`agent`, `activity`, `subagents`, `startedAt`, and optional numeric `context` (0–1)—no project
+names, identifiers, config, server URLs or errors. Missing/corrupt status is reported as
+not running. Like text status, this exits 0 even when disconnected; check the JSON booleans
+for health checks.
 
 ![Installer and status](screenshots/10-terminal-install.png)
 

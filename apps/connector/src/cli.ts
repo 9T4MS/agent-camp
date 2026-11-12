@@ -42,10 +42,11 @@ import {
   userHome,
 } from "./paths.ts";
 import { systemProcesses } from "./proc.ts";
+import { statusSnapshot } from "./status.ts";
 import { canSelfUpdate, DEFAULT_UPDATE_BASE, Updater } from "./update.ts";
 import { platformId, VERSION } from "./version.ts";
 
-const BOOL_FLAGS = new Set(["assume-processes", "once", "yes", "help", "y"]);
+const BOOL_FLAGS = new Set(["assume-processes", "once", "yes", "help", "y", "json"]);
 
 export type Args = { command: string; flags: Record<string, string | boolean>; rest: string[] };
 
@@ -111,6 +112,7 @@ Commands:
                     link, or the id); "off" removes it; no argument prints the current one.
                     Restarts the background connector so the office updates right away.
   status            connection state and live sessions
+      --json            privacy-safe JSON health snapshot (schemaVersion: 1)
   logs              follow the daemon log
   install-service   register the launchd agent (macOS) so it runs at login
   uninstall [--yes] stop the service and remove binary, config and logs
@@ -141,7 +143,7 @@ export async function main(argv: string[]): Promise<number> {
     case "gif":
       return cmdGif(args);
     case "status":
-      return cmdStatus();
+      return cmdStatus(args);
     case "logs":
       return cmdLogs();
     case "install-service":
@@ -572,7 +574,19 @@ export function formatSessions(sessions: StatusFile["sessions"], now = Date.now(
   });
 }
 
-async function cmdStatus(): Promise<number> {
+async function cmdStatus(args: Args): Promise<number> {
+  if (args.flags.json === true) {
+    let raw: string | null = null;
+    try {
+      raw = readFileSync(statusPath(), "utf8");
+    } catch {
+      // Status is best effort; never expose filesystem errors or config in JSON mode.
+    }
+    console.log(
+      JSON.stringify(statusSnapshot(raw, { connectorVersion: VERSION, now: Date.now(), pidAlive })),
+    );
+    return 0;
+  }
   const { config, existed } = loadConfig(configPath());
   const lines: string[] = [`agent-office ${VERSION} (${platformId()})`];
   lines.push(
