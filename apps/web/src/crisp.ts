@@ -27,6 +27,8 @@ export class CrispView {
       height: 1,
       resolution: app.renderer.resolution,
       scaleMode: "linear",
+      // without it the sprite keeps the quad size of the texture's first size after a resize
+      dynamic: true,
     });
     this.enabled = !softwareGl(app);
     this.display = new Sprite(this.rt);
