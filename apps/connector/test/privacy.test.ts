@@ -14,7 +14,15 @@ import { silent } from "../src/log.ts";
 import { agentDirs } from "../src/paths.ts";
 import { fakeProcesses } from "../src/proc.ts";
 import { type FakeServer, fakeServer, waitFor } from "./fake-server.ts";
-import { addCowork, COWORK_PRIVATE, type FakeHome, makeHome, RAW_IDS, SECRET } from "./helpers.ts";
+import {
+  addCowork,
+  COWORK_PRIVATE,
+  type FakeHome,
+  makeHome,
+  P,
+  RAW_IDS,
+  SECRET,
+} from "./helpers.ts";
 
 /** A detailed (>200 chars) look description, as typed by the user. */
 const LOOK =
@@ -29,10 +37,62 @@ afterEach(() => {
   h?.cleanup();
 });
 
+/** Canaries in local inputs that only status may be derived from (see `addLocalCanaries`). */
+const CANARIES = [
+  "SECRET_SESSION_TITLE",
+  "SECRET_HOST_SESSION",
+  "SECRET_SOCKET_PATH",
+  "SECRET_SUBAGENT_TASK",
+  "SECRET_AGENT_TYPE",
+  "claude-desktop",
+  "busy",
+  "1793177512345", // statusUpdatedAt
+];
+
+/**
+ * Write the fixture pid files the way Claude Code 2.1.32x does (session title, status, desktop
+ * entrypoint, socket path) and a subagent meta.json with its task description, all carrying
+ * canaries: only "is it busy" and "how many subagents run" may be derived from them.
+ */
+function addLocalCanaries(h: FakeHome) {
+  const sessions = [
+    { pid: 12345, sessionId: RAW_IDS[0], cwd: "/Users/anna/code/agent-office" },
+    { pid: 12346, sessionId: RAW_IDS[1], cwd: "/Users/anna/code/website" },
+  ];
+  for (const s of sessions) {
+    writeFileSync(
+      h.path(`.claude/sessions/${s.pid}.json`),
+      JSON.stringify({
+        ...s,
+        startedAt: 1793178000000,
+        name: "SECRET_SESSION_TITLE",
+        nameSource: "user",
+        hostSessionId: "SECRET_HOST_SESSION",
+        messagingSocketPath: "/tmp/SECRET_SOCKET_PATH.sock",
+        entrypoint: "claude-desktop",
+        status: "busy",
+        statusUpdatedAt: 1793177512345,
+        updatedAt: 1793177512345,
+      }),
+    );
+  }
+  writeFileSync(
+    h.path(P.sub1.replace(/\.jsonl$/, ".meta.json")),
+    JSON.stringify({
+      agentType: "SECRET_AGENT_TYPE",
+      description: "SECRET_SUBAGENT_TASK",
+      toolUseId: "toolu_canary",
+      spawnDepth: 1,
+      requestShape: "background",
+    }),
+  );
+}
+
 /** Things that must never appear in anything we send. */
 function forbidden(home: string): string[] {
   return [
     SECRET,
+    ...CANARIES,
     ...RAW_IDS,
     ...RAW_IDS.map((id) => id.split("-")[0]!),
     ...COWORK_PRIVATE,
@@ -59,6 +119,7 @@ function assertClean(texts: string[], home: string) {
 describe("privacy", () => {
   test("hello + snapshots over the wire contain only status metadata", async () => {
     h = makeHome();
+    addLocalCanaries(h);
     addCowork(h, { lastTool: "ClaudeDesign" });
     srv = fakeServer();
     const detector = new Detector({
@@ -137,6 +198,7 @@ describe("privacy", () => {
 
   test("`run --once` output is clean too", async () => {
     h = makeHome();
+    addLocalCanaries(h);
     addCowork(h);
     // Cowork is opt-in: turn it on so its session is part of the privacy check
     mkdirSync(join(h.home, "cfg"), { recursive: true });

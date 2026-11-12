@@ -1,6 +1,7 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { PS_COLUMNS, UCOMM_WIDTH } from "../src/proc.ts";
 
 export const FIXTURE_HOME = join(import.meta.dir, "..", "..", "..", "fixtures", "home");
 
@@ -47,6 +48,38 @@ export function makeHome(now = Date.now()): FakeHome {
   };
   for (const rel of Object.values(P)) h.age(rel, 5_000);
   return h;
+}
+
+/** One `ps -axo` column per field, in the order the connector asks for them (PS_COLUMNS). */
+const PS_FIELDS: Record<
+  string,
+  (row: { pid: number; ppid: number; exe: string; args: string }) => string
+> = {
+  pid: (r) => String(r.pid).padStart(5),
+  ppid: (r) => String(r.ppid).padStart(5),
+  ucomm: (r) => r.exe.slice(0, UCOMM_WIDTH).padEnd(UCOMM_WIDTH),
+  args: (r) => r.args,
+};
+
+/**
+ * `ps -axo <PS_COLUMNS>` output as macOS prints it: right-aligned pids, then `ucomm` (the
+ * executable's file name) cut and padded to exactly 16 chars, then args. Rows are
+ * `[pid, ppid, args, ucomm?]`; ucomm defaults to the file name of the first word of args. Built
+ * from PS_COLUMNS itself, so changing the columns the connector asks `ps` for without teaching
+ * `psLines` the new layout fails the tests (an unknown column throws here).
+ */
+export function psOut(...rows: [number, number, string, string?][]): string {
+  const columns = PS_COLUMNS.split(",").map((c) => {
+    const field = PS_FIELDS[c.replace(/=$/, "")];
+    if (!field) throw new Error(`psOut: no fake for ps column ${c}`);
+    return field;
+  });
+  return rows
+    .map(([pid, ppid, args, exe = basename(args.split(" ")[0]!)]) =>
+      columns.map((col) => col({ pid, ppid, exe, args })).join(" "),
+    )
+    .join("\n")
+    .concat("\n");
 }
 
 // ---- Cowork (Claude desktop app) ---------------------------------------------------------------

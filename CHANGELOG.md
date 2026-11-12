@@ -14,6 +14,13 @@ banner after a deploy.
 - 🙇 Every full hour all agents jump up, run to the head desk, line up and bow to her one by one
 - The office no longer jumps or changes size while the camera zooms
 - 🐈 Cece and Jess moved in: two office cats who are always hungry and go from desk to desk begging the agents for treats and, at mealtimes, for a proper meal
+- Claude Code sessions in the Code tab of the Claude desktop app now get their desk too (before they only flickered in now and then)
+- The Codex app no longer leaves a ghost desk behind ("idle, started 9 days ago")
+- An agent running a long command, waiting for a subagent or working in the background stays at its desk instead of heading to the bar
+- Background subagents keep their helper bot until they are done, even when they are quiet for a while
+- Agents done for a while stay at the bar: no more walking back to the desk for two minutes when Claude Code jots down its recap
+- A Codex agent waiting for you to approve a command goes to the bar after 2 minutes instead of "running" at its desk; Claude Code's own searches no longer show up as helper bots
+- More sessions than desks? The working ones sit at the desks, the long-idle ones get up and roam
 - 🙂 "Who are you?" in the top bar: confirm once with a code from your Mac, then your portrait sits there with Customize look and your desk; office games and pokes now go out as you
 
 ## 2026-11-11

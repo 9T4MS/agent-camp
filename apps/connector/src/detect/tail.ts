@@ -168,3 +168,23 @@ export function readHead(path: string, maxLines = 5): Record<string, unknown>[] 
     return [];
   }
 }
+
+/**
+ * Parse the complete lines in the last `maxBytes` of a file (one-shot, no offset state), for
+ * files we only glance at occasionally such as subagent transcripts. Returns [] on any error.
+ */
+export function readTail(path: string, maxBytes = TAIL_BYTES): Record<string, unknown>[] {
+  try {
+    const size = statSync(path).size;
+    const start = Math.max(0, size - maxBytes);
+    let bytes = readRange(path, start, size - start);
+    if (start > 0) {
+      // we probably landed mid-line: drop everything up to the first newline
+      const nl = bytes.indexOf(NL);
+      bytes = nl >= 0 ? bytes.subarray(nl + 1) : new Uint8Array(0);
+    }
+    return parseJsonl(decoder.decode(bytes));
+  } catch {
+    return [];
+  }
+}

@@ -72,7 +72,7 @@ Poll every 2 s, cheap filesystem and process checks only. A session is live when
 
 | Agent | Transcripts | Live signal | Subagents |
 | --- | --- | --- | --- |
-| Claude Code | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` | `claude` process with matching cwd, or `~/.claude/sessions/<pid>.json` if present; mtime < 90 s | `<session-id>/subagents/**/agent-*.jsonl` modified in the last 60 s (walk two levels, incl. `subagents/workflows/<id>/`) |
+| Claude Code | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` | `claude` process with matching cwd, or `~/.claude/sessions/<pid>.json` if present; mtime < 90 s | `<session-id>/subagents/**/agent-*.jsonl` (walk two levels, incl. `subagents/workflows/<id>/`) still running per its `agent-<id>.meta.json`: background until `finished`, foreground until the parent has the tool_result for its `toolUseId` (else while its own tool call is in flight); never after 15 min of silence; without a meta.json: modified in the last 60 s |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (first line `session_meta` has `cwd`, `id`) | `codex` process; mtime < 90 s | count 0 |
 | Pi | `~/.pi/agent/sessions/--<path>--/<ts>_<uuid>.jsonl` (respect `PI_CODING_AGENT_DIR`) | `pi` process; mtime < 90 s | count 0 |
 
@@ -82,7 +82,7 @@ Optional: the installer may add a user-level Claude Code hook in `~/.claude/sett
 
 ### Deriving activity
 
-Tail only the last ~32 KB of each live transcript (append-only, keep a byte offset). Map the latest entry to one verb: `typing` (edit/write tools), `reading` (read/grep/glob/search), `running` (bash/shell), `thinking` (assistant turn, no tool yet), `waiting` (turn finished, waiting for the human), `idle` (no writes for 2+ min, process alive). Exact mapping is implementer decides; unknown tools → `thinking`.
+Tail only the last ~32 KB of each live transcript (append-only, keep a byte offset). Map the latest entry to one verb: `typing` (edit/write tools), `reading` (read/grep/glob/search), `running` (bash/shell), `thinking` (assistant turn, no tool yet), `waiting` (turn finished, waiting for the human), `idle` (no writes for 2+ min, process alive, and nothing says it is still working: a busy pid-file status or a pending tool call, each for at most 30 min of silence, or live subagents). Exact mapping is implementer decides; unknown tools → `thinking`.
 
 ### What gets sent
 

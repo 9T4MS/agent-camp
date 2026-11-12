@@ -43,7 +43,8 @@ same password the first time you open it.
 
 Paste it where Claude can run commands on your Mac: the **Code** tab of the Claude desktop
 app, or Claude Code in a terminal or IDE. A normal chat or Claude Design can't install it. The
-office shows sessions of Claude Code, Codex and Pi running on your Mac. Designers who work in
+office shows sessions of Claude Code (in a terminal, an IDE or the Code tab of the Claude
+desktop app), Codex and Pi running on your Mac. Designers who work in
 Claude Design in the Claude desktop app can get a desk too, and so can older Cowork sessions,
 if you turn them on (see [Claude Design and Cowork](#claude-design-and-cowork)). claude.ai
 chats run in the cloud and don't appear.
@@ -190,7 +191,8 @@ don't name a jacket colour, your jacket takes the agent's colour as before; if y
 keep your jacket and get a badge on the chest (and a patch across the shoulders from behind)
 in the agent's colour instead. Every extra
 session is a sibling of you with tiny variations, and your pod has one desk per running
-session (at least 2, up to 6).
+session (at least 2, up to 6). With more sessions than desks, the working ones sit at the desks
+and the long-idle ones get up and roam.
 
 Want a say? Tell the office who you are: tap **Who are you?** in the top bar, pick your
 character and **Send a code to my Mac**. A 6-digit code pops up as a notification on your Mac
@@ -291,7 +293,8 @@ in front or not" as its activity. Nothing about its windows or content is read. 
 Optional: `agent-office configure --birthday MM-DD` and the office brings you a cake that day
 (only "it's your birthday today" is ever shown, never the date).
 
-Fun: every live subagent shows up as its own little helper scurrying around your desk. They
+Fun: every live subagent shows up as its own little helper scurrying around your desk (a
+background subagent stays until it is done, even when it is quiet for a while). They
 are robots by default; `agent-office configure --helpers cats` turns them into kittens
 (`--helpers robots` switches back). Restart the connector to apply it:
 `launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector`.
@@ -464,6 +467,11 @@ Everything is behind the office password (the same one as the connector's): the 
 shows a login page and the browser stays logged in for 30 days; opening the office during the
 last 15 of those days starts a fresh 30. If the server also sets
 `VIEWER_KEY`, `?key=…` links (handy for the kiosk iPad) skip the login.
+
+An agent goes idle (and off to the bar) after two minutes without any activity in its
+transcript, unless it is still working: a command or tool that is still running, live
+subagents, or Claude Code itself saying it is busy keep it at its desk, for at most 30 minutes
+of complete silence.
 
 Agents that have filled more than half of their context window start to smoke, past 80% they
 are on fire (the agent card shows the exact share; Claude Code and Codex). Helpers stay close

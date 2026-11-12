@@ -242,6 +242,52 @@ describe("OfficeModel", () => {
     expect(m.sessions.get("laptop:b4")!.desk).toBe(2);
   });
 
+  test("a snapshot with more sessions than desks seats the working ones first", () => {
+    const m = new OfficeModel(() => T0);
+    const idle = { activity: "idle" as const };
+    // 7 idle sessions listed first, then two working ones and an offline "typing" one
+    const many = [1, 2, 3, 4, 5, 6, 7].map((i) => sess(`i${i}`, idle));
+    m.apply(
+      snap([
+        person("Ben", [
+          ...many,
+          sess("w1"),
+          sess("off", { offline: true }),
+          sess("w2", { activity: "running" }),
+        ]),
+      ]),
+    );
+    const desk = (id: string) => m.sessions.get(`laptop:${id}`)!.desk;
+    expect(desk("w1")).toBeLessThan(6);
+    expect(desk("w2")).toBeLessThan(6);
+    // the free desks left go to the first idle ones, in incoming order
+    expect(["i1", "i2", "i3", "i4"].map(desk)).toEqual([0, 1, 2, 3]);
+    expect([desk("w1"), desk("w2")]).toEqual([4, 5]);
+    for (const id of ["i5", "i6", "i7", "off"]) expect(desk(id)).toBeGreaterThanOrEqual(6);
+    // desks stay unique
+    const all = m.sessionsOf("ben").map((s) => s.desk);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  test("snapshot seating keeps the incoming order when everything fits, and known desks", () => {
+    const m = new OfficeModel(() => T0);
+    m.apply(snap([person("Ben", [sess("b1", { activity: "idle" }), sess("b2")])]));
+    expect(m.sessionsOf("ben").map((s) => s.sessionId)).toEqual(["laptop:b1", "laptop:b2"]);
+    // a re-snapshot with more sessions: known ones keep their desks, new working ones get the
+    // remaining free desks before the new idle ones
+    const idle = [3, 4, 5, 6, 7].map((i) => sess(`b${i}`, { activity: "idle" }));
+    m.apply(
+      snap([person("Ben", [sess("b1", { activity: "idle" }), sess("b2"), ...idle, sess("b8")])]),
+    );
+    const desk = (id: string) => m.sessions.get(`laptop:${id}`)!.desk;
+    expect([desk("b1"), desk("b2")]).toEqual([0, 1]);
+    expect(desk("b8")).toBeLessThan(6);
+    expect(["b3", "b4", "b5"].map(desk)).toEqual([2, 3, 4]);
+    expect(desk("b8")).toBe(5);
+    expect(desk("b6")).toBeGreaterThanOrEqual(6);
+    expect(desk("b7")).toBeGreaterThanOrEqual(6);
+  });
+
   test("events produce animated changes", () => {
     const m = new OfficeModel(() => T0);
     m.apply(snap([]));

@@ -14,7 +14,7 @@ import { COWORK_LIVE_MS, findCoworkTranscripts, RESCAN_MS } from "../src/detect/
 import { DESIGN_RAW_ID, Detector, sessionKeyFor } from "../src/detect/index.ts";
 import { agentDirs } from "../src/paths.ts";
 import { claudeDesktopInPs, fakeProcesses, isClaudeDesktopArgs, parsePs } from "../src/proc.ts";
-import { addCowork, COWORK_ID, type FakeHome, makeHome, P } from "./helpers.ts";
+import { addCowork, COWORK_ID, type FakeHome, makeHome, P, psOut } from "./helpers.ts";
 
 let h: FakeHome;
 afterEach(() => h?.cleanup());
@@ -62,13 +62,24 @@ describe("Claude desktop app process", () => {
   });
 
   test("found in ps output without becoming an agent process", () => {
-    const ps = [
-      "  501     1 /Applications/Claude.app/Contents/MacOS/Claude",
-      "  502   501 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=gpu-process",
-      "  900   800 /Users/a/.local/bin/claude",
-    ].join("\n");
+    const cli: [number, number, string, string] = [
+      900,
+      800,
+      "/Users/a/.local/bin/claude",
+      "2.1.322",
+    ];
+    const ps = psOut(
+      [501, 1, "/Applications/Claude.app/Contents/MacOS/Claude"],
+      [
+        502,
+        501,
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=gpu-process",
+        "Claude Helper",
+      ],
+      cli,
+    );
     expect(claudeDesktopInPs(ps)).toBe(true);
-    expect(claudeDesktopInPs("  900   800 /Users/a/.local/bin/claude\n")).toBe(false);
+    expect(claudeDesktopInPs(psOut(cli))).toBe(false);
     expect(parsePs(ps).map((p) => p.pid)).toEqual([900]);
   });
 });

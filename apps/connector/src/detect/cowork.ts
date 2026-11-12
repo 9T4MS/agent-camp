@@ -17,7 +17,13 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { str } from "./activity.ts";
-import { claudeContext, countSubagents, normalizeClaude } from "./claude.ts";
+import {
+  claudeContext,
+  countSubagents,
+  newSubagentCache,
+  normalizeClaude,
+  type SubagentCache,
+} from "./claude.ts";
 import { readHead } from "./tail.ts";
 import type { Candidate, CandidateMeta, MetaCache } from "./types.ts";
 
@@ -98,7 +104,12 @@ export class CoworkScanner {
   }
 
   /** Find Cowork session candidates. Never throws. */
-  scan(desktopDir: string, now: number, cache: MetaCache = new Map()): Candidate[] {
+  scan(
+    desktopDir: string,
+    now: number,
+    cache: MetaCache = new Map(),
+    subCache: SubagentCache = newSubagentCache(),
+  ): Candidate[] {
     if (now - this.scannedAt >= RESCAN_MS || now < this.scannedAt) {
       this.found = findCoworkTranscripts(desktopDir, now);
       this.scannedAt = now;
@@ -109,13 +120,19 @@ export class CoworkScanner {
       if (!t) continue;
       const prev = out.get(f.rawId);
       if (prev && prev.mtimeMs >= t.mtimeMs) continue;
-      out.set(f.rawId, makeCandidate(f, t.mtimeMs, t.birthMs, cache));
+      out.set(f.rawId, makeCandidate(f, t.mtimeMs, t.birthMs, cache, subCache));
     }
     return [...out.values()];
   }
 }
 
-function makeCandidate(f: Found, mtimeMs: number, birthMs: number, cache: MetaCache): Candidate {
+function makeCandidate(
+  f: Found,
+  mtimeMs: number,
+  birthMs: number,
+  cache: MetaCache,
+  subCache: SubagentCache,
+): Candidate {
   let meta: CandidateMeta | undefined;
   return {
     agent: "claude",
@@ -147,6 +164,7 @@ function makeCandidate(f: Found, mtimeMs: number, birthMs: number, cache: MetaCa
     },
     normalize: normalizeClaude,
     context: claudeContext,
-    subagents: (now) => countSubagents(join(f.folderPath, f.rawId, "subagents"), now),
+    subagents: (now, entries) =>
+      countSubagents(join(f.folderPath, f.rawId, "subagents"), now, entries, subCache),
   };
 }

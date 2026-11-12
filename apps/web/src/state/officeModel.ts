@@ -3,7 +3,9 @@
  * semantic changes the renderer animates. Pure (no DOM, no Pixi), clock injectable.
  *
  * Also owns stable seating: each person gets the lowest free pod, each session the
- * lowest free desk in that pod (desk >= DESKS_PER_POD means "no desk, roams").
+ * lowest free desk in that pod (desk >= DESKS_PER_POD means "no desk, roams"). When more
+ * sessions arrive at once than desks are free, working ones get the desks (deskRules.ts);
+ * the renderer later hands idle sessions' desks to working roamers via `moveDesk`.
  */
 import {
   type Activity,
@@ -17,6 +19,7 @@ import {
   type ServerToViewer,
   type SessionView,
 } from "@agent-office/protocol";
+import { seatingOrder } from "./deskRules.ts";
 
 export type PersonState = {
   personId: string;
@@ -480,7 +483,17 @@ export class OfficeModel {
     for (const s of this.sessionsOf(pv.personId)) {
       if (!keep.has(s.sessionId)) this.removeSession(s.sessionId, instant, out);
     }
-    for (const s of pv.sessions) this.upsertSession(pv.personId, s, instant, out);
+    // known sessions keep their desks; new ones fill the free desks, working ones first
+    // when they don't all fit (otherwise long-idle sessions would hold the pod on a reload)
+    const known = pv.sessions.filter((s) => this.sessions.has(s.sessionId));
+    const fresh = pv.sessions.filter((s) => !this.sessions.has(s.sessionId));
+    const taken = this.sessionsOf(pv.personId).filter((s) => s.desk < DESKS_PER_POD).length;
+    const order = seatingOrder(
+      fresh,
+      DESKS_PER_POD - taken,
+      (s) => s.activity !== "idle" && !s.offline,
+    );
+    for (const s of [...known, ...order]) this.upsertSession(pv.personId, s, instant, out);
   }
 
   private upsertSession(personId: string, sv: SessionView, instant: boolean, out: ModelChange[]) {

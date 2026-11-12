@@ -29,8 +29,11 @@ export type Candidate = {
   normalize(entry: Record<string, unknown>): TurnEvent | null;
   /** share of the context window in use, from the transcript's latest usage numbers */
   context?(entries: readonly Record<string, unknown>[]): number | undefined;
-  /** Claude only: count live subagent transcripts */
-  subagents?(now: number): number;
+  /**
+   * Claude only: count live subagents. `entries` are the raw tail entries of this session's
+   * transcript (already read by the detector), used to see which tool calls are still pending.
+   */
+  subagents?(now: number, entries: readonly Record<string, unknown>[]): number;
   /**
    * A session of the Claude desktop app (Cowork). It may run inside the app's VM, so no
    * process on this machine owns it: it is live while the app runs and its transcript was
@@ -39,6 +42,22 @@ export type Candidate = {
   desktop?: boolean;
   /** fixed project label, used instead of the cwd's folder name */
   project?: string;
+  /** Claude only: the status each pid file reports (only pid files that carry one) */
+  pidStatus?: PidStatus[];
+  /** Claude only: newest mtime of any subagent transcript (0 if none) */
+  lastSubagentWriteMs?(): number;
+};
+
+/**
+ * Claude Code's undocumented self-reported state from `sessions/<pid>.json`. A strong hint
+ * that a quiet session is still working; see the evidence in claude.ts. Never sent anywhere.
+ */
+export type PidStatus = {
+  pid: number;
+  /** "busy" | "idle" | "shell" seen so far; anything else counts as "not busy" */
+  status: string;
+  /** when the status last changed (not a heartbeat: it does not move while busy) */
+  sinceMs?: number;
 };
 
 /** Transcript path -> header metadata, so headers are read once per file. */

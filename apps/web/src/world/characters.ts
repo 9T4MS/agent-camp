@@ -63,6 +63,7 @@ import {
 import { flameTextures, smokeTexture } from "../art/heat.ts";
 import { C } from "../art/palette.ts";
 import { POD_MATS } from "../art/tiles.ts";
+import { type DeskSeat, deskSwaps, preferMover, stateSince } from "../state/deskRules.ts";
 import type { ModelChange, OfficeModel, PersonState, SessionState } from "../state/officeModel.ts";
 import type { Perch, WaitSpot } from "./cat.ts";
 import {
@@ -329,6 +330,10 @@ export class CharacterManager {
   private ghostSprites: Sprite[] = [];
   private ghosts: Ghost[] = [];
   private ghostCheck = 0;
+  /** seconds until the next look for idle desk holders and working roamers */
+  private deskCheck = 0;
+  /** when a session last won or lost a desk in a swap (Date.now), for the cooldown */
+  private swappedAt = new Map<string, number>();
   /** ended sessions of the last seconds, to spot `/clear` restarts */
   private recentEnds: (EndedSession & { char: SessionCharacter | null; cleared: boolean })[] = [];
   /** most sessions at once per person (personal record) */
@@ -825,6 +830,7 @@ export class CharacterManager {
       sp.destroy();
     releaseSheet(c.sheet);
     this.chars.delete(c.sessionId);
+    this.swappedAt.delete(c.sessionId);
     const { moved, promoted } = this.fillDeskGaps(c.personId);
     this.syncSlots(moved);
     for (const m of promoted) {
@@ -847,13 +853,14 @@ export class CharacterManager {
       let gap = 0;
       while (used.has(gap)) gap++;
       if (gap >= MAX_DESKS) return { moved, promoted };
-      let mover: SessionCharacter | undefined;
+      let best: { c: SessionCharacter; desk: number; working: boolean } | undefined;
       for (const o of this.chars.values()) {
         if (o.personId !== personId || o.removed || o.desk <= gap) continue;
         if (o.mode === "waving" || o.mode === "leaving" || o.mode === "zapped") continue;
         if (!this.model.sessions.has(o.sessionId)) continue;
-        if (!mover || o.desk > mover.desk) mover = o;
+        best = preferMover(best, { c: o, desk: o.desk, working: this.working(o) }, MAX_DESKS);
       }
+      const mover = best?.c;
       if (!mover) return { moved, promoted };
       if (!mover.hasDesk) promoted.add(mover);
       else if (!this.otherAtDesk(mover)) {
@@ -864,6 +871,79 @@ export class CharacterManager {
       mover.desk = gap;
       moved.add(mover);
     }
+  }
+
+  /**
+   * Working sessions win desks: a person's working roamer takes the desk of their idle desk
+   * holder, who gets up and roams instead (rules and hysteresis in deskRules.ts). Runs about
+   * once a second and only looks at people who have roamers, so it costs next to nothing.
+   */
+  private balanceDesks() {
+    const roaming = new Set<string>();
+    for (const c of this.chars.values()) if (!c.hasDesk && !c.removed) roaming.add(c.personId);
+    if (roaming.size === 0) return;
+    const now = Date.now();
+    for (const personId of roaming) {
+      const mine = new Map<string, SessionCharacter>();
+      const seats: DeskSeat[] = [];
+      for (const c of this.chars.values()) {
+        if (c.personId !== personId || c.removed) continue;
+        const s = this.model.sessions.get(c.sessionId);
+        if (!s) continue;
+        mine.set(c.sessionId, c);
+        seats.push({
+          id: c.sessionId,
+          desk: c.desk,
+          idle: s.activity === "idle",
+          since: stateSince(s.activityLog, s.activitySince),
+          movable:
+            !s.offline &&
+            !c.evac &&
+            c.mode !== "waving" &&
+            c.mode !== "leaving" &&
+            c.mode !== "zapped" &&
+            c.mode !== "carried",
+          swappedAt: this.swappedAt.get(c.sessionId),
+        });
+      }
+      for (const sw of deskSwaps(seats, now, MAX_DESKS)) {
+        const taker = mine.get(sw.taker);
+        const yielder = mine.get(sw.yielder);
+        if (taker && yielder) this.swapDesks(taker, yielder, now);
+      }
+    }
+  }
+
+  /** `taker` (roaming) gets `yielder`'s desk and walks over; the yielder gets up and roams. */
+  private swapDesks(taker: SessionCharacter, yielder: SessionCharacter, now: number) {
+    const desk = yielder.desk;
+    const roam = taker.desk;
+    // the desk goes dark with its chair pushed in until the new owner sits down
+    if (!this.otherAtDesk(yielder)) {
+      this.setMonitorFor(yielder, "off");
+      this.resetChair(yielder);
+    }
+    this.model.moveDesk(yielder.sessionId, roam);
+    yielder.desk = roam;
+    this.model.moveDesk(taker.sessionId, desk);
+    taker.desk = desk;
+    this.swappedAt.set(taker.sessionId, now);
+    this.swappedAt.set(yielder.sessionId, now);
+    // helpers follow their agent's new spot; nobody here is seated at a desk any more
+    this.syncSlots(new Set([taker, yielder]));
+    if (yielder.mode === "seated" || (yielder.mode === "walking" && yielder.goal === "desk"))
+      this.idleWander(yielder);
+    if (
+      !taker.evac &&
+      (taker.mode === "poi" || (taker.mode === "walking" && taker.goal !== "exit"))
+    )
+      this.goToDesk(taker);
+  }
+
+  /** Busy and online: the kind of session that should have a desk. */
+  private working(c: SessionCharacter): boolean {
+    const s = this.model.sessions.get(c.sessionId);
+    return !!s && s.activity !== "idle" && !s.offline;
   }
 
   private otherAtDesk(c: SessionCharacter) {
@@ -1723,6 +1803,11 @@ export class CharacterManager {
       c.helpers.update(dt, time);
       if (c.mode === "poi" && c.poi?.id.startsWith("arcade"))
         this.scene.arcadeBusy.add(c.poi.tile.x);
+    }
+    this.deskCheck -= dt;
+    if (this.deskCheck <= 0) {
+      this.deskCheck = 1;
+      this.balanceDesks();
     }
     this.updateRemains(dt, time);
     this.updateRebellions(dt);

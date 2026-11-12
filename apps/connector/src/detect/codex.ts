@@ -40,6 +40,21 @@ export function newestDayDirs(sessionsDir: string, limit = DAY_DIRS): string[] {
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+/**
+ * A command run outside the sandbox: `sandbox_permissions: "require_escalated"` (or older
+ * `with_escalated_permissions: true`), as JSON `arguments` of `exec_command`/`shell` or inside
+ * the JS `input` of the `exec` tool. Under the default `on-request` approval policy Codex asks
+ * the human before running it and writes nothing while the prompt is open, so the pending call
+ * is no evidence of work.
+ */
+const ESCALATED =
+  /\bsandbox_permissions\W{1,6}require_escalated\b|\bwith_escalated_permissions\W{1,6}true\b/;
+
+function asksApproval(payload: Record<string, unknown>): boolean {
+  const args = str(payload.arguments) ?? str(payload.input) ?? "";
+  return args.includes("escalated") && ESCALATED.test(args);
+}
+
 /** Codex rollout line -> normalized event. */
 export function normalizeCodex(entry: Record<string, unknown>): TurnEvent | null {
   const payload = isObj(entry.payload) ? entry.payload : undefined;
@@ -48,8 +63,12 @@ export function normalizeCodex(entry: Record<string, unknown>): TurnEvent | null
   if (entry.type === "response_item") {
     switch (ptype) {
       case "function_call":
-      case "custom_tool_call":
-        return { kind: "tool", name: str(payload.name) ?? "unknown" };
+      case "custom_tool_call": {
+        const name = str(payload.name) ?? "unknown";
+        return asksApproval(payload)
+          ? { kind: "tool", name, approval: true }
+          : { kind: "tool", name };
+      }
       case "local_shell_call":
         return { kind: "tool", name: "shell" };
       case "web_search_call":
