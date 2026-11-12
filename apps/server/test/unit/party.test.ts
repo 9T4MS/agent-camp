@@ -8,7 +8,7 @@ import {
   type Vehicle,
 } from "@agent-office/protocol";
 import { OfficeApp } from "../../src/core/app.ts";
-import { makeSessionToken, SESSION_COOKIE } from "../../src/core/auth.ts";
+import { ME_COOKIE, makeMeToken, makeSessionToken, SESSION_COOKIE } from "../../src/core/auth.ts";
 import {
   PARTY_BODY_MAX_BYTES,
   PARTY_COOLDOWN_MS,
@@ -40,21 +40,39 @@ function setup(store = new MemoryStore(), env: Record<string, string> = {}) {
         connectorVersion: "1.0.0",
       }),
     );
-  const post = (
+  /**
+   * A move is sent by the browser confirmed to be its actor ("It's me"): by default the
+   * request carries that person's `ao_me` cookie. `me: null` sends none, `me: "bob"` Bob's.
+   */
+  const post = async (
     body: unknown,
-    opts: { auth?: string | null; cookie?: string; ip?: string; raw?: string; key?: string } = {},
-  ) =>
-    app.handleHttp(
+    opts: {
+      auth?: string | null;
+      cookie?: string;
+      ip?: string;
+      raw?: string;
+      key?: string;
+      me?: string | null;
+    } = {},
+  ) => {
+    const actor = (body as { personId?: unknown } | null)?.personId;
+    const me = opts.me === undefined ? (typeof actor === "string" ? actor : null) : opts.me;
+    const cookies = [
+      ...(opts.cookie ? [opts.cookie] : []),
+      ...(me ? [`${ME_COOKIE}=${await makeMeToken("pw", me, now)}`] : []),
+    ];
+    return app.handleHttp(
       new Request(`http://office/api/party${opts.key ? `?key=${opts.key}` : ""}`, {
         method: "POST",
         body: opts.raw ?? JSON.stringify(body),
         headers: {
           ...(opts.auth === null ? {} : { authorization: opts.auth ?? "Bearer pw" }),
-          ...(opts.cookie ? { cookie: opts.cookie } : {}),
+          ...(cookies.length ? { cookie: cookies.join("; ") } : {}),
           "cf-connecting-ip": opts.ip ?? `test-ip-${++requester}`,
         },
       }),
     );
+  };
   const state = () => PartyState.parse(app.snapshot().data.party);
   const equip = (
     item: HeldItem = "confetti",
@@ -82,6 +100,18 @@ function setup(store = new MemoryStore(), env: Record<string, string> = {}) {
 }
 
 describe("party API uses canonical avatars and viewer socket state", () => {
+  test("you play as yourself: a move needs the actor's own \"It's me\" cookie", async () => {
+    const { post, state } = setup();
+    const nobody = (await post({ personId: "anna", action: "wave" }, { me: null }))!;
+    expect(nobody.status).toBe(403);
+    expect(await nobody.json()).toEqual({ error: "confirm who you are first" });
+    const bob = (await post({ personId: "anna", action: "wave" }, { me: "bob" }))!;
+    expect(bob.status).toBe(403);
+    expect(await bob.json()).toEqual({ error: "you can only play as yourself" });
+    expect(state().events).toHaveLength(0);
+    expect((await post({ personId: "anna", action: "wave" }))!.status).toBe(200);
+  });
+
   test("cookie/bearer/viewer-key authorized writes; unauthorized reads do not exist", async () => {
     const { app, post, advance } = setup(undefined, { VIEWER_KEY: "view" });
     const cookie = `${SESSION_COOKIE}=${await makeSessionToken("pw", 1_000_000)}`;

@@ -34,6 +34,7 @@ import {
   meFromRequest,
   meProofFromRequest,
 } from "./auth.ts";
+import { Games } from "./games.ts";
 import {
   AI_AVATAR_SCHEMA,
   type AvatarResult,
@@ -181,6 +182,7 @@ export class OfficeApp {
   private lastPoke = new Map<string, number>();
   readonly messages: OfficeMessages;
   readonly party: Party;
+  readonly games: Games;
   private lastLook = new Map<string, number>();
   private lastDescribe = new Map<string, number>();
   /** studio Generates the server's provider is drawing: person -> its studio token, start */
@@ -234,6 +236,30 @@ export class OfficeApp {
       (who, now) => this.interactionWait(who, now),
       this.lastPoke,
     );
+    this.games = new Games(store, {
+      timezone: this.timezone,
+      people: () => new Map(this.hub.state().people.map((p) => [p.personId, p.name])),
+      notify: (personId, text) => {
+        const poke = JSON.stringify(
+          envelope("connector.poked", { kind: "message", from: "Office games", text }),
+        );
+        let delivered = 0;
+        for (const socketId of this.hub.liveSocketsOf(personId, this.now()))
+          if (transport.sendToConnector?.(socketId, poke)) delivered++;
+        return delivered;
+      },
+      codePending: (personId, now) => {
+        try {
+          const pending = JSON.parse(store.kvGet(`claim.${personId}`) ?? "null") as {
+            exp?: number;
+          } | null;
+          return !!pending && typeof pending.exp === "number" && pending.exp > now;
+        } catch {
+          return false;
+        }
+      },
+      broadcast: (data) => transport.broadcast(data),
+    });
   }
 
   private now(): number {
@@ -283,13 +309,20 @@ export class OfficeApp {
     const version = v !== "dev" ? v : this.latest.current;
     return {
       ...snap,
-      data: { ...snap.data, today, party: this.party.state(now), ...(version ? { version } : {}) },
+      data: {
+        ...snap.data,
+        today,
+        party: this.party.state(now),
+        games: this.games.state(),
+        ...(version ? { version } : {}),
+      },
     };
   }
 
   alarm(): void {
     this.publish(this.hub.tick(this.now()));
     this.messages.prune(this.now());
+    this.games.tick(this.now());
     this.scheduleAlarm();
   }
 
@@ -321,9 +354,11 @@ export class OfficeApp {
   }
 
   private scheduleAlarm(): void {
-    const deadlines = [this.hub.nextDeadline(), this.messages.nextDeadline()].filter(
-      (n): n is number => n !== null,
-    );
+    const deadlines = [
+      this.hub.nextDeadline(),
+      this.messages.nextDeadline(),
+      this.games.nextDeadline(),
+    ].filter((n): n is number => n !== null);
     this.transport.scheduleAlarm(deadlines.length ? Math.min(...deadlines) : null);
   }
 
@@ -678,6 +713,14 @@ export class OfficeApp {
           { error: body.status === 413 ? "too large" : "invalid JSON" },
           { status: body.status },
         );
+      // you play as yourself: the person this browser is confirmed to be ("It's me")
+      const me = await meFromRequest(req, this.env, now);
+      const actor = (body.value as { personId?: unknown } | null)?.personId;
+      if (typeof actor === "string" && actor !== me)
+        return json(
+          { error: me ? "you can only play as yourself" : "confirm who you are first" },
+          { status: 403 },
+        );
       const actionAt = this.now();
       const online = new Map(
         this.hub
@@ -697,6 +740,8 @@ export class OfficeApp {
         ...(result.retryAfter ? { headers: { "retry-after": String(result.retryAfter) } } : {}),
       });
     }
+
+    if (path === "/api/games" || path.startsWith("/api/games/")) return this.gamesHttp(req, path);
 
     const look = /^\/api\/people\/([^/]{1,64})\/avatar$/.exec(path);
     if (look) {
@@ -869,6 +914,53 @@ export class OfficeApp {
    * gets its own code, so the browser is tied to the one Mac it read it on: the only Mac its
    * look studio sends a description to (requestLocalLook).
    */
+  /**
+   * Turn-based games. Reading a game is for every viewer (a hidden fleet only goes to its
+   * owner); doing anything needs the `ao_me` cookie: you play as yourself.
+   */
+  private async gamesHttp(req: Request, path: string): Promise<Response> {
+    const method = req.method.toUpperCase();
+    const now = this.now();
+    if (!(await isAuthorized(req, this.env, now)))
+      return json({ error: "unauthorized" }, { status: 401 });
+    const me = await meFromRequest(req, this.env, now);
+    if (method === "GET") {
+      const id = /^\/api\/games\/([A-Za-z0-9_-]{1,64})$/.exec(path)?.[1];
+      if (!id) return json({ error: "not found" }, { status: 404 });
+      if (id === "me") {
+        if (!me) return json({ error: "confirm who you are first" }, { status: 403 });
+        const r = this.games.settings(me);
+        return json(r.body, { status: r.status });
+      }
+      const r = this.games.get(id, me);
+      return json(r.body, { status: r.status });
+    }
+    if (path !== "/api/games" || method !== "POST")
+      return json({ error: "method not allowed" }, { status: 405 });
+    // per address and claimed person: a whole office shares one address, and two colleagues
+    // playing each other must not trip over one limit (the name is not trusted here, it only
+    // picks the bucket)
+    const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "-";
+    const claimed = /(?:^|;\s*)ao_me=([^.;]{1,64})/.exec(req.headers.get("cookie") ?? "")?.[1];
+    const who = `${ip}|${claimed ?? ""}`;
+    const retryAfter = this.games.requestAllowed(who, now);
+    if (retryAfter !== null)
+      return json(
+        { error: "slow down" },
+        { status: 429, headers: { "retry-after": String(retryAfter) } },
+      );
+    if (!me) return json({ error: "confirm who you are first" }, { status: 403 });
+    const body = await readPartyBody(req);
+    if (body.status)
+      return json(
+        { error: body.status === 413 ? "too large" : "invalid JSON" },
+        { status: body.status },
+      );
+    const r = this.games.handle(me, body.value, now);
+    this.scheduleAlarm();
+    return json(r.body, { status: r.status });
+  }
+
   private async sendClaimCode(req: Request, personId: string): Promise<Response> {
     const now = this.now();
     if (!this.hub.state().people.some((p) => p.personId === personId))
@@ -881,6 +973,13 @@ export class OfficeApp {
     const sockets = this.hub.liveSocketsOf(personId, now);
     if (sockets.length === 0)
       return json({ error: "no Mac of theirs is connected right now" }, { status: 409 });
+    // a Mac drops a notification within 5 s of the last one: a code right after a game
+    // notification would vanish without anybody noticing
+    if (now - this.games.noticedAt(personId) < 5_000)
+      return json(
+        { error: "a notification just went to that Mac, try again in a few seconds" },
+        { status: 429 },
+      );
     const dayKey = `claim.day.${personId}.${new Date(now).toISOString().slice(0, 10)}`;
     const today = Number(this.store.kvGet(dayKey) ?? 0);
     if (today >= CLAIM_MAX_PER_DAY)

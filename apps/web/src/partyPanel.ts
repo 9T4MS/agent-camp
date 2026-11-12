@@ -44,6 +44,8 @@ export class PartyPanel {
       focus: (id: string) => void;
       /** a spectator wants to play: ask who they are (the Me menu), then come back */
       claim: (then: () => void) => void;
+      /** the turn-based games' lists (my games, live games, results) */
+      games?: HTMLElement;
       onDemo: (mutation: PartyMutation) => void;
     },
   ) {
@@ -133,6 +135,7 @@ export class PartyPanel {
       intro,
       this.player,
       this.confirm,
+      ...(options.games ? [options.games] : []),
       this.equipment,
       this.field("Buddy", this.target),
       moves,

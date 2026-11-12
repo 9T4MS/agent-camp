@@ -1189,7 +1189,11 @@ declare global {
     __office: {
       ready: boolean;
       fps(): number;
-      model: { people: Map<string, unknown>; sessions: Map<string, unknown> };
+      model: {
+        people: Map<string, unknown>;
+        sessions: Map<string, unknown>;
+        games: { id: string }[];
+      };
       camera: {
         zoomToFit(): void;
         focusArea(name: string): void;

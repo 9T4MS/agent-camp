@@ -314,7 +314,8 @@ shouts for more RAM (the one whose agent's context window is fullest goes first)
 a stick from the cabin and slots it into the server rack on the desk floor. He is drawn in every browser
 and needs no data, so nothing about him is sent anywhere.
 
-Received: waves, short legacy messages, cat visits and office messages with
+Received: waves, short legacy messages, cat visits, "your turn" notices of the turn-based
+games and office messages with
 **Also notify recipients’ Macs** enabled are queued to connected Macs (at most one
 notification every 5 s on the connector; macOS may list it under "Script Editor"). Turn
 desktop notifications off with `agent-office configure --notifications false`. Saving a
@@ -362,8 +363,8 @@ The games panel adds:
 
 The panel uses the existing office login; there is no additional password field. You play as
 the person this browser is confirmed to be (the portrait in the top bar); a browser that is
-nobody is asked "Who are you?" first. The page enforces this, the server does not check moves
-yet.
+nobody is asked "Who are you?" first. The server checks it too: a move needs the "It's me"
+cookie of the person it is for.
 
 **No polling:** party state joins the existing viewer WebSocket snapshot, and successful moves
 broadcast `party.updated` on that socket (including to kiosks). Opening or leaving the games
@@ -380,8 +381,58 @@ Textures/particles are bounded and reduced-motion preferences are respected. `?d
 uses the same UI locally without sending moves to the server. Deploy web and server together;
 no connector update or AI key is required.
 
+### Schiffe versenken and Vier gewinnt (turn-based games)
+
+Two games for two, played a move at a time whenever you get to it. Click a colleague's
+nameplate and pick a game under **Challenge**; they find the invite on their portrait in the top
+bar (a number shows how many games wait for you) and in **✦ Office games** under **My games**.
+Anybody can watch a running game from **Live games**; results and records are listed below.
+
+- **Schiffe versenken:** an 8×8 board and four ships (4, 3, 3, 2) that may not touch, not even
+  at a corner. Your fleet starts placed at random: pick a ship, pick a cell to move it there,
+  **Rotate** or **Shuffle**, then **Ready**. Each turn you pick 3 cells and fire them together;
+  a hit gives no extra shot. Whoever starts opens with 2 shots (with 3, the side that starts
+  won 60% of simulated games; with 2 it is 53%). The cells around a sunk ship are marked as
+  water. A game takes about 10 to 13 turns each.
+- **Vier gewinnt:** 7 columns, 6 rows, four in a line wins. On a phone the first tap shows
+  where the disc lands, the second one drops it.
+
+![Schiffe versenken](screenshots/17-games-battleship-laptop.png)
+
+How it behaves:
+
+- **You play as yourself.** Challenging, answering and moving need the "It's me" confirmation;
+  a browser that is nobody can only watch. Your fleet is sent to your own browser only: not to
+  your opponent, not to people watching, not into anything every viewer receives. When a game
+  is over both fleets are shown. This rests on the same courtesy lock as the look editor.
+- **No clock that beats you.** You have three days for a move, and Saturdays and Sundays (in
+  the office time zone) do not count. After that nothing happens by itself: the player who
+  waits may **claim the win**, **call it off** or simply keep waiting. An invite nobody
+  answers runs out after the same time; a game nobody touched for 14 days ends without a
+  result. After a few hours of waiting you can **ask for the move** once a day.
+- **Friendly by default.** Tick "counts for the ratings" when you challenge and the invite
+  says so; only such games move the ratings (Elo, start 1000, shown with a "?" for the first
+  five). Wins, losses and draws are counted for every finished game. Whoever lost the last
+  game of a kind starts the next one. You can have three open games, one per colleague and
+  kind.
+- **Notifications on your Mac** come from "Office games" when it is your turn, at most one
+  per 30 minutes (several games are bundled into "3 games are waiting for you"). They wait a
+  minute first and are dropped if you have the office open, because the page already shows
+  it. A person asking for your move goes out at once. Switch them off in your portrait's
+  menu ("Your turn" on my Mac).
+- **Keyboard and screen readers:** the boards are grids you move through with the arrow keys
+  (or type a coordinate like `C4`); every cell says what it is ("C4, hit"), states differ by
+  symbol and not only by colour, and a status line says what the other side just did. Esc
+  closes the board. `/?game=next` opens the game that waits for you.
+
+All games live in one small record on the server, next to the party points. Moves go out on the
+existing viewer socket (`game.updated`); the server wakes itself only when an invite runs out or
+a notification is due.
+
 Local checks: `bun run lint`, `bun run typecheck`, `bun test`, `bun run test:e2e`, then
-`bun run --filter @agent-office/web build && bun tools/screenshots/party-smoke.ts`.
+`bun run --filter @agent-office/web build && bun tools/screenshots/party-smoke.ts`
+(and `bun tools/screenshots/games-smoke.ts` for the turn-based games: three browsers play both
+games end to end, one with the keyboard only, one as a phone, one watching).
 The last command starts an isolated real server, two simulated participants and three browser
 viewers (including a kiosk). It verifies zero idle API requests, the shared editor and all
 usable items, WebSocket synchronization/reconnect, scores, login, rate limits and mobile fit.

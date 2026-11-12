@@ -1,0 +1,513 @@
+/* Turn-based games: lists in the games drawer, the challenge box, the board window. */
+
+/* ---- lists in the drawer ------------------------------------------------------------------ */
+.games-list h3 {
+  margin: 18px 0 8px;
+}
+.games-list .games-empty,
+.games-list .games-notice {
+  margin: 0;
+  font-size: 13px;
+  color: var(--silver);
+}
+.games-list .games-notice {
+  margin-top: 8px;
+  color: var(--pink);
+}
+.game-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  margin-bottom: 6px;
+}
+.game-row .game-open {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--cream);
+  background: var(--night);
+  border: 2px solid var(--dusk);
+  font: inherit;
+  cursor: pointer;
+}
+.game-row.waits .game-open {
+  border-color: var(--amber);
+}
+.game-row .game-title {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  color: var(--cyan);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.game-row .game-line {
+  font-size: 13px;
+  color: var(--silver);
+}
+.game-row.waits .game-line {
+  color: var(--amber);
+}
+.game-row .game-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.game-answers .pixel-btn {
+  flex: 1;
+  padding: 2px 8px;
+}
+.games-ladder {
+  margin: 0;
+  padding-left: 26px;
+  font-size: 13px;
+  color: var(--silver);
+}
+.games-ladder .me {
+  color: var(--amber);
+}
+.games-list button:focus-visible,
+.challenge button:focus-visible,
+.challenge input:focus-visible,
+.game-modal button:focus-visible {
+  outline: 2px solid var(--lemon);
+  outline-offset: 2px;
+}
+
+/* ---- challenge box on a nameplate --------------------------------------------------------- */
+.challenge {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 2px dashed var(--dusk);
+  display: grid;
+  gap: 6px;
+}
+.challenge-title {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--grey);
+  text-transform: uppercase;
+}
+.challenge-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.challenge-btns[hidden],
+.challenge-rated[hidden] {
+  display: none;
+}
+.challenge-btns .pixel-btn {
+  min-height: 36px;
+  font-size: 11px;
+}
+.challenge-rated {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--silver);
+}
+.challenge-why:empty {
+  display: none;
+}
+.challenge-why,
+.challenge-record {
+  font-size: 12px;
+  color: var(--grey);
+}
+
+/* ---- Me chip badge and menu rows ---------------------------------------------------------- */
+.hud-top .me-chip .me-badge {
+  min-width: 16px;
+  padding: 0 3px;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--night);
+  background: var(--amber);
+}
+.me-menu .me-games {
+  display: grid;
+  gap: 6px;
+}
+.me-menu .me-game {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.me-menu .me-game-line {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--amber);
+}
+.me-menu .me-answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+/* ---- board window ------------------------------------------------------------------------- */
+.game-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px + var(--safe-t)) max(12px, var(--safe-r)) calc(12px + var(--safe-b))
+    max(12px, var(--safe-l));
+  background: rgb(24 20 37 / 82%);
+  touch-action: manipulation;
+}
+.game-box {
+  width: min(860px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  color: var(--cream);
+}
+.game-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.game-head h2 {
+  margin: 0;
+  font-family: var(--font-pixel);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--lemon);
+}
+.game-head .game-vs {
+  flex: 1;
+  font-size: 13px;
+  color: var(--silver);
+}
+.game-head .close {
+  align-self: center;
+  min-width: 44px;
+  min-height: 36px;
+  font-size: 16px;
+}
+.game-status {
+  margin: 0;
+  min-height: 1.3em;
+  font-size: 15px;
+  color: var(--cream);
+}
+.game-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pink);
+}
+.game-error:empty {
+  display: none;
+}
+.game-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.game-foot .pixel-btn,
+.salvo .pixel-btn,
+.place-tools .pixel-btn {
+  min-height: 44px;
+}
+.game-foot .game-note {
+  flex: 1;
+  min-width: 140px;
+  font-size: 13px;
+  color: var(--silver);
+}
+.game-modal .pixel-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.game-modal .pixel-btn.primary {
+  background: var(--moss);
+  box-shadow:
+    inset 0 calc(var(--px) * -2) 0 var(--forest),
+    inset 0 var(--px) 0 var(--leaf);
+}
+
+/* Battleship: two grids side by side; one at a time on a phone */
+.game-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.sea-tabs {
+  display: none;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+.sea-tabs .pixel-btn {
+  flex: 1;
+  min-height: 40px;
+}
+.sea-tabs .pixel-btn[aria-selected="true"] {
+  color: var(--night);
+  background: var(--amber);
+  box-shadow: none;
+}
+.sea-pane {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+.sea-pane.fleet:only-child {
+  grid-column: 1 / -1;
+}
+.sea-pane h3 {
+  margin: 0;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--amber);
+}
+.sea {
+  --cell: clamp(26px, calc((min(100vw, 860px) - 150px) / 18), 40px);
+  border-collapse: separate;
+  border-spacing: 2px;
+  padding: 4px;
+  background: var(--night);
+  border: 2px solid var(--dusk);
+  user-select: none;
+}
+.sea th {
+  width: 16px;
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--grey);
+}
+.sea td {
+  padding: 0;
+}
+.sea .cell {
+  display: block;
+  width: var(--cell);
+  height: var(--cell);
+  padding: 0;
+  font-family: var(--font-pixel);
+  font-size: calc(var(--cell) * 0.5);
+  line-height: 1;
+  color: var(--silver);
+  background: var(--ink);
+  border: 2px solid var(--grey);
+  border-radius: 0;
+  cursor: pointer;
+}
+.sea .cell[aria-disabled="true"] {
+  cursor: default;
+}
+.sea .cell.untried[aria-disabled="true"],
+.sea .cell.empty {
+  border-color: var(--slate);
+}
+.sea .cell.miss {
+  color: var(--silver);
+}
+.sea .cell.water {
+  color: var(--grey);
+  border-style: dotted;
+}
+.sea .cell.hit,
+.sea .cell.ship-hit {
+  color: var(--white);
+  background: var(--red);
+  border-color: var(--white);
+}
+.sea .cell.sunk,
+.sea .cell.ship-sunk {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: repeating-linear-gradient(45deg, var(--night) 0 4px, var(--cocoa) 4px 8px);
+}
+.sea .cell.ship {
+  background: var(--silver);
+  border-color: var(--white);
+}
+.sea .cell.picked {
+  color: var(--lemon);
+  border-color: var(--lemon);
+  border-style: dashed;
+}
+.sea .cell.ship.picked {
+  background: var(--lemon);
+  border-style: solid;
+}
+/* the latest salvo: cyan corner brackets, next to (not instead of) the glyph */
+.sea .cell.last {
+  box-shadow:
+    inset 5px 5px 0 -3px var(--cyan),
+    inset -5px -5px 0 -3px var(--cyan);
+}
+.sea .cell:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+.salvo,
+.place-tools {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.salvo-count {
+  font-size: 13px;
+  color: var(--silver);
+}
+.place-ships {
+  display: flex;
+  gap: 6px;
+}
+.place-ships .pixel-btn {
+  letter-spacing: 2px;
+}
+.place-ships .pixel-btn[aria-checked="true"] {
+  color: var(--night);
+  background: var(--lemon);
+  box-shadow: none;
+}
+.place-problem,
+.place-ok {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--silver);
+}
+.place-problem {
+  color: var(--pink);
+}
+
+/* Four in a Row: seven column buttons */
+.four {
+  --disc: clamp(30px, calc((min(100vw, 860px) - 90px) / 7), 56px);
+  grid-column: 1 / -1;
+  justify-self: center;
+  display: grid;
+  grid-template-columns: repeat(7, var(--disc));
+  gap: 4px;
+  padding: 6px;
+  background: var(--night);
+  border: 2px solid var(--dusk);
+}
+.four-col {
+  display: grid;
+  gap: 4px;
+  padding: 4px 0;
+  background: var(--ink);
+  border: 2px solid var(--slate);
+  border-radius: 0;
+  cursor: pointer;
+}
+.four-col[aria-disabled="true"] {
+  cursor: default;
+}
+.four-col:not([aria-disabled="true"]):hover,
+.four-col.armed {
+  border-color: var(--lemon);
+}
+.four .disc {
+  justify-self: center;
+  width: calc(var(--disc) - 12px);
+  height: calc(var(--disc) - 12px);
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--slate);
+}
+/* the two sides differ in shape, not only in colour: solid amber, hollow cyan */
+.four .disc.s0 {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.four .disc.s1 {
+  border: 6px solid var(--cyan);
+}
+.four .disc.last {
+  outline: 2px solid var(--white);
+  outline-offset: 1px;
+}
+.four .disc.win {
+  outline: 3px solid var(--lemon);
+  outline-offset: 1px;
+}
+.four-col.armed .disc.none:last-of-type {
+  border-style: dashed;
+  border-color: var(--lemon);
+}
+
+@media (max-width: 760px) {
+  .game-modal {
+    align-items: stretch;
+    padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  }
+  .game-box {
+    width: 100%;
+    padding: 12px 10px;
+  }
+  .game-body {
+    grid-template-columns: 1fr;
+  }
+  .sea-tabs {
+    display: flex;
+  }
+  .game-body[data-tab="target"] .sea-pane.fleet,
+  .game-body[data-tab="fleet"] .sea-pane.target {
+    display: none;
+  }
+  .sea {
+    --cell: clamp(28px, calc((100vw - 64px) / 8), 44px);
+  }
+  .four {
+    --disc: clamp(30px, calc((100vw - 60px) / 7), 56px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sea .cell.last {
+    animation: game-land 0.45s steps(3) 1;
+  }
+  .four .disc.last {
+    animation: game-drop 0.3s steps(4) 1;
+  }
+}
+@keyframes game-land {
+  from {
+    transform: scale(1.25);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes game-drop {
+  from {
+    transform: translateY(-120%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+body.kiosk .game-modal,
+body.nohud .game-modal {
+  display: none;
+}

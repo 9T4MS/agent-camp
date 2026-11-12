@@ -347,8 +347,22 @@ export class Hud {
   private meId: string | null = null;
   /** `me` changed (confirmed, forgotten, restored from the cookie) */
   onMeChange: (me: string | null) => void = () => {};
+  /**
+   * Turn-based games: what waits for me (badge and rows of the Me menu), and the challenge box
+   * of a person's panel. null = no games here (kiosk, demo).
+   */
+  games: {
+    waiting(): { id: string; title: string; line: string; invite: boolean }[];
+    open(id: string): void;
+    answer(id: string, accept: boolean): void;
+    challengeBox(person: PersonState): HTMLElement;
+    /** whether "your turn" notifications go to my Mac; null = not known */
+    notices(): boolean | null;
+    setNotices(on: boolean): void;
+  } | null = null;
   private meChip: HTMLButtonElement | null = null;
   private meChipKey = "";
+  private meGamesKey = "";
   private meMenu: HTMLElement;
   /** Me menu: the person whose code is being entered (null = the list / my own menu) */
   private claiming: string | null = null;
@@ -780,8 +794,14 @@ export class Hud {
   refreshMe() {
     this.renderMeChip();
     this.lookEditor?.sync();
-    // a half-typed code and my own menu are left alone
-    if (this.meMenuOpen && !this.me && !this.claiming) this.renderMeMenu();
+    // a half-typed code is left alone; my own menu follows what waits for me
+    if (!this.meMenuOpen || this.claiming) return;
+    if (!this.me) this.renderMeMenu();
+    else {
+      const key = this.meMenuKey();
+      if (key !== this.meGamesKey && !this.meMenu.contains(document.activeElement))
+        this.renderMeMenu();
+    }
   }
 
   private loadDay(personId: string) {
@@ -801,6 +821,7 @@ export class Hud {
   private renderPanel() {
     // don't yank the poke box away while someone is typing in it
     if (this.pokeBox?.isConnected && this.pokeBox.contains(document.activeElement)) return;
+    if (this.panel.querySelector(".challenge")?.contains(document.activeElement)) return;
     if (this.customize?.root.isConnected && this.customize.root.contains(document.activeElement)) {
       // ... but the GIF section still shows a new GIF as soon as `gif.updated` arrives
       this.customize.update(this.model.people.get(this.customize.personId)?.gif);
@@ -861,6 +882,7 @@ export class Hud {
       .querySelector(".this-is-me")
       ?.addEventListener("click", () => this.openMeMenu({ personId: p.personId }));
     this.mountCustomize(p);
+    if (this.games) this.panel.append(this.games.challengeBox(p));
     this.mountPoke(p);
     const portrait = this.portrait(p.personId);
     if (portrait) {
@@ -1550,6 +1572,53 @@ export class Hud {
     }
   }
 
+  /** What my menu shows of the games: when it changes, the open menu is redrawn. */
+  private meMenuKey(): string {
+    return JSON.stringify([this.games?.waiting() ?? [], this.games?.notices() ?? null]);
+  }
+
+  /** What waits for me in the turn-based games: up to three rows, invites with their answer. */
+  private fillMeGames(box: HTMLElement) {
+    const games = this.games;
+    const rows = games?.waiting() ?? [];
+    if (!games || rows.length === 0) {
+      box.remove();
+      return;
+    }
+    box.append(el("div", "me-title", "WAITING FOR YOU"));
+    for (const row of rows.slice(0, 3)) {
+      const open = el("button", "pixel-btn me-game");
+      open.type = "button";
+      open.dataset.game = row.id;
+      // names come from other people's connectors: text, never markup
+      open.append(
+        el("span", "me-game-title", esc(row.title)),
+        el("span", "me-game-line", esc(row.line)),
+      );
+      open.addEventListener("click", () => {
+        this.closeMeMenu();
+        games.open(row.id);
+      });
+      box.append(open);
+      if (!row.invite) continue;
+      const answers = el("div", "me-answers");
+      for (const [label, accept] of [
+        ["Play", true],
+        ["Not now", false],
+      ] as const) {
+        const b = el("button", "pixel-btn", label);
+        b.type = "button";
+        b.addEventListener("click", () => {
+          this.closeMeMenu();
+          games.answer(row.id, accept);
+        });
+        answers.append(b);
+      }
+      box.append(answers);
+    }
+    if (rows.length > 3) box.append(el("div", "me-note dim", `and ${rows.length - 3} more`));
+  }
+
   private miniPortrait(personId: string): HTMLCanvasElement | null {
     const c = this.portrait(personId);
     if (c) c.className = "portrait-mini";
@@ -1562,8 +1631,9 @@ export class Hud {
     if (!chip) return;
     const p = this.me ? this.model.people.get(this.me) : undefined;
     // the portrait is redrawn only when the look changes
+    const waiting = this.me ? (this.games?.waiting().length ?? 0) : 0;
     const key = this.me
-      ? `${this.me}|${p?.name ?? ""}|${JSON.stringify(p?.avatar ?? null)}`
+      ? `${this.me}|${p?.name ?? ""}|${waiting}|${JSON.stringify(p?.avatar ?? null)}`
       : "spectator";
     if (key === this.meChipKey && chip.childElementCount > 0) return;
     this.meChipKey = key;
@@ -1580,29 +1650,43 @@ export class Hud {
     // my character may not be drawn yet (right after a reload): try again on the next update
     if (!portrait) this.meChipKey = "";
     chip.prepend(portrait ?? el("span", "me-q", "&#9786;"));
+    if (waiting > 0) chip.append(el("span", "me-badge", String(waiting)));
     chip.title = `You are ${name} on this device`;
-    chip.setAttribute("aria-label", `Me: ${name}`);
+    chip.setAttribute(
+      "aria-label",
+      waiting > 0
+        ? `Me: ${name}, ${waiting} ${waiting === 1 ? "game is" : "games are"} waiting for you`
+        : `Me: ${name}`,
+    );
     chip.classList.add("confirmed");
   }
 
   private renderMeMenu() {
     const menu = this.meMenu;
     const me = this.me;
+    this.meGamesKey = this.meMenuKey();
     if (me) {
       const name = this.myName();
       menu.setAttribute("aria-label", "Me");
       menu.innerHTML = `
         <div class="me-head"><span class="portrait-slot"></span><b>${esc(name ?? "You")}</b><span class="dim">this device</span></div>
         ${this.meNote ? `<div class="me-note ok" role="status">${esc(this.meNote)}</div>` : ""}
+        <div class="me-games"></div>
         ${
           name
             ? `${this.onEditLook ? '<button type="button" class="pixel-btn me-look">&#9998; Customize look</button>' : ""}
                <button type="button" class="pixel-btn me-card">My desk</button>`
             : '<div class="me-note dim">You are not in the office right now.</div>'
         }
+        ${
+          this.games && this.games.notices() !== null
+            ? `<button type="button" class="link-btn me-notices" aria-pressed="${this.games.notices()}">"Your turn" on my Mac: ${this.games.notices() ? "on" : "off"}</button>`
+            : ""
+        }
         <button type="button" class="link-btn me-forget" title="This browser stops being you (e.g. a shared iPad)">Not ${esc(name ?? "you")}? Forget this device</button>`;
       const portrait = this.miniPortrait(me);
       if (portrait) menu.querySelector(".portrait-slot")!.replaceWith(portrait);
+      this.fillMeGames(menu.querySelector<HTMLElement>(".me-games")!);
       menu.querySelector(".me-look")?.addEventListener("click", () => {
         this.closeMeMenu();
         this.openLookEditor(me);
@@ -1610,6 +1694,11 @@ export class Hud {
       menu.querySelector(".me-card")?.addEventListener("click", () => {
         this.closeMeMenu();
         this.onOpenMe(me);
+      });
+      menu.querySelector(".me-notices")?.addEventListener("click", () => {
+        this.games?.setNotices(!this.games.notices());
+        this.renderMeMenu();
+        this.meMenu.querySelector<HTMLElement>(".me-notices")?.focus();
       });
       menu.querySelector(".me-forget")!.addEventListener("click", () => {
         void (this.onClaim?.forget() ?? Promise.resolve()).then(() => {
