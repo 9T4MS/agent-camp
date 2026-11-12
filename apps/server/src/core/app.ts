@@ -173,6 +173,13 @@ const json = (data: unknown, init: ResponseInit = {}) =>
     },
   });
 
+function toBase64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 export class OfficeApp {
   readonly hub: Hub;
   readonly genui: AvatarService;
@@ -902,8 +909,48 @@ export class OfficeApp {
       });
     }
 
+    if (path === "/api/export" && method === "GET") return this.exportData(req, url);
+
     if (path.startsWith("/api/")) return json({ error: "not found" }, { status: 404 });
     return null;
+  }
+
+  /**
+   * Full data export for moving to another server (apps/server/scripts/export-postgres.ts).
+   * Password only, so kiosk keys and browser sessions cannot dump owner hashes and claims.
+   * Without `table`: the tables, their columns and row counts. With `table`: one page of
+   * rows after rowid `after`; BLOBs come as {"$base64": ...}.
+   */
+  private exportData(req: Request, url: URL): Response {
+    if (!bearerOk(req, this.env)) return json({ error: "unauthorized" }, { status: 401 });
+    const { exportTables, exportRows } = this.store;
+    if (!exportTables || !exportRows)
+      return json({ error: "store cannot export" }, { status: 501 });
+    const table = url.searchParams.get("table");
+    if (!table) {
+      return json({
+        version: serverVersion(this.env),
+        exportedAt: this.now(),
+        tables: exportTables.call(this.store),
+      });
+    }
+    const after = Number(url.searchParams.get("after") ?? 0);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 500), 1), 1000);
+    if (!Number.isFinite(after) || !Number.isFinite(limit))
+      return json({ error: "bad after/limit" }, { status: 400 });
+    let rows: ReturnType<typeof exportRows>;
+    try {
+      rows = exportRows.call(this.store, table, after, limit);
+    } catch {
+      return json({ error: "unknown table" }, { status: 404 });
+    }
+    return json({
+      rows: rows.map((r) => ({
+        rowid: r.rowid,
+        values: r.values.map((v) => (v instanceof Uint8Array ? { $base64: toBase64(v) } : v)),
+      })),
+      next: rows.length === limit ? rows.at(-1)!.rowid : null,
+    });
   }
 
   /**
