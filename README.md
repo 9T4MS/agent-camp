@@ -480,8 +480,18 @@ with `/timelapse?day=YYYY-MM-DD`; an invalid date falls back to All.
 
 ### Office Messages
 
-Use **Messages** beside Office Games (or in the logo menu) to open the shared history and
-composer. Choose **Everyone in the office** or **Selected people** (up to 50), write up to
+New browsers show a persistent **Office chat** feed over the office, with clear unused space
+and small dark text backings for readability. **Write a message…** expands the composer;
+**History** opens filters/older history. Existing browsers keep their saved button/popup mode.
+Use **Chat settings** to switch between **Chat overlay** and **Button + popup**, choose left/right
+placement, width, feed height, 16/18/20px readable or pixel text, background fill (0/20/85/100%),
+sender initials, timestamps and image/text emotes. Settings and Hide are local to this browser;
+Reset appearance does not clear a draft, recipients, read progress or Mac-alert choice.
+On phones the resting feed shows the newest message in a compact strip. Cards/games can
+temporarily reduce or move the feed; look editing occludes it without discarding a draft.
+Passive chat does not pause the camera tour. Kiosk/nohud still never fetch or retain messages.
+
+Choose **Everyone in the office** or **Selected people** (up to 50), write up to
 200 UTF-16 code units of plain text, and optionally sign it with a display name. New general
 messages start with Mac notifications off; the person/card Message button starts with its
 person selected and notifications on. The checkbox is always explicit. Everyone + Mac notify
@@ -489,15 +499,24 @@ asks for confirmation; people are resolved when the server saves the message.
 
 - Enter adds a newline; Ctrl/Cmd+Enter sends. Selected recipients can be offline but must
   still be present in the office roster. Everyone can post even to an empty office.
-- Collapse with **−** or Escape; hidden arrivals add a browser-local unread badge without
-  reopening the log. Read means visible, at the bottom, with no filter hiding messages —
+- **Hide** explicitly hides chat; **Messages** beside Office Games restores it. Escape closes
+  the innermost picker/settings first, then returns an active overlay to compact reading;
+  it closes the popup but never silently hides a resting overlay. There is no inactivity fade.
+  Hidden arrivals add a browser-local unread badge without reopening the log. Read requires
+  a visible, focused document, displayed feed at the bottom and no filter hiding messages —
   not an account-level read receipt. Initial history is not an unread flood.
+- **Emoji & office emotes** inserts at the textarea selection; search the Emoji/Office tabs.
+  The six original static emotes are `:campfire:`, `:coffee:`, `:wave:`, `:shipit:`, `:thinking:`
+  and `:party:`. Unknown names remain text. Text-name mode, failed images, old clients and
+  Mac notifications show the literal token. No external emote service or image upload is used.
+  Emoji can take several UTF-16 units; an insertion exceeding 200 units is rejected whole.
+  Enter inserts a newline; Ctrl/Cmd+Enter sends (not during IME composition).
 - Load older history or filter broadcasts/by recipient. Reload/reconnect recovers retained
   messages; expired periods are labelled. Drafts stay only in this tab’s memory.
 - A lost/uncertain acknowledgement keeps the draft and warns that the message may already
   be saved. **Check history before sending again.** There is no automatic resend or
   duplicate-safe retry guarantee; an explicit second send can create a second message.
-- Use **Delete** on your messages to remove them from the shared log, including after reload.
+- Open **More actions → Delete** on your messages to remove them from the shared log, including after reload.
   Other office viewers do not get a delete control or permission to delete them.
 - The office accepts at most **200 stored messages per UTC day**, across all browsers/IPs
   and history-only or desktop-alert sends. The stored cap survives restarts; deleting does

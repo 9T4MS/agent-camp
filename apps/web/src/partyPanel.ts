@@ -18,6 +18,9 @@ export class PartyPanel {
   close(): void {
     this.drawer.hidden = true;
   }
+  get expanded(): boolean {
+    return !this.drawer.hidden;
+  }
   /** who moves are sent as: `me` while they are in the office, otherwise nobody */
   private person = "";
   private me: string | null = null;

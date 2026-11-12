@@ -564,7 +564,8 @@ async function boot() {
     });
     messagesPanel.onOpen = () => {
       games?.close();
-      if (matchMedia("(max-width: 560px)").matches) hud.suspendPanel();
+      if (matchMedia(messagesPanel?.overlay ? "(max-width: 899px)" : "(max-width: 560px)").matches)
+        hud.suspendPanel();
     };
     hud.onMessages = (personId) => messagesPanel?.compose(personId);
     hud.onLogout = () => {
@@ -976,9 +977,9 @@ async function boot() {
     hud.panelOpen ||
     hud.lookEditorOpen ||
     (gamesUi?.boardOpen ?? false) ||
-    (messagesPanel?.expanded ?? false);
+    (messagesPanel?.interacting ?? false);
   hud.onPanelChange = () => {
-    if (hud.panelOpen && matchMedia("(max-width: 560px)").matches && messagesPanel?.expanded)
+    if (hud.panelOpen && matchMedia("(max-width: 560px)").matches && messagesPanel?.interacting)
       messagesPanel.collapse(false);
     chars.selected = hud.openSessionId;
     if (hud.openCatSlot === null) laserArmed = null;
@@ -1281,7 +1282,7 @@ async function boot() {
     if (messagesPanel?.expanded) messagesPanel.collapse(false);
     if (matchMedia("(max-width: 560px)").matches) hud.suspendPanel();
   };
-  if (messagesPanel?.expanded) messagesPanel.onOpen();
+  if (messagesPanel?.expanded && !messagesPanel.overlay) messagesPanel.onOpen();
   games.setMe(hud.me);
   if (focusParam) {
     // with a live server the snapshot arrives later: focus as soon as the person exists
@@ -1340,6 +1341,11 @@ async function boot() {
     life.update(dt, time);
     effects.update(dt);
     living.update(dt);
+    messagesPanel?.setContext(
+      hud.panelOpen,
+      games?.expanded ?? false,
+      hud.lookEditorOpen || (gamesUi?.boardOpen ?? false),
+    );
     camera.update(dt);
     crisp.update();
     if (!nohud && !kiosk) minimap.update(dt);

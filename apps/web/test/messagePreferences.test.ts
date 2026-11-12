@@ -19,7 +19,7 @@ describe("message presentation migration", () => {
       version: 1,
       visible: false,
       appearance: { ...defaultPresentation, mode: "popup", size: 20, background: 85 },
-    };
+    } as const;
     expect(messagePreferences(JSON.stringify(saved), null)).toEqual(saved);
   });
   test.each(["{", "null", "[]", '{"version":2}'])("rejects invalid envelope %s", (raw) => {

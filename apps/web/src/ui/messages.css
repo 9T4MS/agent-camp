@@ -42,7 +42,7 @@
   justify-content: space-between;
 }
 .messages-history-tab {
-  display: none;
+  display: block;
 }
 .messages-panel h2 {
   margin: 0;
@@ -70,7 +70,9 @@
   border: 2px solid var(--dusk);
   background: var(--night);
   color: var(--cream);
-  font: 16px var(--font-body);
+  font:
+    16px system-ui,
+    sans-serif;
   border-radius: 0;
   padding: 6px;
   min-height: 38px;
@@ -101,14 +103,14 @@
   unicode-bidi: isolate;
 }
 .messages-byline time {
-  color: var(--grey);
+  color: var(--sand);
   font-size: 12px;
 }
 .messages-log p {
   white-space: pre-wrap;
   unicode-bidi: plaintext;
   margin: 6px 0;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 .messages-panel form {
   min-height: 100px;
@@ -262,5 +264,281 @@
   }
   .messages-panel:has(form:focus-within) form {
     flex: 1;
+  }
+}
+
+/* A clear scene surface. Fill never changes the opacity of text or controls. */
+.messages-overlay {
+  width: min(
+    var(--chat-width),
+    calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right))
+  );
+  height: min(calc(var(--chat-height) + 340px), calc(100dvh - 150px));
+  border: 0;
+  box-shadow: none;
+  background: color-mix(in srgb, #181425 var(--chat-fill), transparent);
+  color: #fff5d6;
+  padding: 4px;
+}
+.messages-overlay[data-position="right"] {
+  left: auto;
+  right: max(14px, env(safe-area-inset-right));
+  /* Keep the minimap's lower-right lane free. */
+  bottom: calc(186px + env(safe-area-inset-bottom) + var(--messages-bottom, 0px));
+}
+.messages-overlay.messages-resting {
+  height: auto;
+  max-height: calc(var(--messages-vh, 100dvh) - 150px);
+}
+.messages-overlay header {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.messages-overlay h2 {
+  flex: 1 1 80px;
+  font-size: 12px;
+  text-shadow:
+    -1px -1px #181425,
+    1px -1px #181425,
+    -1px 1px #181425,
+    1px 1px #181425,
+    0 0 3px #181425;
+}
+.messages-overlay header .pixel-btn {
+  padding: 6px;
+  font:
+    12px system-ui,
+    sans-serif;
+}
+.messages-overlay .messages-log {
+  background: transparent;
+  padding: 4px;
+}
+.messages-resting .messages-log {
+  flex: 0 1 auto;
+  height: var(--chat-height);
+}
+.messages-panel .messages-log,
+.messages-sample {
+  font:
+    var(--chat-size, 16px) / 1.45 system-ui,
+    sans-serif;
+}
+.messages-text-pixel .messages-log {
+  font-family: var(--font-body);
+}
+.messages-overlay .messages-log article {
+  border: 0;
+  padding: 6px 0;
+}
+.messages-overlay .messages-log p,
+.messages-sample {
+  /* Small local text support, leaving the unused scene/log area genuinely clear. */
+  color: #fff5d6;
+  text-shadow:
+    -1px -1px #181425,
+    1px -1px #181425,
+    -1px 1px #181425,
+    1px 1px #181425,
+    0 0 3px #181425;
+}
+.messages-overlay .messages-log p {
+  background: #181425e6;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  display: inline;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.messages-byline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  font:
+    13px / 1.45 system-ui,
+    sans-serif;
+  margin-bottom: 4px;
+}
+.messages-byline b {
+  flex: 1 1 160px;
+}
+.messages-overlay .messages-byline b,
+.messages-overlay .messages-byline time {
+  background: #181425e6;
+  padding: 1px 3px;
+}
+.messages-sender-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: #181425;
+  border: 1px solid #b86f50;
+  color: #fff5d6;
+  flex-shrink: 0;
+  font:
+    bold 12px system-ui,
+    sans-serif;
+}
+.messages-row-actions {
+  float: right;
+  margin-left: 6px;
+}
+.messages-log article::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.messages-row-actions summary {
+  color: #fff5d6;
+  text-shadow:
+    -1px -1px #181425,
+    1px -1px #181425,
+    -1px 1px #181425,
+    1px 1px #181425;
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+  font:
+    12px system-ui,
+    sans-serif;
+}
+.messages-overlay form,
+.messages-settings,
+.messages-emoji-picker {
+  background: #181425;
+  color: #fff5d6;
+  padding: 8px;
+}
+.messages-settings {
+  overflow-y: auto;
+  min-height: 0;
+  font:
+    14px / 1.45 system-ui,
+    sans-serif;
+}
+.messages-settings h3 {
+  margin: 0;
+}
+.messages-settings label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+.messages-settings label select {
+  flex: 0 1 200px;
+  min-height: 44px;
+}
+.messages-sample {
+  padding: 12px 0;
+}
+.messages-emoji-picker input {
+  width: 100%;
+}
+.messages-emoji-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  gap: 4px;
+  max-height: 144px;
+  overflow-y: auto;
+}
+.messages-panel .messages-emoji-results .pixel-btn {
+  font-size: 20px;
+  padding: 4px;
+}
+.message-emote {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  max-width: 28px;
+  max-height: 28px;
+  vertical-align: middle;
+  image-rendering: pixelated;
+}
+.messages-configuring {
+  height: min(680px, calc(100dvh - 150px));
+}
+.messages-panel:has(:where(.messages-emoji-picker:not([hidden]))) .messages-log {
+  display: none;
+}
+.messages-panel:has(.messages-emoji-picker:not([hidden])) form {
+  flex: 1;
+  min-height: 0;
+}
+.messages-occluded {
+  visibility: hidden;
+  pointer-events: none;
+}
+.messages-compact.messages-resting .messages-log {
+  height: min(140px, 24dvh);
+}
+@media (min-width: 1180px) {
+  .messages-overlay.messages-both-lanes {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 1179px) {
+  .messages-overlay.messages-compact.messages-resting {
+    left: max(14px, env(safe-area-inset-left));
+    right: auto;
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    max-height: 30dvh;
+  }
+  /* Reserve the strip rather than painting chat over a card/game's primary controls. */
+  #app:has(.messages-overlay.messages-compact:not([hidden])) .hud-panel,
+  #app:has(.messages-overlay.messages-compact:not([hidden])) .party-panel {
+    max-height: calc(70dvh - 170px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 560px) {
+  #app:has(.messages-overlay.messages-compact:not([hidden])) .hud-panel {
+    bottom: calc(30dvh + 70px + env(safe-area-inset-bottom));
+  }
+  .messages-overlay.messages-resting,
+  .messages-overlay.messages-resting[data-position="right"] {
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    left: max(14px, env(safe-area-inset-left));
+    right: auto;
+    width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: 30dvh;
+  }
+  .messages-resting header h2,
+  .messages-resting .messages-history-status,
+  .messages-resting .messages-row-actions {
+    display: none;
+  }
+  .messages-resting .messages-log {
+    height: auto;
+    min-height: 36px;
+  }
+  .messages-resting .messages-log article:not(:last-child) {
+    display: none;
+  }
+  .messages-resting header .pixel-btn,
+  .messages-resting .messages-write {
+    min-height: 44px;
+  }
+  .messages-resting .messages-write {
+    font:
+      12px system-ui,
+      sans-serif;
+    padding: 4px;
+  }
+  .messages-panel.messages-configuring {
+    height: calc(var(--messages-vh, 100dvh) - 100px);
+  }
+  .messages-overlay:not(.messages-resting)[data-position="right"] {
+    left: 14px;
+    right: auto;
+    bottom: calc(60px + var(--messages-bottom, 0px));
+  }
+  .messages-panel.messages-keyboard[data-position] {
+    bottom: calc(12px + var(--messages-bottom, 0px));
+    height: calc(var(--messages-vh) - 24px);
+    max-height: calc(var(--messages-vh) - 24px);
   }
 }
