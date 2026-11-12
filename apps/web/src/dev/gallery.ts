@@ -25,6 +25,13 @@ import {
   kittenTextures,
   RESIDENT_COATS,
 } from "../art/fx.ts";
+import {
+  extinguisherTextures,
+  IT_GUY_RENDER,
+  messTextures,
+  ramTexture,
+  sootTexture,
+} from "../art/itGuy.ts";
 import { C } from "../art/palette.ts";
 import {
   leadSheet,
@@ -35,13 +42,6 @@ import {
   sidekickSheet,
 } from "../art/portalCharacters.ts";
 import { queenTextures } from "../art/queen.ts";
-import {
-  extinguisherTextures,
-  messTextures,
-  RICHARD_RENDER,
-  ramTexture,
-  sootTexture,
-} from "../art/richard.ts";
 import { parseLookParam } from "../demo/demoFeed.ts";
 import type { ObjectKind } from "../world/map.ts";
 
@@ -116,8 +116,8 @@ export function showGallery(app: Application) {
     ...SHOWCASE.map(([extra, agent]) =>
       lookFor({ ...avatarFromSeed("tom"), ...extra }, agent, null),
     ),
-    // Richard, the IT guy from the server cabin
-    RICHARD_RENDER,
+    // The IT guy from the server cabin
+    IT_GUY_RENDER,
   ];
   looks.forEach((look, row) => {
     const sheet = characterSheet(look);

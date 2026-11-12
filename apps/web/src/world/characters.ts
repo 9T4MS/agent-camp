@@ -323,12 +323,12 @@ export class CharacterManager {
   onSnack: (x: number, y: number) => void = () => {};
   /** someone punched their hours at the time clock (at x, y) */
   onPunch: (x: number, y: number) => void = () => {};
-  /** someone walked into Kurt's office and stands at his desk */
-  onAskKurt: (sessionId: string) => void = () => {};
-  /** how long a visit at Kurt's desk lasts (seconds) */
-  kurtVisit = 9;
-  /** how likely an idle wander goes to ask Kurt for something (party demo: more) */
-  kurtChance = 0.06;
+  /** someone walked into the CFO's office and stands at his desk */
+  onAskCfo: (sessionId: string) => void = () => {};
+  /** how long a visit at the CFO's desk lasts (seconds) */
+  cfoVisit = 9;
+  /** how likely an idle wander goes to ask the CFO for something (party demo: more) */
+  cfoChance = 0.06;
   private hits = new HitCounter();
   private craters: Crater[] = [];
   private rebels = new Map<string, Rebellion>();
@@ -1081,10 +1081,10 @@ export class CharacterManager {
       const clock = all.find((p) => p.id === "timeclock");
       if (clock) return take(clock);
     }
-    // ask Kurt for the Klima ticket or a contract (only on purpose, never as a random spot)
-    if (this.rand() < this.kurtChance) {
-      const kurt = all.find((p) => p.id === "kurt");
-      if (kurt) return take(kurt);
+    // ask the CFO for their contract (only on purpose, never as a random spot)
+    if (this.rand() < this.cfoChance) {
+      const cfo = all.find((p) => p.id === "cfo");
+      if (cfo) return take(cfo);
     }
     // a coffee run
     if (c.mugT <= 0 && this.rand() < 0.3) {
@@ -1097,7 +1097,7 @@ export class CharacterManager {
     let pois =
       nooks.length > 0 && this.rand() < 0.25
         ? nooks
-        : free(this.scene.map.pois).filter((p) => p.id !== "kurt");
+        : free(this.scene.map.pois).filter((p) => p.id !== "cfo");
     if (pois.length === 0) pois = nooks;
     if (pois.length === 0) return;
     const favourites = pois.filter((p) => p.area !== "desks" && p.area !== "meeting");
@@ -1124,7 +1124,7 @@ export class CharacterManager {
     return (
       !o.removed &&
       o.mode === "poi" &&
-      o.poi?.id !== "kurt" &&
+      o.poi?.id !== "cfo" &&
       !o.rally &&
       !o.chat &&
       o.chatCooldown <= 0 &&
@@ -1294,10 +1294,10 @@ export class CharacterManager {
     return out;
   }
 
-  /** Someone standing at Kurt's desk says something (Kurt's visit). */
-  sayAtKurt(sessionId: string, text: string) {
+  /** Someone standing at the CFO's desk says something (the CFO's visit). */
+  sayAtCfo(sessionId: string, text: string) {
     const c = this.chars.get(sessionId);
-    if (c && !c.removed && c.mode === "poi" && c.poi?.id === "kurt") this.say(c, text);
+    if (c && !c.removed && c.mode === "poi" && c.poi?.id === "cfo") this.say(c, text);
   }
 
   /** Every seated, online person at a desk, whatever their agent is doing (Eloy meows at them). */
@@ -1969,7 +1969,7 @@ export class CharacterManager {
           } else if (c.poi?.id === "timeclock") {
             this.onPunch(c.x, c.y);
             this.idleWander(c);
-          } else if (c.poi?.id === "kurt") {
+          } else if (c.poi?.id === "cfo") {
             this.idleWander(c);
           } else if (c.poi?.id === "shop-counter") {
             // bought something: straight to the smokers' corner
@@ -2151,9 +2151,9 @@ export class CharacterManager {
         c.poi?.id === "snack" ||
         c.poi?.id === "timeclock";
       c.timer = quick ? 3 + this.rand() * 2 : (10 + this.rand() * 15) * this.dwell;
-      if (c.poi?.id === "kurt") {
-        c.timer = this.kurtVisit;
-        this.onAskKurt(c.sessionId);
+      if (c.poi?.id === "cfo") {
+        c.timer = this.cfoVisit;
+        this.onAskCfo(c.sessionId);
       }
       // a seat at the counter comes with a beer (it stands on the counter beside them)
       if (c.poi && isBarStool(c.poi) && (c.carry !== "beer" || c.mugT < c.timer + 5))

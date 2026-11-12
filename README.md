@@ -319,9 +319,9 @@ are robots by default; `agent-office configure --helpers cats` turns them into k
 (`--helpers robots` switches back). Restart the connector to apply it:
 `launchctl kickstart -k gui/$(id -u)/dev.agentoffice.connector`.
 
-Richard, the IT guy, lives in the wooden server cabin in the garden. Every few minutes the
+The IT guy lives in the wooden server cabin in the garden. Every few minutes the
 cabin catches fire and he runs out with the extinguisher. Every minute or so a developer
-shouts for more RAM (the one whose agent's context window is fullest goes first); Richard gets
+shouts for more RAM (the one whose agent's context window is fullest goes first); the IT guy gets
 a stick from the cabin and slots it into the server rack on the desk floor. He is drawn in every browser
 and needs no data, so nothing about him is sent anywhere.
 
@@ -458,7 +458,7 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 | `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer, open Office Messages with that person selected, send a cat to sit on their desk, or throw a paper ball (office only). There is one office cat, plus one for every two people (up to 10), and four cats who live there: Cece and Jess are always hungry and go from desk to desk begging the people at working agents for treats and, at mealtimes, for a meal; Kiwi has the zoomies; Eloy goes round every dev at a desk and meows at them. Click a cat to pet it and open its card, then feed it, toss it a yarn ball, or get out the laser pointer and tap the floor. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/?kiosk=1&gifs=0`   | The kiosk without head GIFs (nothing is loaded from Giphy on that screen). |
-| `/?richard=0`        | No Richard on this screen: no cabin fires, no RAM runs (the cabin stays). |
+| `/?itguy=0`          | No IT guy on this screen: no cabin fires, no RAM runs (the cabin stays). |
 | `/?toons=0`          | No portal characters on this screen. They are off on the kiosk by default; `/?kiosk=1&toons=1` brings them back there. |
 | `/?bow=1`            | The hourly bow at the head desk every minute instead of on the full hour (demos, screenshots). |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |

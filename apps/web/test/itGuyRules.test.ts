@@ -1,15 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { seededRandom } from "@agent-office/protocol";
 import {
-  buildOfficeMap,
-  CABIN_DOOR,
-  CABIN_HOSE,
-  FOOTPRINTS,
-  RACK_SPOT,
-  SERVER_CABIN,
-} from "../src/world/map.ts";
-import { findPath } from "../src/world/pathing.ts";
-import {
   expiredMess,
   FIRE_OUT,
   FIRE_START,
@@ -23,7 +14,16 @@ import {
   RAM_COMING,
   RAM_THANKS,
   ramSize,
-} from "../src/world/richardRules.ts";
+} from "../src/world/itGuyRules.ts";
+import {
+  buildOfficeMap,
+  CABIN_DOOR,
+  CABIN_HOSE,
+  FOOTPRINTS,
+  RACK_SPOT,
+  SERVER_CABIN,
+} from "../src/world/map.ts";
+import { findPath } from "../src/world/pathing.ts";
 
 const target = (id: string, context: number) => ({ id, context, x: 0, y: 0 });
 
@@ -86,7 +86,7 @@ describe("mess", () => {
   });
 });
 
-describe("Richard's spots", () => {
+describe("the IT guy's spots", () => {
   test("cabin door, hose spot and rack are reachable from the street door and each other", () => {
     for (const rows of [4, 6]) {
       const map = buildOfficeMap(rows);

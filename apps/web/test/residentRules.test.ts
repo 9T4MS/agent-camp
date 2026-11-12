@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { seededRandom } from "@agent-office/protocol";
-import { buildOfficeMap, HEAD_DESK, KURT_DESK, SALES_STAND, STOVE_SPOT } from "../src/world/map.ts";
+import { buildOfficeMap, CFO_DESK, HEAD_DESK, SALES_STAND, STOVE_SPOT } from "../src/world/map.ts";
 import { findPath } from "../src/world/pathing.ts";
-import { haggle, hourCrossed, kurtTalk, kurtWifi, lineSpots } from "../src/world/residentRules.ts";
+import {
+  cfoCall,
+  cfoOuting,
+  cfoTalk,
+  haggle,
+  hourCrossed,
+  lineSpots,
+} from "../src/world/residentRules.ts";
 
 const grid = (x0: number, y0: number, x1: number, y1: number) => ({
   isWalkable: (x: number, y: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1,
@@ -93,46 +100,64 @@ describe("haggling at the sales stand", () => {
   });
 });
 
-describe("asking Kurt", () => {
-  test("a dev asks for the Klima ticket or a contract; it's hard, this and that, takes time", () => {
-    const rand = seededRandom("kurt");
-    const topics = new Set<string>();
+describe("asking the CFO", () => {
+  test("a dev asks for their contract; it's hard, takes time", () => {
+    const rand = seededRandom("cfo");
     for (let i = 0; i < 200; i++) {
-      const { topic, lines } = kurtTalk(rand);
-      topics.add(topic);
-      expect(lines.map((l) => l.who)).toEqual(["dev", "kurt", "kurt", "kurt", "dev"]);
-      expect(lines[0]!.text).toMatch(topic === "klima" ? /KLIMA TICKET/ : /CONTRACT/);
+      const { lines } = cfoTalk(rand);
+      expect(lines.map((l) => l.who)).toEqual(["dev", "cfo", "cfo", "dev"]);
+      expect(lines[0]!.text).toMatch(/CONTRACT/);
       expect(lines[1]!.text).toMatch(/HARD|TRICKY|DIFFICULT/);
-      expect(lines[2]!.text).toMatch(/THIS.*THAT/);
-      expect(lines[3]!.text).toMatch(/TIME/);
-      for (const l of lines) expect(l.text).toMatch(/^[A-Z0-9 .,!?':]+$/);
+      expect(lines[2]!.text).toMatch(/TIME/);
+      for (const l of lines) {
+        expect(l.text).toMatch(/^[A-Z0-9 .,!?':]+$/);
+        expect(l.text).not.toMatch(/KLIMA/);
+      }
     }
-    expect([...topics].sort()).toEqual(["contract", "klima"]);
   });
-  test("out of his office he asks where the wifi is, someone answers, he has the last word", () => {
-    const rand = seededRandom("wifi");
-    const answers = new Set<string>();
-    for (let i = 0; i < 100; i++) {
-      const w = kurtWifi(rand);
-      expect(w.ask).toBe("WHERE IS THE WIFI?!");
-      answers.add(w.answer);
-      for (const t of [w.ask, w.answer, w.thanks]) expect(t).toMatch(/^[A-Z0-9 .,!?':]+$/);
+  test("he calls his colleague at WEKAO: dials, greets, two or three lines, goodbye", () => {
+    const rand = seededRandom("wekao");
+    for (let i = 0; i < 200; i++) {
+      const lines = cfoCall(rand);
+      expect(lines.length === 5 || lines.length === 6).toBe(true);
+      expect(lines[0]).toBe("CALLING WEKAO...");
+      expect(lines[1]).toMatch(/WEKAO|IT'S ME/);
+      expect(new Set(lines.slice(2, -1)).size).toBe(lines.length - 3);
+      for (const l of lines) expect(l).toMatch(/^[A-Z0-9 .,!?':]+$/);
     }
+  });
+  test("out of his office he asks about the wifi or lunch, someone answers, he has the last word", () => {
+    const rand = seededRandom("outing");
+    const answers = new Set<string>();
+    const topics = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      const o = cfoOuting(rand);
+      topics.add(o.topic);
+      expect(o.ask).toBe(
+        o.topic === "wifi" ? "WHERE IS THE WIFI?!" : "ANYONE ORDERING LUNCH AT PHO HA NOI?!",
+      );
+      answers.add(o.answer);
+      for (const t of [o.leave, o.ask, o.answer, o.thanks]) {
+        expect(t).toMatch(/^[A-Z0-9 .,!?':]+$/);
+        expect(t).not.toMatch(/THIS.*THAT/);
+      }
+    }
+    expect([...topics].sort()).toEqual(["lunch", "wifi"]);
     expect(answers.size).toBeGreaterThan(3);
   });
   for (const rows of [4, 6]) {
     test(`his office is only reachable through its door (${rows} pod rows)`, () => {
       const map = buildOfficeMap(rows);
-      const room = map.areas.find((a) => a.name === "kurt")!;
-      const visit = map.pois.find((p) => p.id === "kurt")!;
+      const room = map.areas.find((a) => a.name === "cfo")!;
+      const visit = map.pois.find((p) => p.id === "cfo")!;
       const inRoom = (t: { x: number; y: number }) =>
         t.x >= room.x && t.x < room.x + room.w && t.y >= room.y && t.y < room.y + room.h;
       expect(inRoom(visit.tile)).toBe(true);
-      expect(visit.tile).toEqual({ x: KURT_DESK.x, y: KURT_DESK.y + 1 });
+      expect(visit.tile).toEqual({ x: CFO_DESK.x, y: CFO_DESK.y + 1 });
       expect(map.isWalkable(visit.tile.x, visit.tile.y)).toBe(true);
       expect(findPath(map, map.spawn, visit.tile)).not.toBeNull();
       // his chair behind the desk is free floor
-      expect(map.isWalkable(KURT_DESK.x, KURT_DESK.y - 1)).toBe(true);
+      expect(map.isWalkable(CFO_DESK.x, CFO_DESK.y - 1)).toBe(true);
       // close the door: nobody gets in any more
       const door = [];
       for (let y = room.y; y < room.y + room.h; y++)

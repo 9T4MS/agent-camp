@@ -1,5 +1,5 @@
 /**
- * Richard, the IT guy. He lives in the wooden server cabin in the garden, together with the
+ * The IT guy. He lives in the wooden server cabin in the garden, together with the
  * servers: he potters around it, goes in for a while, now and then wanders to the kitchen for a
  * coffee and drops a cable, a screw or a pizza box wherever he walks. Every few minutes the
  * cabin catches fire and he runs back with the extinguisher; whenever a developer runs short
@@ -10,25 +10,15 @@ import { seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
 import { textBubbleTexture } from "../art/fun.ts";
 import { flameTextures, smokeTexture } from "../art/heat.ts";
-import { C } from "../art/palette.ts";
 import {
   extinguisherTextures,
+  itGuySheet,
   messTextures,
   ramTexture,
-  richardSheet,
   sootTexture,
-} from "../art/richard.ts";
+} from "../art/itGuy.ts";
+import { C } from "../art/palette.ts";
 import type { Effects } from "./effects.ts";
-import {
-  CABIN_DOOR,
-  CABIN_HOSE,
-  FOOTPRINTS,
-  type OfficeMap,
-  type Point,
-  RACK_SPOT,
-  SERVER_CABIN,
-  TILE,
-} from "./map.ts";
 import {
   expiredMess,
   FIRE_EVERY_S,
@@ -46,7 +36,17 @@ import {
   RAM_THANKS,
   type RamTarget,
   ramSize,
-} from "./richardRules.ts";
+} from "./itGuyRules.ts";
+import {
+  CABIN_DOOR,
+  CABIN_HOSE,
+  FOOTPRINTS,
+  type OfficeMap,
+  type Point,
+  RACK_SPOT,
+  SERVER_CABIN,
+  TILE,
+} from "./map.ts";
 import { Walker } from "./walker.ts";
 
 /** The auto-pilot camera looks at a fire at most this often (and not in the first minutes). */
@@ -71,18 +71,18 @@ type Mode = "inside" | "walk" | "putter" | "coffee" | "rummage" | "install" | "s
 type Fire = { flames: Sprite[]; left: number; smokeT: number; foamT: number };
 type MessItem = { sprite: Sprite; born: number };
 
-export type RichardHooks = {
+export type ItGuyHooks = {
   /** seated developers with a working agent and how full its context window is */
   ramTargets: () => RamTarget[];
   /** a developer says something from their chair */
   devSays: (id: string, text: string) => void;
 };
 
-export class Richard {
+export class ItGuy {
   readonly walker: Walker;
   private mode: Mode = "inside";
   private timer = 8;
-  private rand = seededRandom("richard");
+  private rand = seededRandom("itGuy");
   private onArrive: (() => void) | null = null;
   private target: Point | null = null;
   private speed = WALK;
@@ -111,9 +111,9 @@ export class Richard {
     private readonly objects: Container,
     private map: OfficeMap,
     private readonly effects: Effects,
-    private readonly hooks: RichardHooks,
+    private readonly hooks: ItGuyHooks,
   ) {
-    this.walker = new Walker(objects, richardSheet(), map, effects, this.doorSpot());
+    this.walker = new Walker(objects, itGuySheet(), map, effects, this.doorSpot());
     this.walker.sprite.visible = false;
     this.prop = new Sprite(ramTexture());
     this.prop.anchor.set(0.5, 1);

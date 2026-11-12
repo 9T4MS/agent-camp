@@ -1,5 +1,5 @@
 /**
- * Pure rules of Richard, the IT guy in the server cabin: when the cabin catches fire next,
+ * Pure rules of the IT guy in the server cabin: when the cabin catches fire next,
  * which developer gets new RAM first, how much mess he leaves lying around, and his lines.
  */
 import type { Point } from "./map.ts";
@@ -24,7 +24,7 @@ export function jitter(every: number, rand: () => number): number {
 export type RamTarget = Point & { id: string; context: number };
 
 /**
- * Who asks Richard for RAM: someone whose agent uses at least half its context window if
+ * Who asks the IT guy for RAM: someone whose agent uses at least half its context window if
  * there is one (the fullest first, ties at random), otherwise anyone with a working agent.
  */
 export function pickRamTarget<T extends RamTarget>(
@@ -70,13 +70,13 @@ export function messAlpha(age: number, life = MESS_LIFE_S): number {
 }
 
 export const RAM_ASKS = [
-  "RICHARD! MORE RAM!",
-  "RICHARD, IT'S SWAPPING!",
+  "IT GUY! MORE RAM!",
+  "IT GUY, IT'S SWAPPING!",
   "OUT OF MEMORY AGAIN!",
-  "RICHARD! RAM PLEASE!",
+  "IT GUY! RAM PLEASE!",
 ];
 export const RAM_COMING = ["COMING!", "ON MY WAY!", "RAM? I HAVE RAM!", "HOLD ON!"];
-export const RAM_THANKS = ["FINALLY!", "SO FAST NOW!", "THANKS RICHARD!", "IT FLIES!"];
+export const RAM_THANKS = ["FINALLY!", "SO FAST NOW!", "THANKS IT GUY!", "IT FLIES!"];
 export const FIRE_START = ["MY SERVERS!", "NOT AGAIN!", "FIRE! FIRE!", "WHO PLUGGED THAT IN?!"];
 export const FIRE_OUT = [
   "ALL GOOD. PROBABLY.",

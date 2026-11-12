@@ -1,5 +1,5 @@
 /**
- * Richard, the IT guy who lives in the wooden server cabin in the garden: short white-grey
+ * The IT guy who lives in the wooden server cabin in the garden: short white-grey
  * hair, a ruddy face, a grey polo, short blue trousers, bare shins and lime-green crocs. Drawn
  * with the shared HD painter (no agent colour, no badge), plus the small things he carries
  * (a fire extinguisher, a RAM stick), the mess he leaves behind and the soot on his roof.
@@ -23,7 +23,7 @@ const POLO = ramp("#6f7975", "#4f5855", "#8f9a95");
 const SHORTS = ramp("#3b6db3", "#28497a", "#5b8fd4");
 const CROCS = ramp("#8fd14f", "#5c9a2c", "#b8e67c");
 
-export const RICHARD_LOOK: CharacterLook = {
+export const IT_GUY_LOOK: CharacterLook = {
   v: 1,
   build: "broad",
   skin: ramp("#eaa98a", "#c97e64", "#f7c6aa"),
@@ -109,8 +109,8 @@ export const RICHARD_LOOK: CharacterLook = {
   },
 };
 
-export const RICHARD_RENDER: RenderLook = {
-  look: RICHARD_LOOK,
+export const IT_GUY_RENDER: RenderLook = {
+  look: IT_GUY_LOOK,
   agent: "claude",
   agentRamp: agentRampOf("claude"),
   accent: false,
@@ -118,7 +118,7 @@ export const RICHARD_RENDER: RenderLook = {
   mug: false,
 };
 
-export const richardSheet = (): CharacterSheet => characterSheet(RICHARD_RENDER);
+export const itGuySheet = (): CharacterSheet => characterSheet(IT_GUY_RENDER);
 
 function once<T>(make: () => T): () => T {
   let v: T | undefined;
@@ -174,7 +174,7 @@ export const ramTexture = once(() => {
   return Texture.from(pc.toCanvas());
 });
 
-/** What Richard leaves lying around: a tangled cable, a screw, a pizza box, a floppy disk. */
+/** What the IT guy leaves lying around: a tangled cable, a screw, a pizza box, a floppy disk. */
 export const messTextures = once(() => {
   const fw = 12;
   const fh = 9;

@@ -6,8 +6,8 @@
  *   x 1..32   main desk floor (pod slots, 3 columns: desks only for people who are here,
  *             cozy nooks elsewhere; rows grow as people join)
  *   x 34..49  kitchen + lounge (top), meeting room (middle), game corner (bottom left) and
- *             Kurt's office (bottom right, x 45..49, door from the game corner at y 25..26)
- *   x 51..62  garden with Richard's server cabin; main door in the bottom wall at x 16..17
+ *             The CFO's office (bottom right, x 45..49, door from the game corner at y 25..26)
+ *   x 51..62  garden with the IT guy's server cabin; main door in the bottom wall at x 16..17
  *   x 63      hedge with a gate at y 7..8 (the garden path crosses into the street block)
  *   x 64..79  east street block: a sidewalk lane (x 64), the "Feierabend" bar (top), the
  *             weed shop (middle) and the smokers' corner (bottom); hedge at x 79
@@ -262,7 +262,7 @@ export const FOOTPRINTS = {
   headDesk: { w: 3, h: 1, solid: true },
   timeClock: { w: 1, h: 1, solid: false },
   salesStand: { w: 2, h: 1, solid: true },
-  kurtDesk: { w: 2, h: 1, solid: true },
+  cfoDesk: { w: 2, h: 1, solid: true },
   fileCabinet: { w: 1, h: 1, solid: true },
   serverCabin: { w: 4, h: 2, solid: true },
 } as const;
@@ -275,15 +275,15 @@ export const HEAD_DESK: Point = { x: 46, y: 14 };
 export const SALES_STAND: Point = { x: 52, y: 22 };
 /** Where the cook stands at the stove. */
 export const STOVE_SPOT: Point = { x: 35, y: 4 };
-/** Left tile of Kurt's desk (2 wide, he sits behind it facing the door of his office). */
-export const KURT_DESK: Point = { x: 46, y: 23 };
-/** Left tile of Richard's wooden server cabin in the garden (4 wide, 2 deep). */
+/** Left tile of the CFO's desk (2 wide, he sits behind it facing the door of his office). */
+export const CFO_DESK: Point = { x: 46, y: 23 };
+/** Left tile of the IT guy's wooden server cabin in the garden (4 wide, 2 deep). */
 export const SERVER_CABIN: Point = { x: 56, y: 4 };
-/** The tile in front of the cabin door (Richard goes in and out here). */
+/** The tile in front of the cabin door (the IT guy goes in and out here). */
 export const CABIN_DOOR: Point = { x: 58, y: 6 };
-/** Where Richard stands to spray the burning cabin roof. */
+/** Where the IT guy stands to spray the burning cabin roof. */
 export const CABIN_HOSE: Point = { x: 57, y: 6 };
-/** Where Richard stands (facing up) to put RAM into the server rack on the desk floor. */
+/** Where the IT guy stands (facing up) to put RAM into the server rack on the desk floor. */
 export const RACK_SPOT: Point = { x: 32, y: 16 };
 
 const o = (kind: ObjectKind, x: number, y: number, variant?: number): MapObject =>
@@ -331,8 +331,8 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("beanbag", 42, 23, 1),
   o("beanbag", 43, 23, 2),
   o("pingpong", 40, 25),
-  // Kurt's office (x 45..49, door at x 44, y 25..26)
-  o("kurtDesk", KURT_DESK.x, KURT_DESK.y),
+  // The CFO's office (x 45..49, door at x 44, y 25..26)
+  o("cfoDesk", CFO_DESK.x, CFO_DESK.y),
   o("fileCabinet", 45, 22),
   o("plant", 49, 22, 2),
   o("plantBig", 49, 27),
@@ -402,7 +402,7 @@ export type AreaName =
   | "lounge"
   | "meeting"
   | "game"
-  | "kurt"
+  | "cfo"
   | "garden"
   | "bar"
   | "shop";
@@ -464,8 +464,8 @@ const BASE_POIS: readonly Poi[] = [
   poi("pong-r", "game", 43, 25, "left", "play"),
   poi("tv-1", "game", 42, 23, "up", "sitBack", seat(42, 23)),
   poi("tv-2", "game", 43, 23, "up", "sitBack", seat(43, 23)),
-  // in front of Kurt's desk: ask him for the Klima ticket or a contract
-  poi("kurt", "kurt", KURT_DESK.x, KURT_DESK.y + 1, "up", "stand"),
+  // in front of the CFO's desk: ask him for a contract
+  poi("cfo", "cfo", CFO_DESK.x, CFO_DESK.y + 1, "up", "stand"),
   poi("bench-1", "garden", 58, 10, "down", "sit", seat(58, 9)),
   poi("bench-2", "garden", 59, 10, "down", "sit", seat(59, 9)),
   poi("bench-3", "garden", 52, 15, "down", "sit", seat(52, 14)),
@@ -702,7 +702,7 @@ export function buildOfficeMap(podRows: number = BASE_POD_ROWS): OfficeMap {
     { name: "lounge", label: "Lounge", x: 42, y: 3, w: 8, h: 8 },
     { name: "meeting", label: "Meeting room", x: 34, y: 13, w: 16, h: 7 },
     { name: "game", label: "Game corner", x: 34, y: 22, w: 10, h: 6 + extra },
-    { name: "kurt", label: "Kurt's office", x: 45, y: 22, w: 5, h: 6 + extra },
+    { name: "cfo", label: "CFO's office", x: 45, y: 22, w: 5, h: 6 + extra },
     { name: "garden", label: "Garden", x: 51, y: 1, w: 12, h: height - 2 },
     { name: "bar", label: "Bar", x: 65, y: 1, w: 14, h: 12 },
     { name: "shop", label: "Weed shop", x: 65, y: 15, w: 14, h: 13 + extra },

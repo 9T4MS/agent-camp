@@ -935,7 +935,7 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(29, 24, 2, 4, C.bark);
     },
   },
-  kurtDesk: {
+  cfoDesk: {
     w: 32,
     h: 30,
     dy: 2,
@@ -957,9 +957,6 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(25, -2, 6, 2, C.cream);
       pc.rect(26, 7, 4, 4, C.white);
       pc.set(29, 7, C.bark);
-      pc.rect(4, 16, 24, 8, C.amber);
-      pc.hline(4, 23, 24, C.orange);
-      drawText(pc, Math.floor((32 - measureText("KURT")) / 2), 18, "KURT", C.cocoa);
       pc.rect(1, 26, 3, 4, C.night);
       pc.rect(28, 26, 3, 4, C.night);
     },
@@ -984,7 +981,7 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(13, 29, 2, 1, C.night);
     },
   },
-  // ---- Richard's wooden server cabin in the garden -------------------------------------------
+  // ---- the IT guy's wooden server cabin in the garden -------------------------------------------
   serverCabin: {
     w: 64,
     h: 66,

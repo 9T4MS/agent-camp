@@ -1,6 +1,6 @@
 /**
  * Looks of the residents without a coding agent (the head of sales, who also runs the
- * kitchen, the head of development and Kurt in his own office) and of the clients at the
+ * kitchen, the head of development and the CFO in his own office) and of the clients at the
  * sales stand. They are drawn
  * with the same HD painter as everybody else; no agent colour, no badge.
  */
@@ -206,8 +206,8 @@ export const HEAD_DEV_LOOK: CharacterLook = {
 const CHARCOAL = ramp("#3d3b42", "#26242b", "#5a5760");
 const SLATE_GREY = ramp("#4f4b52", "#333036", "#6d6873");
 
-/** Kurt: bald, short grey beard, tortoiseshell glasses, a big grin, open blazer over light blue. */
-export const KURT_LOOK: CharacterLook = {
+/** The CFO: bald, short grey beard, tortoiseshell glasses, a big grin, open blazer over light blue. */
+export const CFO_LOOK: CharacterLook = {
   v: 1,
   build: "broad",
   skin: ramp("#efbfa0", "#cf977c", "#fbd6bd"),
@@ -345,5 +345,20 @@ export function clientLook(i: number): CharacterLook {
 
 export const salesSheet = (): CharacterSheet => characterSheet(render(SALES_LOOK));
 export const headDevSheet = (): CharacterSheet => characterSheet(render(HEAD_DEV_LOOK));
-export const kurtSheet = (): CharacterSheet => characterSheet(render(KURT_LOOK));
+export const cfoSheet = (): CharacterSheet => characterSheet(render(CFO_LOOK));
+/** The CFO on the phone to WEKAO: the same look with a phone in his right hand. */
+export const cfoPhoneSheet = (): CharacterSheet =>
+  characterSheet(
+    render({
+      ...CFO_LOOK,
+      extras: {
+        leftHand: "none",
+        costume: "none",
+        wrist: "none",
+        accent: "#feae34",
+        ...CFO_LOOK.extras,
+        rightHand: "phone",
+      },
+    }),
+  );
 export const clientSheet = (i: number): CharacterSheet => characterSheet(render(clientLook(i)));

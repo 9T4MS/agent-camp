@@ -1,63 +1,79 @@
 /**
- * Kurt: sits behind his desk in his own office next to the game corner, buried in paper. Now
- * and then a dev walks in and asks for the Klima ticket or a contract; it is always hard, he
- * is doing this and that, and it will take time. And every so often he comes out of his
- * office, walks up to someone at their desk and asks where the wifi is.
+ * The CFO: sits behind his desk in his own office next to the game corner, buried in paper. Now
+ * and then a dev walks in and asks for their contract; it is always hard and it will take
+ * time. Now and then he picks up the phone and calls his beloved colleague at WEKAO. And
+ * every so often he comes out of his office, walks up to someone at
+ * their desk and asks where the wifi is, or whether anyone is ordering lunch at Pho Ha Noi.
  */
 import { seededRandom } from "@agent-office/protocol";
 import type { Container } from "pixi.js";
 import { C } from "../art/palette.ts";
-import { kurtSheet } from "../art/residents.ts";
+import { cfoPhoneSheet, cfoSheet } from "../art/residents.ts";
 import type { Effects } from "./effects.ts";
-import { KURT_DESK, type OfficeMap, type Point, TILE } from "./map.ts";
-import { type KurtLine, kurtTalk, kurtWifi } from "./residentRules.ts";
+import { CFO_DESK, type OfficeMap, type Point, TILE } from "./map.ts";
+import { type CfoLine, type CfoOuting, cfoCall, cfoOuting, cfoTalk } from "./residentRules.ts";
 import { Walker } from "./walker.ts";
 
-const MUTTER = ["THIS AND THAT...", "SO MUCH TO DO.", "WHERE WAS I?", "ONE THING AFTER ANOTHER."];
-const CLICKED = ["VERY BUSY.", "THIS AND THAT.", "TAKES TIME.", "LATER, LATER."];
-/** a visitor at his desk while he is out looking for the wifi */
-const EMPTY_DESK = ["KURT?", "HE'S OUT AGAIN.", "WIFI HUNT AGAIN?"];
+const MUTTER = ["SO MUCH TO DO.", "WHERE WAS I?", "ONE THING AFTER ANOTHER."];
+const CLICKED = ["VERY BUSY.", "TAKES TIME.", "LATER, LATER."];
+/** a visitor at his desk while he is out of his office */
+const EMPTY_DESK = ["CFO?", "HE'S OUT AGAIN.", "WIFI HUNT AGAIN?", "LUNCH RUN?"];
+/** a visitor at his desk while he is on the phone to WEKAO */
+const ON_THE_PHONE = ["ON THE PHONE AGAIN?", "WEKAO AGAIN?", "I'LL COME BACK LATER."];
+/** seconds between two lines of his phone call */
+const CALL_GAP = 2.2;
 /** seconds between two lines of a visit */
 const SAY_GAP = 1.5;
 
-/** What Kurt needs from the session characters (CharacterManager). */
-export type KurtPeople = {
+/** What the CFO needs from the session characters (CharacterManager). */
+export type CfoPeople = {
   /** a visitor standing at his desk says something */
   visitorSays(sessionId: string, text: string): void;
-  /** seated people he can ask about the wifi */
+  /** seated people he can ask about the wifi or lunch */
   seated(): (Point & { id: string })[];
   /** a seated person answers from their chair */
   answer(sessionId: string, text: string): void;
 };
 
-type Talk = { id: string; lines: KurtLine[]; t: number };
+type Talk = { id: string; lines: CfoLine[]; t: number };
+type Call = { lines: string[]; t: number };
 
-export class Kurt {
+export class Cfo {
   readonly walker: Walker;
   private mode: "desk" | "out" | "ask" | "back" = "desk";
-  private rand = seededRandom("kurt");
+  private rand = seededRandom("cfo");
   private talk: Talk | null = null;
   private mutterT = 10;
   private talkCooldown = 0;
-  /** seconds between two wifi hunts (shorter in the party demo) */
-  wifiEvery = 60;
-  /** seconds until the next wifi hunt */
-  wifiIn = 25;
+  /** seconds between two outings (shorter in the party demo) */
+  outingEvery = 60;
+  /** seconds until the next outing */
+  outingIn = 25;
   private target: string | null = null;
+  /** what he is out for (wifi or lunch) */
+  private outing: CfoOuting | null = null;
+  /** seconds between two calls to WEKAO (shorter in the party demo) */
+  callEvery = 75;
+  /** seconds until the next call to WEKAO */
+  callIn = 40;
+  private call: Call | null = null;
+  private readonly deskSheet;
+  private readonly phoneSheet = cfoPhoneSheet();
 
   constructor(
     objects: Container,
     map: OfficeMap,
     private readonly effects: Effects,
-    private readonly people: KurtPeople,
+    private readonly people: CfoPeople,
   ) {
-    this.walker = new Walker(objects, kurtSheet(), map, effects, this.seat());
+    this.deskSheet = cfoSheet();
+    this.walker = new Walker(objects, this.deskSheet, map, effects, this.seat());
     this.walker.pose = "sitFront";
   }
 
   /** Behind his desk, facing the door. */
   private seat(): Point {
-    return { x: (KURT_DESK.x + 1) * TILE, y: KURT_DESK.y * TILE - 3 };
+    return { x: (CFO_DESK.x + 1) * TILE, y: CFO_DESK.y * TILE - 3 };
   }
 
   private pick<T>(list: readonly T[]): T {
@@ -78,7 +94,11 @@ export class Kurt {
   get talking() {
     return this.talk !== null;
   }
-  /** out of his office, looking for the wifi */
+  /** on the phone to WEKAO */
+  get calling() {
+    return this.call !== null;
+  }
+  /** out of his office, asking about the wifi or lunch */
   get out() {
     return this.mode !== "desk";
   }
@@ -86,7 +106,12 @@ export class Kurt {
   poke() {
     if (this.talkCooldown > 0) return;
     this.talkCooldown = 1.5;
-    this.walker.say(this.out ? "WHERE IS THE WIFI?!" : this.pick(CLICKED), C.plum);
+    const text = this.calling
+      ? "SHH, I'M ON THE PHONE!"
+      : this.out && this.outing
+        ? this.outing.ask
+        : this.pick(CLICKED);
+    this.walker.say(text, C.plum);
   }
 
   /** A dev arrived at his desk and asks for something (or finds it empty). */
@@ -96,7 +121,12 @@ export class Kurt {
       this.effects.after(0.6, () => this.people.visitorSays(id, this.pick(EMPTY_DESK)));
       return;
     }
-    this.talk = { id: sessionId, lines: kurtTalk(this.rand).lines, t: 0.4 };
+    if (this.calling) {
+      const id = sessionId;
+      this.effects.after(0.6, () => this.people.visitorSays(id, this.pick(ON_THE_PHONE)));
+      return;
+    }
+    this.talk = { id: sessionId, lines: cfoTalk(this.rand).lines, t: 0.4 };
   }
 
   private talkStep(talk: Talk, dt: number) {
@@ -116,12 +146,31 @@ export class Kurt {
       return;
     }
     this.walker.say(line.text, C.plum, SAY_GAP + 0.5);
-    // "this and that": hands up, papers fly
-    this.walker.pose = /THIS|THAT/.test(line.text) ? "raiseHand" : "sitFront";
-    if (this.walker.pose === "raiseHand") this.effects.puff(this.walker.x - 10, this.walker.y + 2);
+    this.walker.pose = "sitFront";
   }
 
-  /** Off to someone at their desk to ask about the wifi. */
+  /** Picks up the phone and calls WEKAO. */
+  private startCall() {
+    this.call = { lines: cfoCall(this.rand), t: 0.3 };
+    this.walker.sheet = this.phoneSheet;
+    this.walker.pose = "sitFront";
+  }
+
+  private callStep(call: Call, dt: number) {
+    call.t -= dt;
+    if (call.t > 0) return;
+    const line = call.lines.shift();
+    if (!line) {
+      this.call = null;
+      this.walker.sheet = this.deskSheet;
+      this.mutterT = 6 + this.rand() * 6;
+      return;
+    }
+    call.t = CALL_GAP;
+    this.walker.say(line, C.plum, CALL_GAP + 0.3);
+  }
+
+  /** Off to someone at their desk to ask about the wifi or lunch. */
   private goAsk(): boolean {
     const all = this.people.seated();
     if (!all.length) return false;
@@ -135,8 +184,9 @@ export class Kurt {
       if (!map.isWalkable(Math.floor(spot.x / TILE), Math.floor((spot.y - 4) / TILE))) continue;
       if (this.walker.goTo(spot)) {
         this.target = t.id;
+        this.outing = cfoOuting(this.rand);
         this.mode = "out";
-        this.walker.say("WIFI IS DOWN!", C.plum, 1.6);
+        this.walker.say(this.outing.leave, C.plum, 1.6);
         return true;
       }
     }
@@ -145,6 +195,7 @@ export class Kurt {
 
   private goBack() {
     this.target = null;
+    this.outing = null;
     if (this.walker.goTo(this.seat())) this.mode = "back";
     else this.sitDown();
   }
@@ -170,9 +221,19 @@ export class Kurt {
           this.talkStep(this.talk, dt);
           break;
         }
-        this.wifiIn -= dt;
-        if (this.wifiIn <= 0) {
-          this.wifiIn = this.wifiEvery * (0.75 + this.rand() * 0.5);
+        if (this.call) {
+          this.callStep(this.call, dt);
+          break;
+        }
+        this.callIn -= dt;
+        if (this.callIn <= 0) {
+          this.callIn = this.callEvery * (0.75 + this.rand() * 0.5);
+          this.startCall();
+          break;
+        }
+        this.outingIn -= dt;
+        if (this.outingIn <= 0) {
+          this.outingIn = this.outingEvery * (0.75 + this.rand() * 0.5);
           if (this.goAsk()) break;
         }
         this.mutterT -= dt;
@@ -185,7 +246,7 @@ export class Kurt {
       case "out":
         if (!w.walking) {
           const id = this.target;
-          const talk = kurtWifi(this.rand);
+          const talk = this.outing ?? cfoOuting(this.rand);
           w.facing = "up";
           w.pose = "raiseHand";
           w.say(talk.ask, C.plum, 2.2);

@@ -1,6 +1,6 @@
 /**
  * Pure rules of the residents without an agent: when the hourly bow starts, where the lines
- * in front of the head desk form, how a haggle at the sales stand goes and what Kurt says
+ * in front of the head desk form, how a haggle at the sales stand goes and what the CFO says
  * when someone asks him for something.
  */
 import type { Point } from "./map.ts";
@@ -110,58 +110,111 @@ export function haggle(rand: () => number): { lines: HaggleLine[]; deal: boolean
   return { lines, deal };
 }
 
-export type KurtTopic = "klima" | "contract";
-export type KurtLine = { who: "kurt" | "dev"; text: string };
+export type CfoLine = { who: "cfo" | "dev"; text: string };
 
-const ASKS: Record<KurtTopic, readonly string[]> = {
-  klima: ["KLIMA TICKET?", "MY KLIMA TICKET?", "ANY NEWS ON THE KLIMA TICKET?"],
-  contract: ["MY CONTRACT?", "CONTRACT READY?", "CAN I SIGN MY CONTRACT?"],
-};
+const ASKS = ["MY CONTRACT?", "CONTRACT READY?", "CAN I SIGN MY CONTRACT?"];
 const HARD = ["HMM. THAT'S HARD.", "OH, THAT'S TRICKY.", "DIFFICULT, DIFFICULT."];
-const THIS_AND_THAT = [
-  "I'M DOING THIS AND THAT.",
-  "RIGHT NOW: THIS AND THAT.",
-  "FIRST THIS, THEN THAT.",
-];
 const TAKES_TIME = ["IT WILL TAKE TIME.", "THAT TAKES TIME.", "GIVE IT TIME."];
-const REACTIONS: Record<KurtTopic, readonly string[]> = {
-  klima: ["OK... BY BIKE THEN.", "SINCE MARCH?", "OK...", "SIGH."],
-  contract: ["OK... I'LL WAIT.", "SINCE MARCH?", "OK...", "SIGH."],
-};
+const REACTIONS = ["OK... I'LL WAIT.", "SINCE MARCH?", "OK...", "SIGH."];
 
 /**
- * One visit at Kurt's desk: a dev asks for the Klima ticket or a contract, Kurt says it's
- * hard, he's doing this and that, it will take time; the dev gives up.
+ * One visit at the CFO's desk: a dev asks for their contract, the CFO says it's hard and it
+ * will take time; the dev gives up.
  */
-export function kurtTalk(rand: () => number): { topic: KurtTopic; lines: KurtLine[] } {
-  const topic: KurtTopic = rand() < 0.5 ? "klima" : "contract";
+export function cfoTalk(rand: () => number): { lines: CfoLine[] } {
   return {
-    topic,
     lines: [
-      { who: "dev", text: pick(rand, ASKS[topic]) },
-      { who: "kurt", text: pick(rand, HARD) },
-      { who: "kurt", text: pick(rand, THIS_AND_THAT) },
-      { who: "kurt", text: pick(rand, TAKES_TIME) },
-      { who: "dev", text: pick(rand, REACTIONS[topic]) },
+      { who: "dev", text: pick(rand, ASKS) },
+      { who: "cfo", text: pick(rand, HARD) },
+      { who: "cfo", text: pick(rand, TAKES_TIME) },
+      { who: "dev", text: pick(rand, REACTIONS) },
     ],
   };
 }
 
-const WIFI_ANSWERS = [
-  "SAME AS YESTERDAY.",
-  "IT'S ON THE ROUTER.",
-  "ASK RICHARD!",
-  "PASSWORD'S ON THE FRIDGE.",
-  "TURN IT OFF AND ON?",
-  "IT'S ALWAYS BEEN THERE.",
+const CALL_OPEN = [
+  "HELLO WEKAO! IT'S ME!",
+  "MY FAVOURITE COLLEAGUE AT WEKAO!",
+  "HI! HOW ARE THINGS AT WEKAO?",
 ];
-const WIFI_THANKS = ["AH. THANKS!", "STILL NOTHING.", "THIS AND THAT, THEN.", "OK. WHICH ROUTER?"];
+const CALL_MIDDLE = [
+  "I MISSED YOU!",
+  "HAHAHA, YES!",
+  "YOU'RE THE BEST.",
+  "WE SHOULD GET LUNCH!",
+  "JUST WANTED TO HEAR YOUR VOICE.",
+  "NO, YOU'RE TOO KIND!",
+  "TELL EVERYONE AT WEKAO I SAY HI.",
+];
+const CALL_CLOSE = ["NO, YOU HANG UP FIRST!", "TALK SOON! BYE BYE!", "CIAO, BYE!"];
 
-/** Kurt out of his office: "WHERE IS THE WIFI?!", someone answers, he gives his verdict. */
-export function kurtWifi(rand: () => number): { ask: string; answer: string; thanks: string } {
-  return {
+/**
+ * The CFO calls his beloved colleague at WEKAO: he dials, greets, says two or three things
+ * (the other side is never heard) and says goodbye.
+ */
+export function cfoCall(rand: () => number): string[] {
+  const middle = [...CALL_MIDDLE];
+  const lines = ["CALLING WEKAO...", pick(rand, CALL_OPEN)];
+  const n = rand() < 0.5 ? 2 : 3;
+  for (let i = 0; i < n; i++) lines.push(middle.splice(Math.floor(rand() * middle.length), 1)[0]!);
+  lines.push(pick(rand, CALL_CLOSE));
+  return lines;
+}
+
+export type CfoOutingTopic = "wifi" | "lunch";
+export type CfoOuting = {
+  topic: CfoOutingTopic;
+  /** what he calls out when he leaves his office */
+  leave: string;
+  ask: string;
+  answer: string;
+  thanks: string;
+};
+
+const OUTINGS: Record<
+  CfoOutingTopic,
+  { leave: string; ask: string; answers: readonly string[]; thanks: readonly string[] }
+> = {
+  wifi: {
+    leave: "WIFI IS DOWN!",
     ask: "WHERE IS THE WIFI?!",
-    answer: pick(rand, WIFI_ANSWERS),
-    thanks: pick(rand, WIFI_THANKS),
+    answers: [
+      "SAME AS YESTERDAY.",
+      "IT'S ON THE ROUTER.",
+      "ASK THE IT GUY!",
+      "PASSWORD'S ON THE FRIDGE.",
+      "TURN IT OFF AND ON?",
+      "IT'S ALWAYS BEEN THERE.",
+    ],
+    thanks: ["AH. THANKS!", "STILL NOTHING.", "OK. WHICH ROUTER?"],
+  },
+  lunch: {
+    leave: "LUNCH TIME!",
+    ask: "ANYONE ORDERING LUNCH AT PHO HA NOI?!",
+    answers: [
+      "ME! NUMBER 12!",
+      "PHO BO, PLEASE!",
+      "ALREADY ATE.",
+      "SPRING ROLLS FOR ME!",
+      "AGAIN? SURE!",
+      "I BROUGHT MY OWN.",
+    ],
+    thanks: ["NOTED!", "OK, I'LL ORDER.", "MORE FOR ME.", "PHO IT IS!"],
+  },
+};
+
+/**
+ * The CFO out of his office, either "WHERE IS THE WIFI?!" or "ANYONE ORDERING LUNCH AT PHO HA
+ * NOI?!" (half and half); someone answers, he has the last word.
+ */
+export function cfoOuting(rand: () => number): CfoOuting {
+  const topic: CfoOutingTopic = rand() < 0.5 ? "wifi" : "lunch";
+  const o = OUTINGS[topic];
+  return {
+    topic,
+    leave: o.leave,
+    ask: o.ask,
+    answer: pick(rand, o.answers),
+    thanks: pick(rand, o.thanks),
   };
 }
