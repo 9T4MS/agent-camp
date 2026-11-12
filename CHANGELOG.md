@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- 🚢 Schiffe versenken and Vier gewinnt: challenge a colleague from their nameplate and play a move whenever you get to it; your portrait in the top bar shows when it is your turn
 - 🔥 Richard, the IT guy, moved into the wooden server cabin in the garden: in crocs and shorts he puts out the cabin whenever it catches fire again, and when an agent runs out of room he brings the dev a fresh RAM stick for the server rack (click him!)
 - 🐈 Kiwi and Eloy moved in: Kiwi has the zoomies and races from one end of the office to the other, and Eloy goes from desk to desk and won't stop meowing at the devs
 - 🍳 The head of sales moved in: he cooks Eierspeis in the kitchen (grab a plate while he's at the stove) and runs out to his stand in the garden whenever a client shows up, to talk the price up
