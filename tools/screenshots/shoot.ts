@@ -51,6 +51,13 @@ const SHARD = (() => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (s: string) => console.log(`[shots] ${s}`);
+const pageErrors: string[] = [];
+const trackPageErrors = (page: Page) =>
+  page.on("pageerror", (error) => {
+    const detail = error.stack ?? error.message;
+    pageErrors.push(detail);
+    log(`  page error: ${detail}`);
+  });
 
 // ---- server ---------------------------------------------------------------------------------
 
@@ -144,7 +151,7 @@ async function context(vp: Viewport): Promise<BrowserContext> {
 
 async function openPage(vp: Viewport, url: string): Promise<Page> {
   const page = await (await context(vp)).newPage();
-  page.on("pageerror", (e) => log(`  page error (${vp}): ${e.message}`));
+  trackPageErrors(page);
   page.on("console", (m) => {
     if (m.type() === "error") log(`  console error (${vp}): ${m.text()}`);
   });
@@ -315,7 +322,7 @@ async function sceneAgentCard() {
   try {
     for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
       const page = await (await context(vp)).newPage();
-      page.on("pageerror", (e) => log(`  page error (${vp}): ${e.message}`));
+      trackPageErrors(page);
       await page.clock.install();
       await page.goto(`${o.http}/?hour=15`);
       await page.waitForFunction(() => window.__office?.ready === true, null, { timeout: 30_000 });
@@ -1208,6 +1215,7 @@ async function main() {
   });
   try {
     for (const [, run] of SCENES.filter((_, i) => inShard(i))) await run();
+    assert.deepEqual(pageErrors, [], "screenshot scenes must not hide browser exceptions");
   } finally {
     await browser.close();
     cleanup();

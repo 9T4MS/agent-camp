@@ -281,8 +281,13 @@ try {
   // Every hand item can be saved in the shared editor and used through cookie auth.
   for (const item of usable) {
     await pause(1300);
+    const previous = await page
+      .locator('.look-row[data-field="rightHand"]')
+      .getAttribute("data-value");
     await pick("rightHand", item);
-    await saveLook();
+    // The setup already equipped the first item; unchanged parts correctly disable Save.
+    if (previous !== item) await saveLook();
+    else assert(await page.getByRole("button", { name: "Save parts", exact: true }).isDisabled());
     await page.locator(".look-editor .close").click();
     await page.getByRole("button", { name: "Office games", exact: false }).click();
     const response = page.waitForResponse(
