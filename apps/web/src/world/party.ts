@@ -286,6 +286,13 @@ export class PartyWorld {
           color = C.sky;
           amount = 24;
           break;
+        case "skull":
+          // a ghostly green haze rises from the skull
+          shape = "smoke";
+          color = C.neon;
+          amount = 12;
+          gravity = false;
+          break;
         case "lightsaber":
           shape = "star";
           amount = 15;

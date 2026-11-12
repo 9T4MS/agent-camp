@@ -329,6 +329,7 @@ function randomLook(rnd: () => number): CharacterLook {
     color: hx(),
     rim: opt(),
     size: pick(E.BUTTON_SIZES),
+    layout: pick(E.BUTTON_LAYOUTS),
   });
   const bool = () => rnd() < 0.5;
   return E.CharacterLook.parse({
@@ -459,6 +460,107 @@ describe("painter robustness", () => {
     pc.rect(-4, 0, 40, 4, "#ff0000");
     expect(pc.data.slice(0, 32).every((v) => v === 0)).toBe(true);
     expect(pc.get(0, 0)).not.toBe(0);
+  });
+});
+
+describe("period costume details", () => {
+  const BTN = "#ff00ff";
+  const cat = lookFromCatalog(avatarFromSeed("probe"));
+  const coat = (layout?: "single" | "double"): AvatarSpec => ({
+    ...avatarFromSeed("probe"),
+    look: {
+      ...cat,
+      vest: { ...cat.vest, kind: "none" },
+      outer: {
+        ...cat.outer,
+        kind: "coat",
+        open: false,
+        collar: "none",
+        agentColored: false,
+        buttons: { count: 4, color: BTN, rim: "none", size: "small", layout },
+      },
+    },
+  });
+  /** x columns that hold a button texel in the front frame */
+  const buttonColumns = (spec: AvatarSpec) => {
+    const pc = paintSheet(lookFor(spec, "claude", null));
+    const xs = new Set<number>();
+    for (let y = 0; y < FH; y++)
+      for (let x = 0; x < FW; x++) if (hex(pc.data[y * pc.width + x]!) === BTN) xs.add(x);
+    return [...xs].sort((a, b) => a - b);
+  };
+
+  test("a coat without a layout stays double-breasted, as stored looks expect", () => {
+    expect(buttonColumns(coat())).toEqual([13, 18]);
+  });
+
+  test("a closed pocketed coat without a layout is pixel-identical to before layout existed", () => {
+    // checksums of the whole sheet, taken with the renderer on main before `buttons.layout`
+    // (the coat's two rows paint before the pockets; the kangaroo pocket overlaps them)
+    const pinned = {
+      flap: "18220713474339190478",
+      patch: "13129392932855950928",
+      welt: "17037330845477448801",
+      kangaroo: "5311935334456398411",
+    } as const;
+    for (const [pockets, sum] of Object.entries(pinned)) {
+      const spec = coat();
+      spec.look = {
+        ...spec.look!,
+        outer: {
+          ...spec.look!.outer,
+          collar: cat.outer.collar,
+          pockets: pockets as never,
+          pocketPiping: BTN,
+          buttons: { count: 4, color: "#e8b53a", rim: "none", size: "small" },
+        },
+      };
+      const s = paintSheet(lookFor(spec, "claude", null));
+      const bytes = new Uint8Array(s.data.buffer, s.data.byteOffset, s.data.byteLength);
+      expect(`${pockets} ${Bun.hash(bytes)}`).toBe(`${pockets} ${sum}`);
+    }
+  });
+
+  test("layout single puts one row of buttons down the centre", () => {
+    expect(buttonColumns(coat("single"))).toEqual([15]);
+  });
+
+  test("layout double gives two rows on a closed jacket too", () => {
+    const spec = coat("double");
+    spec.look = { ...spec.look!, outer: { ...spec.look!.outer, kind: "jacket" } };
+    expect(buttonColumns(spec)).toEqual([13, 18]);
+  });
+
+  test("the skull is a held item that paints bone white", () => {
+    const extras = { leftHand: "none", rightHand: "none", costume: "none", wrist: "none" } as const;
+    const spec = (hand: "none" | "skull"): AvatarSpec => ({
+      ...avatarFromSeed("probe"),
+      look: { ...cat, extras: { ...extras, leftHand: hand, accent: "#2ce8f5" } },
+    });
+    const without = colours(paintSheet(lookFor(spec("none"), "claude", null)), 0);
+    const withSkull = colours(paintSheet(lookFor(spec("skull"), "claude", null)), 0);
+    const cream = E.PALETTE[2];
+    expect(withSkull.get(cream) ?? 0).toBeGreaterThan(without.get(cream) ?? 0);
+  });
+
+  test("the flip cut parts in the middle and flips out past the bob", () => {
+    const spec = (cut: "bob" | "flip"): AvatarSpec => ({
+      ...avatarFromSeed("probe"),
+      look: { ...cat, headwear: { ...cat.headwear, style: "none" }, hair: { ...cat.hair, cut } },
+    });
+    const width = (s: AvatarSpec) => {
+      const pc = paintSheet(lookFor(s, "claude", null));
+      let lo = FW;
+      let hi = -1;
+      for (let y = 0; y < 26; y++)
+        for (let x = 0; x < FW; x++)
+          if (pc.data[y * pc.width + x]! >>> 24 !== 0) {
+            lo = Math.min(lo, x);
+            hi = Math.max(hi, x);
+          }
+      return hi - lo;
+    };
+    expect(width(spec("flip"))).toBeGreaterThan(width(spec("bob")));
   });
 });
 

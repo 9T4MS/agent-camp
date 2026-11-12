@@ -42,7 +42,7 @@ const SLOT_COATS = [0, 1, 2, 3, 4, 5, 6, 2, 1, 5] as const;
 const HOME_TILES: readonly Point[] = [
   { x: 45, y: 8 },
   { x: 39, y: 9 },
-  { x: 44, y: 26 },
+  { x: 42, y: 27 },
   { x: 55, y: 16 },
   { x: 36, y: 17 },
   { x: 44, y: 9 },

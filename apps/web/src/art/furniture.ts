@@ -935,6 +935,55 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(29, 24, 2, 4, C.bark);
     },
   },
+  kurtDesk: {
+    w: 32,
+    h: 30,
+    dy: 2,
+    draw(pc) {
+      pc.rect(0, 0, 32, 13, C.wood);
+      pc.hline(0, 0, 32, C.tan);
+      pc.rect(0, 13, 32, 13, C.bark);
+      pc.hline(0, 13, 32, C.cocoa);
+      // monitor (back to the room), paper stacks that never get smaller
+      pc.rect(10, -8, 12, 10, C.ink);
+      pc.rect(14, 2, 4, 2, C.slate);
+      pc.rect(1, -3, 7, 8, C.white);
+      pc.hline(1, -1, 7, C.silver);
+      pc.hline(1, 1, 7, C.silver);
+      pc.hline(1, 3, 7, C.silver);
+      pc.rect(2, -5, 6, 2, C.cream);
+      pc.rect(24, 0, 7, 5, C.white);
+      pc.hline(24, 2, 7, C.silver);
+      pc.rect(25, -2, 6, 2, C.cream);
+      pc.rect(26, 7, 4, 4, C.white);
+      pc.set(29, 7, C.bark);
+      pc.rect(4, 16, 24, 8, C.amber);
+      pc.hline(4, 23, 24, C.orange);
+      drawText(pc, Math.floor((32 - measureText("KURT")) / 2), 18, "KURT", C.cocoa);
+      pc.rect(1, 26, 3, 4, C.night);
+      pc.rect(28, 26, 3, 4, C.night);
+    },
+  },
+  fileCabinet: {
+    w: 16,
+    h: 30,
+    draw(pc) {
+      pc.rect(1, 0, 14, 29, C.slate);
+      pc.hline(1, 0, 14, C.silver);
+      pc.vline(14, 1, 28, C.dusk);
+      for (let d = 0; d < 3; d++) {
+        const y = 3 + d * 9;
+        pc.rect(3, y, 10, 7, C.grey);
+        pc.hline(3, y, 10, C.silver);
+        pc.rect(5, y + 2, 6, 3, C.cream);
+        pc.hline(6, y + 3, 4, C.ink);
+      }
+      // a contract sticks out of the top drawer
+      pc.rect(4, 1, 6, 3, C.white);
+      pc.rect(1, 29, 2, 1, C.night);
+      pc.rect(13, 29, 2, 1, C.night);
+    },
+  },
   // ---- Richard's wooden server cabin in the garden -------------------------------------------
   serverCabin: {
     w: 64,

@@ -323,6 +323,12 @@ export class CharacterManager {
   onSnack: (x: number, y: number) => void = () => {};
   /** someone punched their hours at the time clock (at x, y) */
   onPunch: (x: number, y: number) => void = () => {};
+  /** someone walked into Kurt's office and stands at his desk */
+  onAskKurt: (sessionId: string) => void = () => {};
+  /** how long a visit at Kurt's desk lasts (seconds) */
+  kurtVisit = 9;
+  /** how likely an idle wander goes to ask Kurt for something (party demo: more) */
+  kurtChance = 0.06;
   private hits = new HitCounter();
   private craters: Crater[] = [];
   private rebels = new Map<string, Rebellion>();
@@ -1075,6 +1081,11 @@ export class CharacterManager {
       const clock = all.find((p) => p.id === "timeclock");
       if (clock) return take(clock);
     }
+    // ask Kurt for the Klima ticket or a contract (only on purpose, never as a random spot)
+    if (this.rand() < this.kurtChance) {
+      const kurt = all.find((p) => p.id === "kurt");
+      if (kurt) return take(kurt);
+    }
     // a coffee run
     if (c.mugT <= 0 && this.rand() < 0.3) {
       const coffee = all.find((p) => p.id === "coffee");
@@ -1083,7 +1094,10 @@ export class CharacterManager {
     // go and chat with someone who hangs around
     if (c.chatCooldown <= 0 && this.rand() < this.chatChance && this.walkOverToChat(c)) return;
     const nooks = free(this.scene.nookPois);
-    let pois = nooks.length > 0 && this.rand() < 0.25 ? nooks : free(this.scene.map.pois);
+    let pois =
+      nooks.length > 0 && this.rand() < 0.25
+        ? nooks
+        : free(this.scene.map.pois).filter((p) => p.id !== "kurt");
     if (pois.length === 0) pois = nooks;
     if (pois.length === 0) return;
     const favourites = pois.filter((p) => p.area !== "desks" && p.area !== "meeting");
@@ -1110,6 +1124,7 @@ export class CharacterManager {
     return (
       !o.removed &&
       o.mode === "poi" &&
+      o.poi?.id !== "kurt" &&
       !o.rally &&
       !o.chat &&
       o.chatCooldown <= 0 &&
@@ -1277,6 +1292,12 @@ export class CharacterManager {
       out.push({ x: c.x, y: c.y, id: c.sessionId, waiting: a === "waiting" });
     }
     return out;
+  }
+
+  /** Someone standing at Kurt's desk says something (Kurt's visit). */
+  sayAtKurt(sessionId: string, text: string) {
+    const c = this.chars.get(sessionId);
+    if (c && !c.removed && c.mode === "poi" && c.poi?.id === "kurt") this.say(c, text);
   }
 
   /** Every seated, online person at a desk, whatever their agent is doing (Eloy meows at them). */
@@ -1948,6 +1969,8 @@ export class CharacterManager {
           } else if (c.poi?.id === "timeclock") {
             this.onPunch(c.x, c.y);
             this.idleWander(c);
+          } else if (c.poi?.id === "kurt") {
+            this.idleWander(c);
           } else if (c.poi?.id === "shop-counter") {
             // bought something: straight to the smokers' corner
             this.hold(c, "joint", 45 + this.rand() * 30);
@@ -2128,6 +2151,10 @@ export class CharacterManager {
         c.poi?.id === "snack" ||
         c.poi?.id === "timeclock";
       c.timer = quick ? 3 + this.rand() * 2 : (10 + this.rand() * 15) * this.dwell;
+      if (c.poi?.id === "kurt") {
+        c.timer = this.kurtVisit;
+        this.onAskKurt(c.sessionId);
+      }
       // a seat at the counter comes with a beer (it stands on the counter beside them)
       if (c.poi && isBarStool(c.poi) && (c.carry !== "beer" || c.mugT < c.timer + 5))
         this.hold(c, "beer", c.timer + 20 + this.rand() * 40);

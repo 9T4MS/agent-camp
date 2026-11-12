@@ -1,6 +1,7 @@
 /**
- * Looks of the two residents without a coding agent (the head of sales, who also runs the
- * kitchen, and the head of development) and of the clients at the sales stand. They are drawn
+ * Looks of the residents without a coding agent (the head of sales, who also runs the
+ * kitchen, the head of development and Kurt in his own office) and of the clients at the
+ * sales stand. They are drawn
  * with the same HD painter as everybody else; no agent colour, no badge.
  */
 import { avatarFromSeed, type CharacterLook, resolveLook } from "@agent-office/protocol";
@@ -202,6 +203,101 @@ export const HEAD_DEV_LOOK: CharacterLook = {
   },
 };
 
+const CHARCOAL = ramp("#3d3b42", "#26242b", "#5a5760");
+const SLATE_GREY = ramp("#4f4b52", "#333036", "#6d6873");
+
+/** Kurt: bald, short grey beard, tortoiseshell glasses, a big grin, open blazer over light blue. */
+export const KURT_LOOK: CharacterLook = {
+  v: 1,
+  build: "broad",
+  skin: ramp("#efbfa0", "#cf977c", "#fbd6bd"),
+  face: {
+    shape: "round",
+    ears: "visible",
+    eyes: "narrow",
+    eyeColor: "#3e2731",
+    brows: "thick",
+    expression: "grin",
+    cheeks: "blush",
+  },
+  hair: { cut: "bald", ramp: ramp("#9a8f86", "#6e655e", "#c4bab0"), sheen: false },
+  facialHair: { style: "beard", color: "#9a8f86" },
+  eyewear: {
+    style: "rectangle",
+    frame: "#5a3a26",
+    frameAccent: "#c88a4a",
+    framePattern: "tortoiseshell",
+    lens: "#e4eef5",
+    tint: "clear",
+  },
+  headwear: { style: "none", ramp: CHARCOAL, accent: "#ffffff" },
+  earrings: { style: "none", color: "#c0cbdc" },
+  shirt: {
+    kind: "shirt",
+    ramp: ramp("#bcd3ee", "#8ea9cc", "#e2edf8"),
+    pattern: plain("#bcd3ee"),
+    collar: "shirt",
+    collarColor: "none",
+    neckwear: "none",
+    neckwearColor: "#ffffff",
+    sleeves: "long",
+    buttons: noButtons("#ffffff"),
+    peeksAtWaist: false,
+  },
+  vest: {
+    kind: "none",
+    ramp: CHARCOAL,
+    pattern: plain("#3d3b42"),
+    collar: "none",
+    piping: "none",
+    buttons: noButtons("#3d3b42"),
+  },
+  outer: {
+    kind: "blazer",
+    agentColored: false,
+    ramp: CHARCOAL,
+    pattern: plain("#3d3b42"),
+    open: true,
+    length: "hip",
+    collar: "lapel",
+    collarColor: "none",
+    collarPiping: "none",
+    piping: "none",
+    buttons: { count: 2, color: "#26242b", rim: "none", size: "small" },
+    pockets: "flap",
+    pocketPiping: "none",
+    yoke: false,
+  },
+  bottoms: {
+    kind: "chinos",
+    ramp: SLATE_GREY,
+    pattern: plain("#4f4b52"),
+    flap: false,
+    embroidery: { motif: "none", color: "#4f4b52", stitching: "none" },
+    buttons: noButtons("#4f4b52"),
+    suspenders: "none",
+    suspendersColor: "#333036",
+    belt: "#3e2731",
+    hem: "plain",
+  },
+  legwear: { kind: "crew-socks", color: "#26242b", accent: "none" },
+  shoes: {
+    kind: "loafers",
+    ramp: ramp("#6b4430", "#3e2731", "#8f5d43"),
+    sole: "#2a1d19",
+    accent: "none",
+    laces: "none",
+  },
+  pose: { hands: "relaxed", stance: "neutral", headTilt: false },
+  extras: {
+    leftHand: "none",
+    rightHand: "none",
+    costume: "none",
+    wrist: "none",
+    accent: "#feae34",
+  },
+};
+
 const SUITS = [
   ramp("#5a6988", "#3a4466", "#8b9bb4"),
   ramp("#4a4650", "#2e2b33", "#6d6873"),
@@ -249,4 +345,5 @@ export function clientLook(i: number): CharacterLook {
 
 export const salesSheet = (): CharacterSheet => characterSheet(render(SALES_LOOK));
 export const headDevSheet = (): CharacterSheet => characterSheet(render(HEAD_DEV_LOOK));
+export const kurtSheet = (): CharacterSheet => characterSheet(render(KURT_LOOK));
 export const clientSheet = (i: number): CharacterSheet => characterSheet(render(clientLook(i)));

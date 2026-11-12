@@ -344,7 +344,8 @@ The games panel adds:
 
 - **Use left/right item:** swing a lightsaber, fire confetti, toast a beer, puff cigarette/joint
   smoke, blow bubbles, flash a disco ball, cast stars, bounce a balloon, spray water,
-  shake maracas, shelter under umbrella rain, or use the existing phone/coffee props.
+  shake maracas, shelter under umbrella rain, raise a skull in a green haze, or use the existing
+  phone/coffee props.
 - **Dance / Wave:** send a visible shared gesture.
 - **High-five:** choose an online buddy; both earn one party point.
 - **Play tag:** choose an online buddy; send a tag spark and earn one point.

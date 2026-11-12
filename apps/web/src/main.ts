@@ -80,6 +80,7 @@ import { CatColony } from "./world/colony.ts";
 import { Effects } from "./world/effects.ts";
 import { HeadGifs } from "./world/gifs.ts";
 import { HeadDev } from "./world/headDev.ts";
+import { Kurt } from "./world/kurt.ts";
 import { OfficeLife } from "./world/life.ts";
 import { catCount, SEASONS, type Season, seasonFor } from "./world/lifeRules.ts";
 import { Living } from "./world/living.ts";
@@ -273,6 +274,12 @@ async function boot() {
   chars.snackOpen = () => chef.cooking;
   chars.onSnack = (x, y) => chef.served(x, y);
   chars.onPunch = (x, y) => headDev.punched(x, y);
+  const kurt = new Kurt(scene.objects, scene.map, effects, {
+    visitorSays: (id, text) => chars.sayAtKurt(id, text),
+    seated: () => chars.devs(),
+    answer: (id, text) => chars.answerPage(id, text),
+  });
+  chars.onAskKurt = (id) => kurt.asked(id);
   const bowParam = params.get("bow");
   if (bowParam && !["0", "false", "off"].includes(bowParam)) headDev.bowEvery = 60;
   if (party) {
@@ -285,6 +292,9 @@ async function boot() {
       richard.ramIn = 8;
     }
     headDev.nagEvery = 25;
+    chars.kurtChance = 0.25;
+    kurt.wifiEvery = 20;
+    kurt.wifiIn = 8;
   }
   const weatherParam = params.get("weather");
   const life = new OfficeLife(
@@ -385,6 +395,7 @@ async function boot() {
     chef.setMap(scene.map);
     richard?.setMap(scene.map);
     headDev.setMap(scene.map);
+    kurt.setMap(scene.map);
     duo?.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
@@ -1015,6 +1026,10 @@ async function boot() {
       headDev.poke();
       return;
     }
+    if (kurt.hit(wx, wy) && (!c || kurt.y > c.y)) {
+      kurt.poke();
+      return;
+    }
     if (c) {
       openSession(c.sessionId);
       return;
@@ -1289,6 +1304,7 @@ async function boot() {
     chef.update(dt, time);
     richard?.update(dt, time);
     headDev.update(dt, time);
+    kurt.update(dt, time);
     duo?.update(dt, time);
     life.update(dt, time);
     effects.update(dt);

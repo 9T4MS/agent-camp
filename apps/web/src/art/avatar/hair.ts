@@ -485,6 +485,82 @@ const BOB: Record<View, Layer> = {
   ],
 };
 
+/** Shoulder length, centre parting, curtain fringe framing the face, ends flipped outwards. */
+const FLIP: Record<View, Layer> = {
+  down: [
+    "................................",
+    "................................",
+    "................................",
+    "........hhhhhhhHHhhhhhHh........",
+    "......hhhhLLhhhHHhhhhhhhHh......",
+    ".....hhhhLhhhhhHHhhhhhhhhHh.....",
+    "....hhhhhhhhhhhHHhhhhhhhhhHh....",
+    "....hhhhhhhhhhH..HhhhhhhhhHh....",
+    "....hhhhhhhhhH....HhhhhhhhHh....",
+    "....hhhhhhhhH......HhhhhhhHh....",
+    "....hhhhhhhhH......HhhhhhhHh....",
+    "....hhhhhhhH........HhhhhhHh....",
+    "....hhhhhH............HhhhHh....",
+    "....hhh..................hHh....",
+    "....hhh..................hHh....",
+    "....hhh..................hHh....",
+    "....hhh..................hHh....",
+    "....hhh..................hHh....",
+    "....hhhh................hhHh....",
+    "...hhhhH................HhhHh...",
+    "..hhhH....................HhHh..",
+    ".hhH........................HHh.",
+  ],
+  up: [
+    "................................",
+    "................................",
+    "................................",
+    "........hhhhhhhhhhhhhhHh........",
+    "......hhhhLLhhhhhhhhhhhhHh......",
+    ".....hhhhLhhhhhhhhhhhhhhhHh.....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "....hhhhhhhhhhhhhhhhhhhhhhHh....",
+    "...hhhhhhhhhhhhhhhhhhhhhhhhHh...",
+    "..hhhHHhhhhhhhhhhhhhhhhhhHHhHh..",
+    ".hhH..HHHHHHHHHHHHHHHHHHHH..HHh.",
+  ],
+  left: [
+    "................................",
+    "................................",
+    "................................",
+    "..........hhhhhhhhhhh...........",
+    "........hhhLLhhhhhhhhhh.........",
+    ".......hhLhhhhhhhhhhhhhhh.......",
+    "......hhhhhhhhhhhhhhhhhhhh......",
+    "......hhhhhhhhhhhhhhhhhhhHh.....",
+    "......hhhhhhhhhhhhhhhhhhhHh.....",
+    "......hhhhhhhhhhhhhhhhhhhHh.....",
+    "......hhhhhhhhhhhhhhhhhhhHh.....",
+    "......hhhh.hhhhhhhhhhhhhhHh.....",
+    "......hh.......hhhhhhhhhhHh.....",
+    "...............hhhhhhhhhhHh.....",
+    "................hhhhhhhhhHh.....",
+    "................hhhhhhhhhHh.....",
+    "................hhhhhhhhhHh.....",
+    "................hhhhhhhhhHh.....",
+    "................hhhhhhhhhhHh....",
+    "................hhhhhhhhhhhHh...",
+    "................HhhhhhhhhHHhHh..",
+    "................HHHHHHHHH..HHh..",
+  ],
+};
+
 const UPSCALED = new Map<string, string[]>();
 function classic(cut: keyof typeof CLASSIC, view: View): string[] {
   const k = `${cut}/${view}`;
@@ -534,7 +610,9 @@ export function drawHair(pc: PixelCanvas, L: CharacterLook, view: View, hy: numb
         ? SIDE_PART[view]
         : cut === "bob"
           ? BOB[view]
-          : classic(cut, view);
+          : cut === "flip"
+            ? FLIP[view]
+            : classic(cut, view);
   const light = cut === "bald" ? L.skin.light : sheen ? ramp.light : ramp.base;
   pc.sprite(0, hy, rows, { h: ramp.base, H: ramp.shadow, L: light, R: "#e43b44" });
 }
