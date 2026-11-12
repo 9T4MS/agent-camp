@@ -16,11 +16,13 @@ import {
   DESK_MESS_LEVELS,
   DESK_PROPS,
   FACIAL_HAIR,
+  type GenerateOutcome,
   GLASSES,
   HAIR_COLORS,
   HAIR_STYLES,
   HELD_ITEMS,
   type InteractionKind,
+  type LookMacState,
   MAX_DESK_PROPS,
   MAX_SELF_DESCRIPTION,
   OUTFITS,
@@ -96,14 +98,24 @@ export type LookResult = {
   avatar?: AvatarSpec;
   /** the person's own Mac is drawing it: the new look arrives over the socket */
   pending?: boolean;
+  /** Generate: why the person's Mac did not take it (see LookMacState) */
+  mac?: LookMacState;
 };
 /** GET /api/people/:id/avatar, as far as the look studio cares. */
 export type LookInfo = {
   custom: boolean;
   aiLooks?: boolean;
+  /** the office server itself draws looks (GENUI_PROVIDER) */
+  serverLooks?: boolean;
   description?: string;
   /** local AI tools on this person's Macs ("Claude Code") */
   localLooks?: string[];
+  /** the look worn now (with the detailed AI look, if any) */
+  avatar?: AvatarSpec;
+  /** whether a Generate from this browser can go to their Mac, and if not why */
+  mac?: LookMacState;
+  /** how the newest Generate sent to their Mac ended (absent while it draws) */
+  lastGenerate?: GenerateOutcome;
 };
 /** How long the studio waits for a look drawn on the person's Mac. */
 const LOCAL_LOOK_WAIT_MS = 5 * 60_000;
@@ -129,6 +141,9 @@ const LOOK_FIELDS: {
   { key: "vehicle", label: "Vehicle", options: VEHICLES },
 ];
 const MESS_LABEL = ["spotless", "a bit messy", "messy", "chaos"] as const;
+/** The picked parts of a look, comparable whatever order its keys came in. */
+const partsKey = (a: AvatarSpec) =>
+  JSON.stringify([...LOOK_FIELDS.map((f) => a[f.key]), a.deskProps, a.deskMess]);
 /** Where each catalog row sits in the look studio. */
 const LOOK_GROUPS: { title: string; keys: readonly LookField[] }[] = [
   {
@@ -371,6 +386,10 @@ export class Hud {
     personId: string;
     box: HTMLElement;
     onKey: (e: KeyboardEvent) => void;
+    /** the office changed: the studio follows the person's look */
+    sync: () => void;
+    /** a Generate on that person's Mac ended (`look.generated`) */
+    generated: () => void;
   } | null = null;
   /** "My desk" in the Me menu */
   onOpenMe: (personId: string) => void = (id) => this.openPanel(id);
@@ -774,6 +793,7 @@ export class Hud {
   /** The Me chip and menu follow the office (my name and look, who is here). */
   refreshMe() {
     this.renderMeChip();
+    this.lookEditor?.sync();
     // a half-typed code is left alone; my own menu follows what waits for me
     if (!this.meMenuOpen || this.claiming) return;
     if (!this.me) this.renderMeMenu();
@@ -923,13 +943,21 @@ export class Hud {
       return;
     }
     this.closeLookEditor();
-    const { box, onKey } = this.buildLookEditor(p);
-    this.lookEditor = { personId, box, onKey };
+    const { box, onKey, sync, generated } = this.buildLookEditor(p);
+    this.lookEditor = { personId, box, onKey, sync, generated };
     // capture: arrows / Esc belong to the studio, not to the office camera underneath
     window.addEventListener("keydown", onKey, true);
     this.root.append(box);
-    box.querySelector<HTMLElement>(".look-row")?.focus();
+    (
+      box.querySelector<HTMLElement>('.studio-tab[aria-selected="true"]') ??
+      box.querySelector<HTMLElement>(".look-row")
+    )?.focus();
     this.onPanelChange();
+  }
+
+  /** `look.generated`: a Generate on someone's Mac ended; only their open studio cares. */
+  lookGenerated(personId: string) {
+    if (this.lookEditor?.personId === personId) this.lookEditor.generated();
   }
 
   closeLookEditor() {
@@ -940,17 +968,38 @@ export class Hud {
     this.onPanelChange();
   }
 
-  private buildLookEditor(p: PersonState): { box: HTMLElement; onKey: (e: KeyboardEvent) => void } {
+  /**
+   * The look studio: two ways to a look, one tab each, so it is always clear what a button does.
+   * - Describe: write how you look, Generate. The AI look goes live as soon as it is drawn
+   *   (nothing to save); the preview shows the look everybody sees now.
+   * - Pick parts: carousels over the catalog, then "Save parts". Parts are catalog ids only and
+   *   cannot hold a detailed AI look, so the preview shows exactly what saving gives, and saving
+   *   replaces the AI look (the Describe tab offers the way back).
+   */
+  private buildLookEditor(p: PersonState): {
+    box: HTMLElement;
+    onKey: (e: KeyboardEvent) => void;
+    sync: () => void;
+    generated: () => void;
+  } {
     const box = el("div", "look-editor look-studio");
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.setAttribute("aria-label", `${p.name}'s look`);
-    // catalog ids only: a saved custom look is drawn from them (a detailed GenUI look is not
-    // kept), so the preview shows exactly what Save gives
-    const draft: AvatarSpec = structuredClone(catalogAvatar(p.avatar));
-    /** a freshly generated look (detailed): previewed until a carousel is touched */
-    let generated: AvatarSpec | null = null;
-    const agent = this.model.sessionsOf(p.personId)[0]?.agent ?? "claude";
+    const personId = p.personId;
+    const agent = this.model.sessionsOf(personId)[0]?.agent ?? "claude";
+    const canDescribe = !!this.onDescribeLook;
+    /** the look everybody sees now: what the Describe tab shows */
+    let active: AvatarSpec = structuredClone(p.avatar);
+    let seen = JSON.stringify(p.avatar);
+    /** picked parts are worn (they win over the description); null = not known yet */
+    let custom: boolean | null = active.look ? false : null;
+    let hasDescription = false;
+    // catalog ids only: saved parts are drawn from them alone, so the parts preview shows
+    // exactly what "Save parts" gives
+    const draft: AvatarSpec = structuredClone(catalogAvatar(active));
+    let baseline = partsKey(draft);
+    let mode: "describe" | "parts" = canDescribe && active.look ? "describe" : "parts";
 
     // desk props are three slots of their own; empty ones are dropped when saving
     const slotIdx = Array.from({ length: MAX_DESK_PROPS }, (_, i) => i);
@@ -1011,50 +1060,99 @@ export class Hud {
         <span class="row-value" aria-live="polite"></span>
         <button type="button" class="pixel-btn arrow next" aria-label="Next ${esc(r.label.toLowerCase())}">&#9654;</button>
       </div>`;
+    const describePane = `
+          <div class="studio-pane pane-describe" role="tabpanel" id="look-pane-describe" aria-labelledby="look-tab-describe">
+            <div class="look-callout" hidden></div>
+            <form class="look-describe">
+              <label class="describe-label" for="look-describe-text">Describe your look</label>
+              <textarea id="look-describe-text" rows="4" maxlength="${MAX_SELF_DESCRIPTION}" placeholder="A few words or a whole paragraph: hair, glasses, clothes, shoes, colors..."></textarea>
+              <div class="describe-foot">
+                <span class="describe-hint dim">The AI draws you from this text (up to a minute).</span>
+                <button class="pixel-btn describe-go" type="submit">&#10024; Generate look</button>
+              </div>
+            </form>
+            <div class="pane-note dim">A new look goes live for everyone as soon as it is drawn. There is nothing to save.</div>
+            <div class="back-to-described" hidden>
+              <span>You are wearing picked parts, so your description is not used.</span>
+              <button type="button" class="pixel-btn use-described"></button>
+            </div>
+          </div>`;
+    const partsPane = `
+          <div class="studio-pane pane-parts" role="tabpanel" id="look-pane-parts" aria-labelledby="look-tab-parts">
+            <div class="pane-note parts-note dim"></div>
+            <div class="studio-rows">${groups
+              .map(
+                (g) =>
+                  `<div class="look-group"><h3>${esc(g.title)}</h3>${g.rows.map(rowHtml).join("")}</div>`,
+              )
+              .join("")}</div>
+            <div class="parts-foot">
+              <button type="button" class="pixel-btn parts-undo">Undo changes</button>
+              <button type="button" class="pixel-btn save">Save parts</button>
+            </div>
+          </div>`;
     box.innerHTML = `
       <div class="studio pixel-box">
         <header class="studio-head">
           <h2>${esc(p.name)}'s look</h2>
-          <span class="studio-keys dim">&#9664; &#9654; change &middot; &#9650; &#9660; row &middot; Esc close</span>
+          <span class="studio-keys dim"></span>
           <button type="button" class="pixel-btn close" aria-label="Close">&times;</button>
         </header>
         <div class="studio-body">
           <section class="studio-stage">
+            <div class="look-current" aria-live="polite"></div>
             <div class="look-preview" aria-label="preview"></div>
-            <div class="look-note dim">Only you can see this until you save. Saving pins the look; a new description no longer changes it.</div>${
-              this.onDescribeLook
-                ? `<form class="look-describe">
-              <label class="describe-label" for="look-describe-text">Describe your look</label>
-              <textarea id="look-describe-text" rows="4" maxlength="${MAX_SELF_DESCRIPTION}" placeholder="A few words or a whole paragraph: hair, glasses, clothes, shoes, colors..."></textarea>
-              <div class="describe-foot">
-                <span class="describe-hint dim">The AI draws you from this text (up to a minute). It replaces a look picked here.</span>
-                <button class="pixel-btn describe-go" type="submit">&#10024; Generate look</button>
-              </div>
-            </form>`
-                : ""
-            }
+            <div class="look-note preview-note dim"></div>
           </section>
-          <section class="studio-rows">${groups
-            .map(
-              (g) =>
-                `<div class="look-group"><h3>${esc(g.title)}</h3>${g.rows.map(rowHtml).join("")}</div>`,
-            )
-            .join("")}</section>
+          <section class="studio-side">${
+            canDescribe
+              ? `<div class="studio-tabs" role="tablist" aria-label="How to make your look">
+              <button type="button" role="tab" class="pixel-btn studio-tab" id="look-tab-describe" aria-controls="look-pane-describe" data-mode="describe">&#10024; Describe it</button>
+              <button type="button" role="tab" class="pixel-btn studio-tab" id="look-tab-parts" aria-controls="look-pane-parts" data-mode="parts">&#9776; Pick parts</button>
+            </div>${describePane}`
+              : ""
+          }${partsPane}
+          </section>
         </div>
         <footer class="studio-foot">
           <div class="poke-status look-status" aria-live="polite"></div>
-          <button class="pixel-btn auto" type="button" title="Drop the custom look: back to the one from the description">Automatic</button>
-          <button class="pixel-btn save" type="button">Save look</button>
+          <button class="pixel-btn done" type="button">Done</button>
         </footer>
       </div>`;
-    const preview = box.querySelector<HTMLElement>(".look-preview")!;
-    const status = box.querySelector<HTMLElement>(".look-status")!;
-    const autoBtn = box.querySelector<HTMLButtonElement>(".auto")!;
+    const q = <T extends HTMLElement = HTMLElement>(sel: string) => box.querySelector<T>(sel);
+    const preview = q(".look-preview")!;
+    const previewNote = q(".preview-note")!;
+    const current = q(".look-current")!;
+    const status = q(".look-status")!;
+    const keysHint = q(".studio-keys")!;
+    const tabs = [...box.querySelectorAll<HTMLButtonElement>(".studio-tab")];
+    const paneDescribe = q(".pane-describe");
+    const paneParts = q(".pane-parts")!;
+    const partsNote = q(".parts-note")!;
+    const saveBtn = q<HTMLButtonElement>(".save")!;
+    const undoBtn = q<HTMLButtonElement>(".parts-undo")!;
+    const callout = q(".look-callout");
+    const backBox = q(".back-to-described");
+    const useDescribed = q<HTMLButtonElement>(".use-described");
+    const describeForm = q<HTMLFormElement>(".look-describe");
+    const describeText = describeForm?.querySelector("textarea") ?? null;
+    const describeGo = q<HTMLButtonElement>(".describe-go");
+    const describeHint = q(".describe-hint");
     const rowEls = new Map(
       [...box.querySelectorAll<HTMLElement>(".look-row")].map((e) => [e.dataset.field!, e]),
     );
-    const drawPreview = () =>
-      preview.replaceChildren(...this.previewLook(generated ?? draft, agent));
+
+    const say = (msg: string, ok?: boolean) => {
+      status.textContent = msg;
+      status.className = `poke-status look-status${ok === undefined ? "" : ok ? " ok" : " err"}`;
+    };
+    const dirty = () => partsKey(draft) !== baseline;
+    /** the parts start over from the look worn now */
+    const resetDraft = () => {
+      Object.assign(draft, structuredClone(catalogAvatar(active)));
+      for (const i of slotIdx) slots[i] = draft.deskProps[i] ?? "none";
+      baseline = partsKey(draft);
+    };
     const paintRow = (r: LookRow) => {
       const e = rowEls.get(r.id)!;
       const value = r.get();
@@ -1063,39 +1161,202 @@ export class Hud {
       e.querySelector(".row-value")!.innerHTML =
         `<span class="row-text">${esc(r.options[idx]?.label ?? value)}</span><span class="row-count">${idx + 1}/${r.options.length}</span>`;
     };
-    const paintAll = () => {
+    const aiWorn = () => !!active.look && custom !== true;
+    const paint = () => {
+      for (const t of tabs) {
+        const on = t.dataset.mode === mode;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+      }
+      if (paneDescribe) paneDescribe.hidden = mode !== "describe";
+      paneParts.hidden = mode !== "parts";
+      keysHint.innerHTML =
+        mode === "parts"
+          ? "&#9664; &#9654; change &middot; &#9650; &#9660; row &middot; Esc close"
+          : "Ctrl+Enter generate &middot; Esc close";
+      current.innerHTML = `<span class="dim">Wearing now:</span> <b>${
+        custom ? "picked parts" : active.look ? "AI look from your description" : "automatic look"
+      }</b>`;
+      const showDraft = mode === "parts";
+      preview.replaceChildren(...this.previewLook(showDraft ? draft : active, agent));
+      previewNote.textContent = !showDraft
+        ? ""
+        : dirty()
+          ? "Preview of your picked parts. Not saved yet."
+          : aiWorn()
+            ? "Your AI look as parts: parts can only come close to it."
+            : "";
+      partsNote.textContent = aiWorn()
+        ? "Saving parts replaces your AI look. Parts cannot show every detail of it."
+        : "Pick each part, then save.";
       for (const r of rows) paintRow(r);
-      drawPreview();
+      saveBtn.disabled = !dirty();
+      undoBtn.disabled = !dirty();
+      if (backBox && useDescribed) {
+        backBox.hidden = custom !== true;
+        useDescribed.textContent = hasDescription
+          ? "Use the look from my description"
+          : "Back to the automatic look";
+      }
     };
-    paintAll();
-    const say = (msg: string, ok?: boolean) => {
-      status.textContent = msg;
-      status.className = `poke-status look-status${ok === undefined ? "" : ok ? " ok" : " err"}`;
+    /** a look became the one worn (a Generate, a save, a broadcast) */
+    const adopt = (avatar: AvatarSpec, isCustom: boolean | null) => {
+      active = structuredClone(avatar);
+      seen = JSON.stringify(avatar);
+      if (isCustom !== null) custom = isCustom;
+      else if (avatar.look) custom = false; // saved parts never carry a detailed look
+      if (!dirty() || isCustom !== null) resetDraft();
+      paint();
     };
-    const describeForm = box.querySelector<HTMLFormElement>(".look-describe");
-    const describeText = describeForm?.querySelector("textarea") ?? null;
-    const describeGo = describeForm?.querySelector<HTMLButtonElement>(".describe-go") ?? null;
-    const describeHint = describeForm?.querySelector<HTMLElement>(".describe-hint") ?? null;
-    void this.fetchLookInfo(p.personId).then((info) => {
-      if (!info) return;
-      if (!info.custom) autoBtn.title = "This look is already automatic";
-      if (info.custom) say("custom look (picked here)");
+    const setMode = (m: typeof mode, focus = false) => {
+      mode = m;
+      paint();
+      if (focus) tabs.find((t) => t.dataset.mode === m)?.focus();
+    };
+    for (const t of tabs) t.addEventListener("click", () => setMode(t.dataset.mode as typeof mode));
+    paint();
+
+    /** Why this browser's Generate cannot go to the person's Mac, and how to fix it. */
+    const showMacState = (info: LookInfo) => {
+      if (!callout || !describeHint) return;
+      const tool = info.localLooks?.[0] ?? "Claude Code";
+      const fallback = info.serverLooks
+        ? " Until then the office AI draws your look (a few a day)."
+        : " This office has no AI of its own, so looks are only drawn on your Mac.";
+      callout.hidden = true;
+      callout.replaceChildren();
+      describeHint.textContent = info.serverLooks
+        ? "The office AI draws you from this text (up to a minute)."
+        : "The AI draws you from this text (up to a minute).";
+      const recheck = () => {
+        const b = el("button", "link-btn recheck", "Check again");
+        b.setAttribute("type", "button");
+        b.addEventListener("click", () => void loadInfo("checked again"));
+        return b;
+      };
+      switch (info.mac) {
+        case "ready":
+          describeHint.textContent = `Your Mac draws it with ${tool} on your own subscription (about a minute).`;
+          return;
+        case "reconfirm": {
+          callout.hidden = false;
+          callout.append(
+            el(
+              "div",
+              "callout-text",
+              `<b>Your Mac reconnected</b> since this browser confirmed it's you, so it cannot draw your look right now.${esc(fallback)} Confirm it's you again with a new code:`,
+            ),
+            this.buildClaim(p, () => {
+              void loadInfo().then(() =>
+                say("Confirmed! Your Mac draws your look now: press Generate.", true),
+              );
+            }),
+          );
+          return;
+        }
+        case "enable":
+          callout.hidden = false;
+          callout.append(
+            el(
+              "div",
+              "callout-text",
+              `<b>Your Mac cannot draw looks yet.</b> In a terminal on your Mac, run <code>agent-office configure --look-generator auto</code> (needs Claude Code), then confirm it's you here again.${esc(fallback)}`,
+            ),
+            recheck(),
+          );
+          return;
+        case "offline":
+          callout.hidden = false;
+          callout.append(
+            el(
+              "div",
+              "callout-text",
+              `<b>Your Mac is not connected to the office.</b> Start the connector there (<code>agent-office status</code> shows what is wrong).${esc(fallback)}`,
+            ),
+            recheck(),
+          );
+          return;
+        default:
+          // no proof of who this is (the demo, an older server): only the server's AI is known
+          if (info.aiLooks === false)
+            describeHint.textContent =
+              "AI looks are off on this office server: your text is saved and used as soon as they are turned on.";
+      }
+    };
+    const loadInfo = async (note?: string) => {
+      const info = await this.fetchLookInfo(personId);
+      if (!info || this.lookEditor?.box !== box) return null;
+      custom = info.custom;
+      hasDescription = !!info.description;
       if (describeText && info.description && !describeText.value)
         describeText.value = info.description;
-      if (describeHint && info.localLooks?.length)
-        describeHint.textContent = `Your Mac draws it with ${info.localLooks[0]} on your own subscription (about a minute). It replaces a look picked here.`;
-      else if (describeHint && info.aiLooks === false)
-        describeHint.textContent =
-          "AI looks are off on this office server: your text is saved and used as soon as the admin turns them on (GENUI_PROVIDER, see README).";
-    });
-    const showAvatar = (avatar: AvatarSpec) => {
-      Object.assign(draft, structuredClone(catalogAvatar(avatar)));
-      for (const i of slotIdx) slots[i] = draft.deskProps[i] ?? "none";
-      generated = avatar.look ? structuredClone(avatar) : null;
-      paintAll();
+      if (info.avatar && JSON.stringify(info.avatar) !== seen) adopt(info.avatar, info.custom);
+      showMacState(info);
+      paint();
+      if (note) say(note);
+      return info;
     };
-    /** bumped by saving a picked look: the server then drops the Mac's answer, stop waiting */
+    void loadInfo();
+
+    /** bumped by saving parts or going back: the server then drops the Mac's answer, stop waiting */
     let localWait = 0;
+    const outcomeMessage = (o: GenerateOutcome): { text: string; ok: boolean } => {
+      const why = o.macError ? ` (${o.macError})` : "";
+      if (o.result === "ai")
+        return o.by === "mac"
+          ? { text: "New look, drawn on your Mac!", ok: true }
+          : { text: `Your Mac could not draw it${why}, so the office AI did. New look!`, ok: true };
+      if (o.result === "superseded")
+        return {
+          text: "Your look changed while it was being drawn (a newer Generate or saved parts), so that one stays.",
+          ok: false,
+        };
+      if (o.result === "off")
+        return {
+          text: `Your Mac could not draw it${why}, your look stays. \`agent-office logs\` on your Mac tells why (often: Claude Code is not logged in there). Fix it, then Generate again.`,
+          ok: false,
+        };
+      return {
+        text: `Your Mac could not draw it${why}, and neither could the office AI. Your look stays, try again later.`,
+        ok: false,
+      };
+    };
+    /**
+     * A Generate went to the person's Mac. No polling (each GET is a billed Durable Object
+     * request): the server broadcasts `look.generated` when it ends, and the studio then GETs
+     * how (with the Mac's error) once. One last GET after LOCAL_LOOK_WAIT_MS covers a
+     * broadcast missed while the socket reconnected.
+     */
+    let macWait: { wait: number; timer: ReturnType<typeof setTimeout> } | null = null;
+    const waitForMac = (wait: number) => {
+      if (macWait) clearTimeout(macWait.timer);
+      macWait = { wait, timer: setTimeout(() => void checkMac(true), LOCAL_LOOK_WAIT_MS) };
+    };
+    const checkMac = async (final: boolean) => {
+      const w = macWait;
+      const live = () => this.lookEditor?.box === box && macWait === w && w?.wait === localWait;
+      if (!live()) return;
+      const info = await this.fetchLookInfo(personId);
+      if (!live()) return;
+      const o = info?.lastGenerate;
+      if (info && o) {
+        clearTimeout(w!.timer);
+        macWait = null;
+        if (describeGo) describeGo.disabled = false;
+        if (info.avatar) adopt(info.avatar, info.custom);
+        showMacState(info);
+        const m = outcomeMessage(o);
+        say(m.text, m.ok);
+        return;
+      }
+      if (!final) return; // an older Generate's news: keep waiting for this one
+      macWait = null;
+      if (describeGo) describeGo.disabled = false;
+      say(
+        "Your Mac has not answered in 5 minutes. Check that the connector runs there (`agent-office status`), then try again.",
+        false,
+      );
+    };
     describeForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!this.onDescribeLook || !describeText || !describeGo) return;
@@ -1107,38 +1368,22 @@ export class Hud {
       }
       describeGo.disabled = true;
       say("the AI is drawing you, this can take a minute...");
-      const before = JSON.stringify(this.model.people.get(p.personId)?.avatar ?? null);
-      const r = await this.onDescribeLook(p.personId, text);
+      const r = await this.onDescribeLook(personId, text);
+      hasDescription = true;
       if (r.pending) {
         say(r.message);
-        // the look arrives as avatar.updated: watch the model until it changes
-        const until = Date.now() + LOCAL_LOOK_WAIT_MS;
-        const wait = ++localWait;
-        const watch = () => {
-          if (this.lookEditor?.box !== box || wait !== localWait) return; // closed or picked
-          const now = this.model.people.get(p.personId)?.avatar;
-          if (now && JSON.stringify(now) !== before) {
-            describeGo.disabled = false;
-            showAvatar(now);
-            say("new look, drawn on your Mac!", true);
-          } else if (Date.now() > until) {
-            describeGo.disabled = false;
-            say("no new look yet: run `agent-office logs` on your Mac to see why", false);
-          } else setTimeout(watch, 1_500);
-        };
-        watch();
+        waitForMac(++localWait);
         return;
       }
       describeGo.disabled = false;
       say(r.message, r.ok);
-      if (r.ok && r.avatar) showAvatar(r.avatar);
+      if (r.ok && r.avatar) adopt(r.avatar, false);
+      // the Mac's state may have changed since the studio opened: show how to fix it
+      else if (r.mac && r.mac !== "ready") void loadInfo();
     });
     const step = (r: LookRow, dir: -1 | 1) => {
-      // touching a carousel starts from the generated look's catalog ids (what Save keeps)
-      generated = null;
       r.set(cycleOption(r.options, r.get(), dir, r.skip?.()));
-      paintRow(r);
-      drawPreview();
+      paint();
       say("");
     };
     for (const r of rows) {
@@ -1148,21 +1393,23 @@ export class Hud {
     }
     const save = async (avatar: AvatarSpec | null) => {
       if (!this.onEditLook) return;
-      if (avatar) {
-        localWait++;
-        if (describeGo) describeGo.disabled = false;
-      }
+      localWait++;
+      if (describeGo) describeGo.disabled = false;
       say("...");
-      const r = await this.onEditLook(p.personId, avatar);
+      const r = await this.onEditLook(personId, avatar);
       say(r.message, r.ok);
-      if (r.ok && r.avatar && !avatar) {
-        // back to automatic: show the look the server picked
-        showAvatar(r.avatar);
-      }
+      if (!r.ok) return;
+      adopt(r.avatar ?? avatar ?? active, avatar !== null);
     };
-    box.querySelector(".save")!.addEventListener("click", () => void save(structuredClone(draft)));
-    autoBtn.addEventListener("click", () => void save(null));
-    box.querySelector(".close")!.addEventListener("click", () => this.closeLookEditor());
+    saveBtn.addEventListener("click", () => void save(structuredClone(draft)));
+    undoBtn.addEventListener("click", () => {
+      resetDraft();
+      paint();
+      say("");
+    });
+    useDescribed?.addEventListener("click", () => void save(null));
+    q(".close")!.addEventListener("click", () => this.closeLookEditor());
+    q(".done")!.addEventListener("click", () => this.closeLookEditor());
     // clicks / scrolls must not reach the office canvas underneath
     for (const ev of ["pointerdown", "wheel"] as const)
       box.addEventListener(ev, (e) => e.stopPropagation());
@@ -1177,37 +1424,48 @@ export class Hud {
         return;
       }
       const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
-      const typing = (e.target as HTMLElement | null)?.closest?.("textarea, input");
+      const target = e.target as HTMLElement | null;
+      const typing = target?.closest?.("textarea, input");
       if (typing && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         describeForm?.requestSubmit();
         return;
       }
-      // in the description box arrows move the caret, they do not flip carousels
-      if (!keys.includes(e.key) || typing) {
-        // typing shortcuts of the office must not fire behind the studio
-        e.stopImmediatePropagation();
+      // typing shortcuts of the office must not fire behind the studio
+      e.stopImmediatePropagation();
+      // in a text field arrows move the caret, they do not flip carousels
+      if (!keys.includes(e.key) || typing) return;
+      // left / right on the tabs switch tabs
+      if (target?.closest(".studio-tabs")) {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          setMode(mode === "describe" ? "parts" : "describe", true);
+        }
         return;
       }
+      if (mode !== "parts") return;
       e.preventDefault();
-      e.stopImmediatePropagation();
-      const current = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
-        ".look-row",
-      );
+      const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(".look-row");
       const at = Math.max(
         0,
-        rows.findIndex((r) => r.id === current?.dataset.field),
+        rows.findIndex((r) => r.id === row?.dataset.field),
       );
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         const next = rows[(at + (e.key === "ArrowUp" ? -1 : 1) + rows.length) % rows.length]!;
         rowEls.get(next.id)!.focus();
         return;
       }
-      if (!current) rowEls.get(rows[0]!.id)!.focus();
+      if (!row) rowEls.get(rows[0]!.id)!.focus();
       step(rows[at]!, e.key === "ArrowLeft" ? -1 : 1);
     };
-    return { box, onKey };
+    /** the office changed: follow my look (a Mac-drawn look, another tab of mine saving) */
+    const sync = () => {
+      const now = this.model.people.get(personId)?.avatar;
+      if (!now || JSON.stringify(now) === seen) return;
+      adopt(now, null);
+    };
+    return { box, onKey, sync, generated: () => void checkMac(false) };
   }
 
   /** Person this browser confirmed to be ("It's me" code); null = a spectator. */
@@ -1501,7 +1759,7 @@ export class Hud {
    * this browser as them. From then on it may change that look (and only that one) and plays
    * the office games as them. A courtesy lock, not real identity (see DECISIONS L9).
    */
-  private buildClaim(p: PersonState): HTMLElement {
+  private buildClaim(p: PersonState, onDone?: () => void): HTMLElement {
     const box = el("div", "claim");
     box.innerHTML = `
       <div class="claim-title">A 6-digit code pops up as a notification on ${esc(p.name)}'s Mac.</div>
@@ -1570,6 +1828,7 @@ export class Hud {
       }
       clearInterval(timer);
       this.confirmed(p.personId);
+      onDone?.();
     });
     return box;
   }

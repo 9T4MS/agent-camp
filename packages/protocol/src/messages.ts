@@ -391,6 +391,20 @@ export const GameUpdated = msg(
   z.object({ game: GameSummary, stats: z.record(z.string(), GameStats).optional() }),
 );
 
+/**
+ * A look studio Generate that went to the person's Mac ended (how: see `GenerateOutcome` in
+ * api.ts; the Mac's error stays out, it is only for that person's own browser). The owner's
+ * open studio then fetches the details once instead of polling. Not part of the office state.
+ */
+export const LookGenerated = msg(
+  "look.generated",
+  z.object({
+    personId: PersonId,
+    result: z.enum(["ai", "off", "failed", "superseded"]),
+    by: z.enum(["mac", "server"]),
+  }),
+);
+
 /** The person's head GIF changed; `gif` omitted = removed. */
 export const GifUpdated = msg(
   "gif.updated",
@@ -417,6 +431,7 @@ export const ServerToViewer = z.discriminatedUnion("type", [
   PersonBirthdayChanged,
   PersonHelpersChanged,
   InteractionHappened,
+  LookGenerated,
 ]);
 export type ServerToViewer = z.infer<typeof ServerToViewer>;
 
@@ -425,13 +440,14 @@ export type AnyMessage = ConnectorToServer | ServerToConnector | ServerToViewer;
 export type MessageType = AnyMessage["type"];
 export type MessageOf<T extends MessageType> = Extract<AnyMessage, { type: T }>;
 export type MessageData<T extends MessageType> = MessageOf<T>["data"];
-/** What the server's diff() emits: everything but snapshots and transient interaction/party updates. */
+/** What the server's diff() emits: everything but snapshots and transient interaction/party/look updates. */
 export type ViewerEvent = Exclude<
   ServerToViewer,
   {
     type:
       | "office.snapshot"
       | "interaction.happened"
+      | "look.generated"
       | "party.updated"
       | "game.updated"
       | "message.sent"

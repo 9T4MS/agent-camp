@@ -447,6 +447,15 @@ async function cmdConfigure(args: Args): Promise<number> {
   if (cowork !== undefined && next.cowork) {
     console.log(`Cowork sessions are on. Restart the connector to apply: ${RESTART_HINT}`);
   }
+  if (lookGen !== undefined) {
+    // the office learns about the look generator from the hello: reconnect now, so the look
+    // studio can use it without a manual restart
+    if (await restartService())
+      console.log(
+        "connector restarted; in the look studio, confirm it's you with a new code to draw on this Mac",
+      );
+    else console.log(`restart the connector to apply it: ${RESTART_HINT}`);
+  }
   return 0;
 }
 

@@ -29,6 +29,7 @@ import {
   type InteractRequest,
   isCatInteraction,
   type LookDescribeResponse,
+  type LookMacState,
   MESSAGE_MAX_ROWS,
   MESSAGE_RETENTION_MS,
   type MessageRecord,
@@ -439,6 +440,10 @@ async function boot() {
       }
       return;
     }
+    if (msg.type === "look.generated") {
+      hud.lookGenerated(msg.data.personId);
+      return;
+    }
     const changes = model.apply(msg);
     // the demo has no codes: start as the first person (the Me menu switches freely)
     if (demo && !demoMe && model.people.size > 0) {
@@ -792,7 +797,7 @@ async function boot() {
       if (!r.ok) return { ok: false, message: body.error ?? `failed (${r.status})` };
       return {
         ok: true,
-        message: avatar ? "saved, looking sharp!" : "back to the automatic look",
+        message: avatar ? "saved, looking sharp!" : "back to the look from your description",
         ...(body.avatar ? { avatar: body.avatar } : {}),
       };
     } catch {
@@ -879,9 +884,13 @@ async function boot() {
       const body = (await r.json()) as AvatarEditResponse;
       return {
         custom: body.custom,
+        avatar: body.avatar,
         ...(body.aiLooks !== undefined ? { aiLooks: body.aiLooks } : {}),
+        ...(body.serverLooks !== undefined ? { serverLooks: body.serverLooks } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(body.localLooks ? { localLooks: body.localLooks.map(toolName) } : {}),
+        ...(body.mac ? { mac: body.mac } : {}),
+        ...(body.lastGenerate ? { lastGenerate: body.lastGenerate } : {}),
       };
     } catch {
       return null;
@@ -918,15 +927,32 @@ async function boot() {
         body.result === "ai"
           ? "new look, straight from your description!"
           : body.result === "off"
-            ? "saved, but AI looks are off on this server: ask the office admin to set GENUI_PROVIDER (README, Deploy)"
+            ? offMessage(body.mac)
             : body.result === "superseded"
-              ? "your look changed while the AI was drawing (a newer Generate or a saved look), so that one stays"
+              ? "your look changed while the AI was drawing (a newer Generate or saved parts), so that one stays"
               : "the AI could not draw you this time (error or daily limit); your look stays. Try again later.";
-      return { ok: body.result === "ai", message, ...(body.avatar ? { avatar: body.avatar } : {}) };
+      return {
+        ok: body.result === "ai",
+        message,
+        ...(body.avatar ? { avatar: body.avatar } : {}),
+        ...(body.mac ? { mac: body.mac } : {}),
+      };
     } catch {
       return { ok: false, message: "could not reach the office" };
     }
   }
+  /**
+   * No look drawn: the office has no AI of its own and the Mac did not take it. Say why the
+   * Mac did not (the fix is on the user's side), not "ask the admin", which is rarely the fix.
+   */
+  const offMessage = (mac: LookMacState | undefined) =>
+    mac === "reconfirm"
+      ? "Text saved, but your Mac reconnected since you confirmed it's you: confirm again with a new code (above), then Generate."
+      : mac === "enable"
+        ? "Text saved, but your Mac cannot draw looks yet: see above how to turn it on, then Generate."
+        : mac === "offline"
+          ? "Text saved, but your Mac is not connected to the office: start the connector there, then Generate."
+          : "Text saved, but AI looks are off on this office server: it is used as soon as they are turned on.";
   if (!kiosk) hud.onDescribeLook = describeLook;
 
   /** Agent card + ease the camera to the character (clear of the side panel). */

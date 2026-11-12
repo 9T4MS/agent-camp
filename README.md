@@ -203,30 +203,39 @@ that is nobody (a guest, the kiosk) only watches and can say hi with a typed nam
 
 ![Who are you?](screenshots/16-its-me-laptop.png)
 
-**Customize look** opens a fullscreen studio: flip through hair,
-face, glasses, cap, outfit (jacket, hoodie, flannel, tee), something for each hand (beer,
-coffee, phone, ...), your ride and desk items with the ◀ ▶ buttons (or the arrow keys), with a
-big live preview. You can only change your own look. This is a courtesy lock for a team
+**Customize look** opens a fullscreen studio showing the look you wear now, with two tabs,
+one per way to a look. You can only change your own look. This is a courtesy lock for a team
 office, not real identity: anyone with the office password could start a connector under your
-name. Saving pins it; **Automatic** goes back to the one from your description. On a shared
-device, "Forget this device" in that menu (or logging out) drops the claim. Outfits that are not in the agent colour carry a small agent
-badge on the tee and a band across the back, so you can still tell Claude from Codex at the
-desk.
+name. On a shared device, "Forget this device" in that menu (or logging out) drops the claim.
 
-The studio also has a **Describe your look** box: write how you look (a few words or a whole
-paragraph) and press **Generate look**; the Mac you confirmed **It's me** on draws you from
-it (as above) within a minute or two, replacing a look picked in the studio. Only that Mac:
-each Mac gets its own code, so another connector started under your name never gets your text,
-and a description a connector sends when it connects never runs on any Mac. After that Mac
-reconnects (sleep, restart), confirm **It's me** again to draw on it; meanwhile the office's
-AI draws. Pressing it again with the same text is
-a fresh try (one per person every 20 s, and one at a time: a new one waits until the last one
-is drawn). Without a Mac that can draw it, the office's own AI draws it, at most 5 times per
-person per day (`GENUI_MAX_CALLS_PER_PERSON`), so nobody uses up the shared daily cap; looks
-drawn on your own Mac do not count. Like editing your look, this needs **It's me** first:
-only your own browser can ask, only that Mac's answer is taken. The text becomes your description, just
+**Pick parts**: flip through hair, face, glasses, cap, outfit (jacket, hoodie, flannel, tee),
+something for each hand (beer, coffee, phone, ...), your ride and desk items with the ◀ ▶
+buttons (or the arrow keys), with a big live preview. **Save parts** pins them, **Undo
+changes** drops what you have not saved. Saving parts replaces an AI look (the studio warns
+you: parts cannot show every detail of it). Outfits that are not in the agent colour carry a
+small agent badge on the tee and a band across the back, so you can still tell Claude from
+Codex at the desk.
+
+**Describe it**: write how you look (a few words or a whole paragraph) and press **Generate
+look**; the Mac you confirmed **It's me** on draws you from it (as above) within a minute or
+two, replacing picked parts. The new look goes live as soon as it is drawn, there is nothing
+to save. While you wear picked parts, this tab offers the way back: **Use the look from my
+description** (or **Back to the automatic look** if you never wrote one). Only that Mac
+draws: each Mac gets its own code, so another connector started under your name never gets
+your text, and a description a connector sends when it connects never runs on any Mac. If
+your Mac cannot draw it, the tab says why and how to fix it: it reconnected since you
+confirmed (sleep, restart: confirm **It's me** again, right there with a new code), it has no
+look generator yet (`agent-office configure --look-generator auto`, which restarts the
+connector), or it is not connected. Meanwhile the office's AI draws, if it has one. If Claude
+Code fails on your Mac (often: not logged in there), the studio shows its error as soon as
+the Mac answers. Pressing it again with the same text is a fresh try (one per person every
+20 s, and one at a time: a new one waits until the last one is drawn). Without a Mac that can
+draw it, the office's own AI draws it, at most 5 times per person per day
+(`GENUI_MAX_CALLS_PER_PERSON`), so nobody uses up the shared daily cap; looks drawn on your
+own Mac do not count. Like editing your look, this needs **It's me** first: only your own
+browser can ask, only that Mac's answer is taken. The text becomes your description, just
 like one set with `agent-office configure --description-file` (a connector that keeps sending
-its old, unchanged description does not undo it). If AI looks are off on the server, the box
+its old, unchanged description does not undo it). If AI looks are off on the server, the tab
 says so and the text is kept for when they are turned on (`GENUI_PROVIDER`, see Deploy).
 
 ![Look studio](screenshots/14-look-editor-laptop.png)

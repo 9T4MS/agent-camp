@@ -125,7 +125,7 @@
 }
 .me-menu .link-btn:focus-visible,
 .me-menu .pixel-btn:focus-visible,
-.me-menu .claim-help summary:focus-visible {
+:is(.me-menu, .look-callout) .claim-help summary:focus-visible {
   outline: 2px solid var(--lemon);
   outline-offset: 2px;
 }
@@ -989,37 +989,37 @@ body.kiosk .hud-reconnect {
   text-decoration: underline;
   cursor: pointer;
 }
-.me-menu .claim {
+:is(.me-menu, .look-callout) .claim {
   display: grid;
   gap: 6px;
 }
-.me-menu .claim-title {
+:is(.me-menu, .look-callout) .claim-title {
   font-size: 12px;
   color: var(--silver);
 }
-.me-menu .claim-send,
-.me-menu .claim-form .pixel-btn {
+:is(.me-menu, .look-callout) .claim-send,
+:is(.me-menu, .look-callout) .claim-form .pixel-btn {
   font-size: 12px;
 }
-.me-menu .claim-form .pixel-btn {
+:is(.me-menu, .look-callout) .claim-form .pixel-btn {
   flex: none;
 }
-.me-menu .claim-form {
+:is(.me-menu, .look-callout) .claim-form {
   display: grid;
   gap: 4px;
 }
-.me-menu .claim-form label {
+:is(.me-menu, .look-callout) .claim-form label {
   font-size: 12px;
   color: var(--silver);
 }
-.me-menu .claim-row {
+:is(.me-menu, .look-callout) .claim-row {
   display: flex;
   gap: 6px;
 }
-.me-menu .claim-form[hidden] {
+:is(.me-menu, .look-callout) .claim-form[hidden] {
   display: none;
 }
-.me-menu .claim-row input {
+:is(.me-menu, .look-callout) .claim-row input {
   width: 0;
   min-width: 0;
   flex: 1;
@@ -1115,7 +1115,109 @@ body.kiosk .hud-reconnect {
   font-size: 12px;
   color: var(--grey);
 }
+.look-studio .look-current {
+  font-size: 13px;
+}
+.look-studio .look-current b {
+  font-weight: 400;
+  color: var(--lemon);
+}
+.look-studio .studio-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.look-studio .studio-tabs {
+  display: flex;
+  gap: 6px;
+}
+.look-studio .studio-tab {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--silver);
+  background: var(--dusk);
+  box-shadow: none;
+}
+.look-studio .studio-tab[aria-selected="true"] {
+  color: var(--night);
+  background: var(--lemon);
+}
+.look-studio .studio-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.look-studio .studio-pane[hidden] {
+  display: none;
+}
+.look-studio .pane-note {
+  font-size: 12px;
+  color: var(--grey);
+}
+.look-studio .look-callout {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--silver);
+  background: var(--ink);
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+.look-studio .look-callout[hidden] {
+  display: none;
+}
+.look-studio .look-callout b {
+  font-weight: 400;
+  color: var(--amber);
+}
+.look-callout code {
+  padding: 0 3px;
+  color: var(--cream);
+  background: var(--night);
+  user-select: all;
+}
+.look-studio .link-btn {
+  justify-self: start;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--grey);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.look-studio .back-to-described {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--silver);
+}
+.look-studio .back-to-described[hidden] {
+  display: none;
+}
+.look-studio .back-to-described .pixel-btn,
+.look-studio .parts-foot .pixel-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.look-studio .parts-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.look-studio .parts-foot .pixel-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .look-studio .studio-rows {
+  flex: 1;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
@@ -1225,6 +1327,9 @@ body.kiosk .hud-reconnect {
   }
   .look-studio .look-note {
     display: none;
+  }
+  .look-studio .studio-side {
+    flex: 1;
   }
   .look-studio .studio-rows {
     flex: 1;
@@ -1569,21 +1674,21 @@ body.kiosk .celebration .version {
   gap: 8px;
   text-align: left;
 }
-.me-menu .claim-send:disabled {
+:is(.me-menu, .look-callout) .claim-send:disabled {
   opacity: 0.6;
   cursor: default;
 }
-.me-menu .claim-row .pixel-btn {
+:is(.me-menu, .look-callout) .claim-row .pixel-btn {
   width: auto;
 }
-.me-menu .claim-row input[aria-invalid="true"] {
+:is(.me-menu, .look-callout) .claim-row input[aria-invalid="true"] {
   outline: 2px solid var(--red);
 }
-.me-menu .claim-help {
+:is(.me-menu, .look-callout) .claim-help {
   font-size: 12px;
   color: var(--silver);
 }
-.me-menu .claim-help summary {
+:is(.me-menu, .look-callout) .claim-help summary {
   cursor: pointer;
   color: var(--grey);
   text-decoration: underline;
