@@ -935,6 +935,101 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.rect(29, 24, 2, 4, C.bark);
     },
   },
+  // ---- Richard's wooden server cabin in the garden -------------------------------------------
+  serverCabin: {
+    w: 64,
+    h: 66,
+    frames: 2,
+    draw(pc, _v, f) {
+      // 6 px of headroom for the dish and the antenna above the roof
+      const oy = pc.oy;
+      pc.oy += 6;
+      // log walls: five logs with a light top and a dark seam, log ends at both corners
+      for (let i = 0; i < 6; i++) {
+        const y = 24 + i * 6;
+        pc.rect(2, y, 60, 6, C.wood);
+        pc.hline(2, y, 60, C.tan);
+        pc.hline(2, y + 5, 60, C.bark);
+        for (const x of [0, 59]) {
+          pc.ellipse(x, y, 5, 6, C.sand);
+          pc.set(x + 2, y + 2, C.tan);
+          pc.set(x + 2, y + 3, C.wood);
+        }
+      }
+      // window with a blinking rack behind it and cables hanging out of it
+      pc.rect(6, 29, 16, 13, C.cocoa);
+      pc.rect(8, 31, 12, 9, C.ink);
+      for (let u = 0; u < 3; u++) {
+        pc.hline(9, 32 + u * 3, 10, C.slate);
+        pc.set(10, 33 + u * 3, (u + f) % 2 ? C.leaf : C.moss);
+        pc.set(12, 33 + u * 3, (u + f) % 3 === 0 ? C.amber : C.night);
+      }
+      const cables = [C.red, C.sky, C.lemon];
+      cables.forEach((c, i) => {
+        const x = 10 + i * 3;
+        pc.vline(x, 41, 4 + i * 2, c);
+        pc.set(x + (i % 2 ? -1 : 1), 45 + i * 2, c);
+        pc.set(x + (i % 2 ? -1 : 1), 46 + i * 2, c);
+      });
+      // the open door (tile 3 of 4): a dark doorway with a rack inside, the leaf swung out
+      pc.rect(33, 29, 13, 29, C.cocoa);
+      pc.rect(34, 30, 11, 28, C.ink);
+      pc.rect(37, 34, 6, 22, C.slate);
+      for (let u = 0; u < 5; u++) {
+        const y = 36 + u * 4;
+        pc.hline(38, y, 4, C.grey);
+        pc.set(38, y + 1, (u + f) % 2 ? C.leaf : C.forest);
+        pc.set(40, y + 1, (u * 2 + f) % 3 === 0 ? C.amber : C.night);
+      }
+      pc.rect(46, 30, 4, 28, C.bark);
+      pc.vline(46, 30, 28, C.wood);
+      pc.set(48, 44, C.amber); // door handle
+      // roof: crooked dark planks, one sagging, one patched with a light board and nails
+      pc.rect(1, 2, 62, 22, C.bark);
+      for (let x = 3; x < 62; x += 6) pc.vline(x, 3, 20, C.cocoa);
+      pc.hline(1, 2, 62, C.wood);
+      pc.rect(22, 3, 6, 21, C.bark);
+      pc.hline(22, 23, 6, C.bark);
+      pc.hline(22, 24, 6, C.cocoa);
+      pc.rect(40, 7, 6, 7, C.sand);
+      pc.set(41, 8, C.slate);
+      pc.set(44, 12, C.slate);
+      pc.rect(0, 22, 64, 2, C.cocoa);
+      // a satellite dish and an antenna with a loose cable
+      pc.ellipse(48, -3, 9, 7, C.silver);
+      pc.ellipse(50, -2, 5, 4, C.white);
+      pc.vline(52, 3, 3, C.slate);
+      pc.vline(9, -6, 9, C.grey);
+      pc.hline(7, -5, 5, C.grey);
+      pc.set(10, 3, C.ink);
+      pc.set(11, 4, C.ink);
+      pc.vline(12, 5, 20, C.ink);
+      pc.set(13, 25, C.ink);
+      // hand-painted sign, nailed on crooked
+      const sign = "SERVER ROOM";
+      const sw = measureText(sign) + 4;
+      const sx = Math.floor((64 - sw) / 2);
+      pc.rect(sx, 13, sw, 8, C.sand);
+      pc.hline(sx, 20, sw, C.tan);
+      pc.rect(sx + sw - 12, 14, 12, 8, C.sand);
+      pc.hline(sx + sw - 12, 21, 12, C.tan);
+      drawText(pc, sx + 2, 15, sign, C.wine);
+      // the mess: a cardboard box, a cable reel and a stack of pizza boxes
+      pc.rect(1, 49, 10, 9, C.tan);
+      pc.hline(1, 49, 10, C.sand);
+      pc.vline(5, 49, 9, C.cream);
+      pc.vline(10, 50, 8, C.wood);
+      pc.ellipse(24, 51, 8, 7, C.orange);
+      pc.ellipse(26, 53, 4, 3, C.rust);
+      for (let i = 0; i < 3; i++) {
+        const y = 56 - i * 3;
+        pc.rect(51 + (i % 2), y - 2, 12, 3, C.sand);
+        pc.hline(51 + (i % 2), y, 12, C.tan);
+        pc.set(55 + i, y - 1, C.red);
+      }
+      pc.oy = oy;
+    },
+  },
 };
 
 const cache = new Map<string, Texture[]>();

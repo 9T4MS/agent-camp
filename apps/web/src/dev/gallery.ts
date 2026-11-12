@@ -35,6 +35,13 @@ import {
   sidekickSheet,
 } from "../art/portalCharacters.ts";
 import { queenTextures } from "../art/queen.ts";
+import {
+  extinguisherTextures,
+  messTextures,
+  RICHARD_RENDER,
+  ramTexture,
+  sootTexture,
+} from "../art/richard.ts";
 import { parseLookParam } from "../demo/demoFeed.ts";
 import type { ObjectKind } from "../world/map.ts";
 
@@ -109,6 +116,8 @@ export function showGallery(app: Application) {
     ...SHOWCASE.map(([extra, agent]) =>
       lookFor({ ...avatarFromSeed("tom"), ...extra }, agent, null),
     ),
+    // Richard, the IT guy from the server cabin
+    RICHARD_RENDER,
   ];
   looks.forEach((look, row) => {
     const sheet = characterSheet(look);
@@ -145,6 +154,10 @@ export function showGallery(app: Application) {
     ...botTextures("codex"),
     ...catTextures(),
     ...queenTextures(),
+    ...extinguisherTextures(),
+    ramTexture(),
+    ...messTextures(),
+    sootTexture(),
     ...alertTextures(),
     ...dotsTextures(),
     bubbleTexture("typing", "agent-office"),

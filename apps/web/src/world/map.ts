@@ -6,7 +6,7 @@
  *   x 1..32   main desk floor (pod slots, 3 columns: desks only for people who are here,
  *             cozy nooks elsewhere; rows grow as people join)
  *   x 34..49  kitchen + lounge (top), meeting room (middle), game corner (bottom)
- *   x 51..62  garden; main door in the bottom wall at x 16..17
+ *   x 51..62  garden with Richard's server cabin; main door in the bottom wall at x 16..17
  *   x 63      hedge with a gate at y 7..8 (the garden path crosses into the street block)
  *   x 64..79  east street block: a sidewalk lane (x 64), the "Feierabend" bar (top), the
  *             weed shop (middle) and the smokers' corner (bottom); hedge at x 79
@@ -261,6 +261,7 @@ export const FOOTPRINTS = {
   headDesk: { w: 3, h: 1, solid: true },
   timeClock: { w: 1, h: 1, solid: false },
   salesStand: { w: 2, h: 1, solid: true },
+  serverCabin: { w: 4, h: 2, solid: true },
 } as const;
 export type ObjectKind = keyof typeof FOOTPRINTS;
 export type MapObject = { kind: ObjectKind; x: number; y: number; variant?: number };
@@ -271,6 +272,14 @@ export const HEAD_DESK: Point = { x: 46, y: 14 };
 export const SALES_STAND: Point = { x: 52, y: 22 };
 /** Where the cook stands at the stove. */
 export const STOVE_SPOT: Point = { x: 35, y: 4 };
+/** Left tile of Richard's wooden server cabin in the garden (4 wide, 2 deep). */
+export const SERVER_CABIN: Point = { x: 56, y: 4 };
+/** The tile in front of the cabin door (Richard goes in and out here). */
+export const CABIN_DOOR: Point = { x: 58, y: 6 };
+/** Where Richard stands to spray the burning cabin roof. */
+export const CABIN_HOSE: Point = { x: 57, y: 6 };
+/** Where Richard stands (facing up) to put RAM into the server rack on the desk floor. */
+export const RACK_SPOT: Point = { x: 32, y: 16 };
 
 const o = (kind: ObjectKind, x: number, y: number, variant?: number): MapObject =>
   variant === undefined ? { kind, x, y } : { kind, x, y, variant };
@@ -322,7 +331,7 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("floorLamp", 34, 27),
   // garden
   o("tree", 52, 3),
-  o("tree", 59, 2, 1),
+  o("tree", 61, 3, 1),
   o("tree", 60, 17),
   o("tree", 52, 19, 1),
   o("tree", 59, 27),
@@ -334,6 +343,7 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("lampPost", 54, 6),
   o("lampPost", 57, 21),
   o("salesStand", SALES_STAND.x, SALES_STAND.y),
+  o("serverCabin", SERVER_CABIN.x, SERVER_CABIN.y),
   o("parasol", 58, 19),
   o("bush", 62, 11),
   o("bush", 51, 26, 1),
