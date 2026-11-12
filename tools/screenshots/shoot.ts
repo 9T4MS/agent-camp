@@ -17,6 +17,7 @@ import { join, resolve } from "node:path";
 import { LOOK_FIXTURES } from "@agent-office/protocol/fixtures";
 import { generateWeek, postBackfill, runScenario, type SimHandle } from "@agent-office/sim";
 import type { Browser, BrowserContext, Page } from "playwright";
+import { checkChatOverlay } from "./chat-smoke.ts";
 import { encodeGif, type RgbaFrame } from "./gif.ts";
 import { terminalHtml } from "./terminal.ts";
 
@@ -766,6 +767,10 @@ async function checkMessageReloadGuard(url: string) {
     extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
   });
   try {
+    await ctx.addInitScript(() => {
+      if (localStorage.getItem("agent-office.messages.expanded") === null)
+        localStorage.setItem("agent-office.messages.expanded", "false");
+    });
     const page = await ctx.newPage();
     await page.goto(url);
     await page.waitForFunction(() => window.__office?.ready);
@@ -856,6 +861,13 @@ async function sceneMessages() {
   };
   try {
     await post("Lunch in five! Everyone can read this shared office log.");
+    // Keep the shipped popup regression path; fresh-browser overlay has its own scene.
+    for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
+      await (await context(vp)).addInitScript(() => {
+        if (localStorage.getItem("agent-office.messages.expanded") === null)
+          localStorage.setItem("agent-office.messages.expanded", "false");
+      });
+    }
     for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
       const page = await openOffice(vp, `${o.http}/?hour=15`, BUSY.people, BUSY.sessions, 500);
       const errors: string[] = [];
@@ -1013,10 +1025,17 @@ async function sceneMessages() {
       assert.equal(await page.locator(".messages-panel").isVisible(), false);
       await launcher.click();
       const deleteButton = page
-        .getByRole("button", { name: "Delete your message", exact: true })
+        .getByRole("button", { name: "Delete your message", exact: true, includeHidden: true })
         .last();
+      const row = page
+        .locator(".messages-log article")
+        .filter({ has: page.locator("details") })
+        .last();
+      await row.locator("summary").click();
       await deleteButton.waitFor();
-      const deletedId = await deleteButton.locator("..").getAttribute("data-message-id");
+      const deletedId = await deleteButton.evaluate(
+        (el) => el.closest("article")?.dataset.messageId,
+      );
       assert.ok(deletedId);
       page.once("dialog", (dialog) => void dialog.accept());
       await deleteButton.click();
@@ -1037,6 +1056,10 @@ async function sceneMessages() {
       extraHTTPHeaders: { authorization: `Bearer ${PASSWORD}` },
     });
     try {
+      await mobile.addInitScript(() => {
+        if (localStorage.getItem("agent-office.messages.expanded") === null)
+          localStorage.setItem("agent-office.messages.expanded", "false");
+      });
       const page = await mobile.newPage();
       await page.goto(o.http);
       await page.waitForFunction(() => window.__office?.ready);
@@ -1097,6 +1120,16 @@ async function sceneMessages() {
   }
 }
 
+async function sceneChatOverlay() {
+  if (!want("18-chat-overlay")) return;
+  const o = await office("busy");
+  try {
+    await checkChatOverlay(browser, o.http, PASSWORD, shoot);
+  } finally {
+    o.stop();
+  }
+}
+
 // ---- main -------------------------------------------------------------------------------------
 
 /** [seconds a scene took in CI, scene]: `--shard` balances by these */
@@ -1120,6 +1153,7 @@ const SCENES: readonly [number, () => Promise<void>][] = [
   [26, sceneSidePanel],
   [52, sceneAgentCard],
   [110, sceneMessages],
+  [60, sceneChatOverlay],
   [25, sceneOfficeLife],
   [18, sceneCleared],
   [162, sceneBarAndShop],

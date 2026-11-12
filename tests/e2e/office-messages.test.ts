@@ -104,7 +104,7 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       const second = await socket(server.base, "/ws/viewer");
       sockets.push(a.ws, a2.ws, b.ws, other.ws, first.ws, second.ws);
       const body = {
-        text: "Explicitly authored e2e message",
+        text: "Explicitly authored e2e message :coffee: 👩🏽‍💻",
         audience: { kind: "selected", personIds: ["anna", "ben"] },
         notifyDesktop: true,
       };
@@ -129,8 +129,11 @@ describe.skipIf(process.env.AGENT_OFFICE_E2E !== "1")("Office Messages (local e2
       expect(other.raw.some((m) => m.includes("connector.poked"))).toBe(false);
       for (const viewer of [first, second])
         expect(viewer.messages.filter((m) => m.type === "message.sent")).toHaveLength(1);
-      for (const connector of [a, a2, b])
-        expect(connector.raw.filter((m) => m.includes("connector.poked"))).toHaveLength(1);
+      for (const connector of [a, a2, b]) {
+        const pokes = connector.raw.filter((m) => m.includes("connector.poked"));
+        expect(pokes).toHaveLength(1);
+        expect(JSON.parse(pokes[0]!).data.text).toBe(body.text);
+      }
       const login = await fetch(`${server.base}/api/login`, {
         method: "POST",
         redirect: "manual",
