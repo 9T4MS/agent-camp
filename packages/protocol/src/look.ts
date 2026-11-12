@@ -58,6 +58,8 @@ export const Pattern = z
 export type Pattern = z.infer<typeof Pattern>;
 
 export const BUTTON_SIZES = ["small", "large"] as const;
+/** single = one row down the centre; double = two rows (double-breasted) */
+export const BUTTON_LAYOUTS = ["single", "double"] as const;
 export const MAX_BUTTONS = 8;
 export const Buttons = z
   .object({
@@ -65,6 +67,17 @@ export const Buttons = z
     color: Hex,
     rim: OptHex.describe('#rrggbb rim/edge colour of each button, or "none"'),
     size: z.enum(BUTTON_SIZES),
+    /**
+     * Added later: missing in stored looks (then a coat is double-breasted, everything else
+     * single). A bad value is dropped, not the whole look. Only the outer garment uses it.
+     */
+    layout: z
+      .enum(BUTTON_LAYOUTS)
+      .optional()
+      .catch(undefined)
+      .describe(
+        "single = one row of buttons down the centre; double = two rows (double-breasted). Only used on the outer garment; a closed coat is double-breasted unless this says single",
+      ),
   })
   .describe("button row");
 export type Buttons = z.infer<typeof Buttons>;
@@ -97,6 +110,8 @@ export const HAIR_CUTS = [
   "curly",
   "afro",
   "bob",
+  /** shoulder length, centre parting, curtain fringe, ends flipped outwards */
+  "flip",
   "long",
   "ponytail",
   "bun",
@@ -249,6 +264,7 @@ export const HELD_KINDS = [
   "water-pistol",
   "maracas",
   "umbrella",
+  "skull",
 ] as const;
 /** Costume details drawn over the clothes (catalog outfits that are costumes). */
 export const COSTUME_KINDS = [

@@ -39,6 +39,7 @@ const usable = [
   "water-pistol",
   "maracas",
   "umbrella",
+  "skull",
   "joint",
   "coffee",
   "phone",

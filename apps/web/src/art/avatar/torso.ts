@@ -421,6 +421,28 @@ export function panels(c: Ctx): { lz: number; ra: number } {
   return { lz: c.tl + pw - 1, ra: c.tr - pw + 1 };
 }
 
+/** Two rows of buttons either side of the closed front (double-breasted). */
+function drawDoubleRows(c: Ctx, b: TorsoBox, collar: string, end: number) {
+  const o = c.L.outer;
+  // looks stored before `layout` existed keep their coat exactly as it was
+  const legacyCoat = o.kind === "coat" && o.buttons.layout === undefined;
+  const perRow = legacyCoat ? Math.max(o.buttons.count, 3) : Math.ceil(o.buttons.count / 2);
+  if (perRow <= 0) return;
+  // start below the collar opening so the rows sit on cloth
+  let top = b.T + 7;
+  if (!legacyCoat) {
+    let k = 0;
+    while (k < 8 && neckHole(collar, k, "outer") >= 2) k++;
+    top = b.T + k + 1;
+  }
+  const btn: Buttons = legacyCoat
+    ? { ...o.buttons, count: perRow, size: "small" }
+    : { ...o.buttons, count: perRow };
+  const y1 = legacyCoat ? end - 1 : Math.min(end - 1, top + perRow * 2 - 2);
+  buttonColumn(c, btn, CX0 - 2, top, y1, o.ramp.shadow);
+  buttonColumn(c, btn, CX1 + 2, top, y1, o.ramp.shadow);
+}
+
 function drawOuterFront(c: Ctx, b: TorsoBox) {
   const o = c.L.outer;
   if (o.kind === "none") return;
@@ -461,27 +483,7 @@ function drawOuterFront(c: Ctx, b: TorsoBox) {
       break;
     case "blazer":
     case "coat":
-      if (!open) {
-        pc.vline(CX1, b.T + 7, end - b.T - 7, o.ramp.shadow);
-        if (o.kind === "coat") {
-          buttonColumn(
-            c,
-            { ...o.buttons, count: Math.max(o.buttons.count, 3), size: "small" },
-            CX0 - 2,
-            b.T + 7,
-            end - 1,
-            o.ramp.shadow,
-          );
-          buttonColumn(
-            c,
-            { ...o.buttons, count: Math.max(o.buttons.count, 3), size: "small" },
-            CX1 + 2,
-            b.T + 7,
-            end - 1,
-            o.ramp.shadow,
-          );
-        }
-      }
+      if (!open) pc.vline(CX1, b.T + 7, end - b.T - 7, o.ramp.shadow);
       break;
     case "cardigan":
       for (let x = c.tl; x <= c.tr; x += 2) pc.set(x, end, o.ramp.light);
@@ -526,6 +528,11 @@ function drawOuterFront(c: Ctx, b: TorsoBox) {
     case "janker":
       break;
   }
+  // double-breasted: two rows of buttons on a closed garment (a coat without a stated layout
+  // is double-breasted, as before). Painted here, before piping and pockets, where the coat's
+  // rows always were, so stored coats stay pixel-identical.
+  const layout = o.buttons.layout ?? (o.kind === "coat" ? "double" : "single");
+  if (!open && layout === "double") drawDoubleRows(c, b, collar, end);
   // the vest's piped edges show inside an open jacket
   const vp = optOrNull(c.L.vest.piping);
   if (open && vp && c.L.vest.kind !== "none") {
@@ -576,8 +583,13 @@ function drawOuterFront(c: Ctx, b: TorsoBox) {
         break;
     }
   }
-  // buttons: along the wearer's right front edge (viewer's left) when open, centre when closed
-  if (o.buttons.count > 0 && o.kind !== "coat") {
+  // single row: along the wearer's right front edge (viewer's left) when open, down the centre
+  // when closed (a coat without a stated layout has no single row, as before)
+  if (
+    (open || layout === "single") &&
+    o.buttons.count > 0 &&
+    (o.kind !== "coat" || o.buttons.layout !== undefined)
+  ) {
     const bx = open ? lz - 2 : CX0;
     const top = open && collar === "stand-up" ? b.T + 2 : b.T + 1;
     buttonColumn(

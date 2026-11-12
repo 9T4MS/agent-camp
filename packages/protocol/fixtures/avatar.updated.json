@@ -87,7 +87,8 @@
             "count": 0,
             "color": "#f4f4f2",
             "rim": "none",
-            "size": "small"
+            "size": "small",
+            "layout": "single"
           },
           "peeksAtWaist": true
         },
@@ -109,7 +110,8 @@
             "count": 8,
             "color": "#6b6a35",
             "rim": "none",
-            "size": "small"
+            "size": "small",
+            "layout": "single"
           }
         },
         "outer": {
@@ -135,7 +137,8 @@
             "count": 5,
             "color": "#e8dcc6",
             "rim": "#8a6a4a",
-            "size": "large"
+            "size": "large",
+            "layout": "single"
           },
           "pockets": "flap",
           "pocketPiping": "#3e5a2e",
@@ -163,7 +166,8 @@
             "count": 2,
             "color": "#e8dcc6",
             "rim": "#8a6a4a",
-            "size": "small"
+            "size": "small",
+            "layout": "single"
           },
           "suspenders": "none",
           "suspendersColor": "#9c8158",

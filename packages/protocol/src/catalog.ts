@@ -144,6 +144,7 @@ export const HELD_ITEMS = [
   { id: "water-pistol", label: "water pistol" },
   { id: "maracas", label: "maracas" },
   { id: "umbrella", label: "umbrella" },
+  { id: "skull", label: "skull" },
 ] as const satisfies readonly Entry<string>[];
 export const HeldItem = z.enum(ids(HELD_ITEMS));
 export type HeldItem = z.infer<typeof HeldItem>;

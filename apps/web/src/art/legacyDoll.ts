@@ -644,6 +644,20 @@ export function drawHeld(
       pc.ellipse(Math.max(0, x - 2), hy - 12, 5, 5, color);
       pc.hline(Math.max(0, x - 2), hy - 8, 5, C.white);
       return;
+    case "skull": {
+      // a bone-white skull held up on the palm, 5×4: domed cranium, two dark eye sockets with
+      // bone between them (so they don't melt into the outline), a narrow jaw with teeth
+      const sx = hx - 2 + dir;
+      pc.hline(sx + 1, hy - 4, 3, C.cream);
+      pc.hline(sx, hy - 3, 5, C.cream);
+      pc.hline(sx, hy - 2, 5, C.cream);
+      pc.set(sx + 1, hy - 2, C.ink);
+      pc.set(sx + 3, hy - 2, C.ink);
+      pc.hline(sx + 1, hy - 1, 3, C.silver);
+      pc.set(sx + 2, hy - 1, C.cream);
+      pc.set(sx + 1, hy - 4, C.white);
+      return;
+    }
     case "beer":
       // glass of lager with a foam head
       pc.rect(x, hy - 2, 2, 1, C.white);
