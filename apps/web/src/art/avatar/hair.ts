@@ -4,7 +4,8 @@
  * New cuts are authored at 2× directly. Codes: h base, H shadow, L light (sheen), R ribbon.
  */
 import type { CharacterLook } from "@agent-office/protocol";
-import type { PixelCanvas } from "../pixel.ts";
+import { C } from "../palette.ts";
+import { type PixelCanvas, packColor } from "../pixel.ts";
 import { hash2 } from "./color.ts";
 import type { View } from "./geometry.ts";
 
@@ -615,4 +616,60 @@ export function drawHair(pc: PixelCanvas, L: CharacterLook, view: View, hy: numb
             : classic(cut, view);
   const light = cut === "bald" ? L.skin.light : sheen ? ramp.light : ramp.base;
   pc.sprite(0, hy, rows, { h: ramp.base, H: ramp.shadow, L: light, R: "#e43b44" });
+  if (L.hair.clips && L.hair.clips !== "none") drawClips(pc, L, view, hy);
+}
+
+// ---- hair clips ---------------------------------------------------------------------------------
+/** Where clips may sit, per view, in the order they are used; a spot is skipped off the hair. */
+const CLIP_SPOTS: Record<View, readonly (readonly [number, number])[]> = {
+  // clear of a hairband's arch and its ends at the temples
+  down: [
+    [10, 6],
+    [19, 6],
+    [4, 17],
+    [25, 17],
+    [14, 5],
+    [5, 20],
+    [24, 20],
+    [4, 23],
+    [25, 23],
+  ],
+  left: [
+    [19, 6],
+    [21, 11],
+    [17, 9],
+    [22, 15],
+    [18, 13],
+    [20, 18],
+    [23, 8],
+    [17, 17],
+  ],
+  up: [
+    [9, 7],
+    [20, 7],
+    [14, 10],
+    [6, 13],
+    [23, 13],
+    [15, 15],
+    [9, 18],
+    [20, 18],
+  ],
+};
+const CLIP_COLORS = [C.pink, C.lemon, C.cyan, C.neon, C.orange, C.plum, C.sky, C.berry] as const;
+
+/** Small 3×1 snap clips in bright colours, only where there is hair under them. */
+function drawClips(pc: PixelCanvas, L: CharacterLook, view: View, hy: number) {
+  const hair = new Set(
+    [L.hair.ramp.base, L.hair.ramp.shadow, L.hair.ramp.light].map((h) => packColor(h)),
+  );
+  const want = L.hair.clips === "many" ? 8 : 3;
+  let n = 0;
+  for (const [x, y] of CLIP_SPOTS[view]) {
+    if (n >= want) break;
+    if (![0, 1, 2].every((i) => hair.has(pc.get(x + i, y + hy)))) continue;
+    const col = CLIP_COLORS[n % CLIP_COLORS.length]!;
+    pc.hline(x, y + hy, 3, col);
+    pc.set(x, y + hy, C.white);
+    n++;
+  }
 }

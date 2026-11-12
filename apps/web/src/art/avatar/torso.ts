@@ -54,7 +54,16 @@ const UNTUCKED = new Set(["hoodie", "sweater", "tshirt", "longsleeve", "polo", "
 
 export function shirtEnd(c: Ctx, b: TorsoBox): number {
   if (c.L.bottoms.kind === "dress") return b.W - 1;
-  return UNTUCKED.has(c.L.shirt.kind) ? b.W + 1 : b.W - 1;
+  switch (c.L.shirt.length) {
+    case "tucked":
+      return b.W - 1;
+    case "untucked":
+      return b.W + 1;
+    case "long":
+      return b.end;
+    default:
+      return UNTUCKED.has(c.L.shirt.kind) ? b.W + 1 : b.W - 1;
+  }
 }
 
 export function vestEnd(c: Ctx, b: TorsoBox): number {
