@@ -303,6 +303,28 @@ select:focus-visible {
 }
 
 /* ---- timelapse ------------------------------------------------------------------------ */
+.day-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.day-controls input {
+  font: inherit;
+  color: var(--cream);
+  background: var(--ink);
+  border: 2px solid var(--night);
+  padding: 4px 6px;
+  color-scheme: dark;
+}
+.day-count {
+  color: var(--amber);
+}
+.timelapse-results {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
 .player {
   display: grid;
   gap: 10px;

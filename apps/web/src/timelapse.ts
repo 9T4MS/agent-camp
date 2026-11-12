@@ -3,6 +3,14 @@
  * that steps through them full-size (play/pause, prev/next, scrubber, speed, arrow keys).
  */
 import type { SnapshotList, SnapshotMeta } from "../../../packages/protocol/src/api.ts";
+import {
+  ALL_DAYS,
+  filterFrames,
+  normalizeDay,
+  preloadFrames,
+  selectedFrameIndex,
+  sortFrames,
+} from "./state/timelapseFrames.ts";
 import { card, esc, getJson, notice, pageShell } from "./ui/page.ts";
 
 const SPEEDS = [1, 2, 4, 8, 15] as const;
@@ -36,10 +44,22 @@ function emptyState(main: HTMLElement) {
   );
 }
 
-function render(main: HTMLElement, frames: SnapshotMeta[]) {
-  let index = frames.length - 1;
+function render(
+  main: HTMLElement,
+  frames: SnapshotMeta[],
+  selectedId: number | undefined,
+  onSelect: (id: number) => void,
+): () => void {
+  if (frames.length === 0) {
+    main.innerHTML = notice("No frames for this day", "<p>Choose another day or All.</p>");
+    return () => {};
+  }
+  let index = selectedFrameIndex(frames, selectedId);
   let speed = 4;
   let timer: ReturnType<typeof setInterval> | undefined;
+  const events = new AbortController();
+  const listenerOptions = { signal: events.signal };
+  const preloaded = new Map<number, HTMLImageElement>();
 
   const speedOpts = SPEEDS.map(
     (s) => `<option value="${s}"${s === speed ? " selected" : ""}>${s} fps</option>`,
@@ -82,12 +102,26 @@ function render(main: HTMLElement, frames: SnapshotMeta[]) {
   const playBtn = $<HTMLButtonElement>(".play");
   const thumbEls = [...main.querySelectorAll<HTMLButtonElement>(".thumb")];
 
-  // warm the cache so playback doesn't flicker
-  for (const f of frames) new Image().src = f.url;
+  if (frames.length === 1) {
+    for (const control of main.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+      ".play, .prev, .next, .scrub",
+    ))
+      control.disabled = true;
+  }
 
   const show = (i: number) => {
     index = (i + frames.length) % frames.length;
     const f = frames[index]!;
+    onSelect(f.id);
+    const preloadWindow = preloadFrames(frames, index);
+    const ids = new Set(preloadWindow.map((frame) => frame.id));
+    for (const id of preloaded.keys()) if (!ids.has(id)) preloaded.delete(id);
+    for (const frame of preloadWindow) {
+      if (preloaded.has(frame.id)) continue;
+      const image = new Image();
+      image.src = frame.url;
+      preloaded.set(frame.id, image);
+    }
     img.src = f.url;
     img.alt = `Office at ${fmtStamp(f.ts)}`;
     stamp.textContent = fmtStamp(f.ts);
@@ -104,6 +138,7 @@ function render(main: HTMLElement, frames: SnapshotMeta[]) {
   };
   const play = () => {
     stop();
+    if (frames.length < 2) return;
     if (index >= frames.length - 1) show(0);
     timer = setInterval(() => {
       if (index >= frames.length - 1) return stop();
@@ -113,44 +148,124 @@ function render(main: HTMLElement, frames: SnapshotMeta[]) {
   };
   const toggle = () => (timer ? stop() : play());
 
-  playBtn.addEventListener("click", toggle);
-  $(".prev").addEventListener("click", () => {
-    stop();
-    show(index - 1);
-  });
-  $(".next").addEventListener("click", () => {
-    stop();
-    show(index + 1);
-  });
-  scrub.addEventListener("input", () => {
-    stop();
-    show(Number(scrub.value));
-  });
-  $<HTMLSelectElement>(".speed").addEventListener("change", (e) => {
-    speed = Number((e.target as HTMLSelectElement).value) || 4;
-    if (timer) play();
-  });
-  for (const t of thumbEls) {
-    t.addEventListener("click", () => {
-      stop();
-      show(Number(t.dataset.i));
-      main.querySelector(".player")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-  }
-  window.addEventListener("keydown", (e) => {
-    if ((e.target as HTMLElement).closest("input, select")) return;
-    if (e.key === " ") {
-      e.preventDefault();
-      toggle();
-    } else if (e.key === "ArrowLeft") {
+  playBtn.addEventListener("click", toggle, listenerOptions);
+  $(".prev").addEventListener(
+    "click",
+    () => {
       stop();
       show(index - 1);
-    } else if (e.key === "ArrowRight") {
+    },
+    listenerOptions,
+  );
+  $(".next").addEventListener(
+    "click",
+    () => {
       stop();
       show(index + 1);
-    }
-  });
+    },
+    listenerOptions,
+  );
+  scrub.addEventListener(
+    "input",
+    () => {
+      stop();
+      show(Number(scrub.value));
+    },
+    listenerOptions,
+  );
+  $<HTMLSelectElement>(".speed").addEventListener(
+    "change",
+    (e) => {
+      speed = Number((e.target as HTMLSelectElement).value) || 4;
+      if (timer) play();
+    },
+    listenerOptions,
+  );
+  for (const t of thumbEls) {
+    t.addEventListener(
+      "click",
+      () => {
+        stop();
+        show(Number(t.dataset.i));
+        main.querySelector(".player")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      },
+      listenerOptions,
+    );
+  }
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (
+        (e.target as Element | null)?.closest("input, select, textarea, button, [contenteditable]")
+      )
+        return;
+      if (e.key === " ") {
+        e.preventDefault();
+        toggle();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        stop();
+        show(index - 1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        stop();
+        show(index + 1);
+      }
+    },
+    listenerOptions,
+  );
   show(index);
+  return () => {
+    stop();
+    events.abort();
+    preloaded.clear();
+  };
+}
+
+function renderDays(main: HTMLElement, frames: SnapshotMeta[]) {
+  let day = normalizeDay(params.get("day"));
+  let selectedId: number | undefined;
+  let dispose = () => {};
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  main.innerHTML = `
+    ${card(
+      "Recording day",
+      `<div class="day-controls">
+      <button class="pixel-btn all-days">All</button>
+      <label>Day <input type="date" class="day" aria-label="Recording day"></label>
+      <span class="muted">Browser-local time (${esc(timezone)})</span>
+      <span class="day-count" role="status"></span>
+    </div>`,
+    )}
+    <div class="timelapse-results"></div>`;
+  const all = main.querySelector<HTMLButtonElement>(".all-days")!;
+  const input = main.querySelector<HTMLInputElement>(".day")!;
+  const count = main.querySelector<HTMLElement>(".day-count")!;
+  const results = main.querySelector<HTMLElement>(".timelapse-results")!;
+  const update = () => {
+    dispose();
+    const filtered = filterFrames(frames, day);
+    all.classList.toggle("on", day === ALL_DAYS);
+    all.setAttribute("aria-pressed", String(day === ALL_DAYS));
+    input.value = day === ALL_DAYS ? "" : day;
+    count.textContent = `${filtered.length} of ${frames.length} frames`;
+    if (frames.length === 0) {
+      emptyState(results);
+    } else {
+      dispose = render(results, filtered, selectedId, (id) => {
+        selectedId = id;
+      });
+    }
+  };
+  all.addEventListener("click", () => {
+    day = ALL_DAYS;
+    update();
+  });
+  input.addEventListener("change", () => {
+    day = normalizeDay(input.value);
+    update();
+  });
+  update();
 }
 
 async function main() {
@@ -158,9 +273,8 @@ async function main() {
   main.innerHTML = `<p class="muted" style="text-align:center">Loading…</p>`;
   try {
     const list = await getJson<SnapshotList>("/api/snapshots");
-    const frames = [...list.snapshots].sort((a, b) => a.ts - b.ts || a.id - b.id);
-    if (frames.length === 0) emptyState(main);
-    else render(main, frames);
+    const frames = sortFrames(list.snapshots);
+    renderDays(main, frames);
   } catch (err) {
     main.innerHTML = notice(
       "Timelapse unavailable",

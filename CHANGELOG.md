@@ -7,6 +7,7 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- Timelapse now lets you watch All frames or one day in your browser's local timezone, with matching counts and thumbnails, and warms only a few frames ahead instead of the whole recording
 - `agent-office status --json` now gives scripts a privacy-safe health snapshot, without config, project names or server credentials
 - 🚢 Schiffe versenken and Vier gewinnt: challenge a colleague from their nameplate and play a move whenever you get to it; your portrait in the top bar shows when it is your turn
 - 🎀 New looks for your character: a curved hairband (hidden from behind, unlike the straight headband), longer sweaters and shirts that hang down over the hips instead of looking like a crop top, and lots of colourful clips in the hair

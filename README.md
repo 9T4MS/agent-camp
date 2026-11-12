@@ -463,7 +463,20 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 | `/?bow=1`            | The hourly bow at the head desk every minute instead of on the full hour (demos, screenshots). |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
-| `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |
+| `/timelapse`         | Snapshots every 15 minutes: All or a selected day, with playback controls. |
+
+### Timelapse
+
+**All** opens on the latest frame. Pick a **Day** to show only that calendar day's frames;
+counts, thumbnails and the scrubber follow the filter. Dates and captions use your browser's
+local timezone (shown beside the controls), not the office timezone. A day without recordings
+shows an empty state. Switching days pauses playback and keeps the selected frame if it is
+still in range; otherwise it shows that range's latest frame.
+
+Space plays/pauses and the arrow keys step frames, except while using form controls.
+Only the current frame and next two are warmed for playback; thumbnails remain lazy-loaded.
+Filtering uses the fetched list in memory, with no extra history requests. You can open a day
+with `/timelapse?day=YYYY-MM-DD`; an invalid date falls back to All.
 
 ### Office Messages
 
@@ -592,6 +605,8 @@ The dev password is `devpass`. Run a connector against it with
 bun run lint && bun run typecheck && bun test   # what CI runs first
 bun run test:e2e      # real server + real connector on fixtures + viewer socket
 bun run screenshots   # builds web, real server + simulator, Playwright -> screenshots/
+bun run --filter @agent-office/web build && bun run tools/screenshots/timelapse-smoke.ts
+                      # real-server Chromium regression for day filtering, playback and login
 ```
 
 `bun run screenshots` needs Chromium for Playwright (`bunx playwright install chromium`
