@@ -280,6 +280,65 @@ export function catCount(people: number): number {
   return Math.min(MAX_CATS, 1 + Math.floor(Math.max(0, people) / 2));
 }
 
+// ---- Cece and Jess, the always-hungry resident cats ---------------------------------------
+export type CatMeal = "breakfast" | "lunch" | "dinner";
+
+/** Mealtime by the office clock (the cats know it to the minute), else just treat time. */
+export function catMealFor(hour: number): CatMeal | null {
+  if (hour >= 7 && hour < 9) return "breakfast";
+  if (hour >= 11.5 && hour < 13.5) return "lunch";
+  if (hour >= 17.5 && hour < 19.5) return "dinner";
+  return null;
+}
+
+const TREAT_ASKS = [
+  "TREAT?",
+  "TREATS PLS",
+  "ONE TREAT?",
+  "SNACK?",
+  "I'M STARVING",
+  "FEED ME",
+  "MRRP? TREAT?",
+  "HAVEN'T EATEN IN AGES",
+] as const;
+const MEAL_ASKS: Record<CatMeal, readonly string[]> = {
+  breakfast: ["BREAKFAST!", "BOWL IS EMPTY", "FEED ME FIRST", "BREAKFAST?"],
+  lunch: ["LUNCH TIME!", "LUNCH?", "IT'S NOON. FOOD.", "MY BOWL. NOW."],
+  dinner: ["DINNER!", "DINNER IS LATE", "DINNER?", "FEED ME!"],
+};
+
+/** What a begging cat asks for: `r` in [0, 1). */
+export function catBegLine(meal: CatMeal | null, r: number): string {
+  const lines = meal ? MEAL_ASKS[meal] : TREAT_ASKS;
+  return lines[Math.min(lines.length - 1, Math.floor(r * lines.length))]!;
+}
+
+/** What the cat card says it is begging for. */
+export function catBegLabel(meal: CatMeal | null, who: string): string {
+  return `begging ${who} for ${meal ?? "treats"}`;
+}
+
+/** Agents fill the bowl at mealtimes more often than they hand out treats. */
+export const CAT_TREAT_CHANCE = 0.45;
+export const CAT_MEAL_CHANCE = 0.6;
+
+export type CatAnswer = { give: boolean; text: string };
+
+/**
+ * How the agent answers a begging cat (`cat` = its name): `give` is `r1 < chance`, `r2` in
+ * [0, 1) picks the line.
+ */
+export function catAnswer(meal: CatMeal | null, cat: string, r1: number, r2: number): CatAnswer {
+  const name = cat.toUpperCase();
+  const give = r1 < (meal ? CAT_MEAL_CHANCE : CAT_TREAT_CHANCE);
+  const lines = give
+    ? meal
+      ? [`${meal.toUpperCase()}, COMING UP`, `OK ${name}, ${meal.toUpperCase()}`, "FINE, FOOD!"]
+      : ["OK, ONE TREAT", "FINE. HERE.", `GOOD ${name}`, "LAST ONE!"]
+    : [`${name}, YOU JUST ATE!`, "NOT NOW, SHIPPING", "LATER!", "NICE TRY"];
+  return { give, text: lines[Math.min(lines.length - 1, Math.floor(r2 * lines.length))]! };
+}
+
 /** The cat holds a meeting: Fridays 17:00-17:45 office time. */
 export function catBossWindow(dayKey: string, hour: number): boolean {
   return weekdayOf(dayKey) === 5 && hour >= 17 && hour < 17.75;

@@ -668,6 +668,18 @@ export const bowlTextures = once(() => {
   return framesOf(pc, fw, fh, 3);
 });
 
+/** A fish-shaped cat treat (an agent tosses one to a begging cat), 7x5. */
+export const treatTexture = once(() => {
+  const pc = new PixelCanvas(7, 5);
+  pc.at(1, 1);
+  pc.sprite(0, 0, [".oo.o", "ooooo", ".oo.o"], { o: C.amber });
+  pc.set(1, 1, C.night);
+  pc.set(3, 2, C.wood);
+  pc.at(0, 0);
+  pc.outline();
+  return Texture.from(pc.toCanvas());
+});
+
 /** Yarn ball rolling (4 frames, 9x9; the thread turns a quarter each frame). */
 export const yarnTextures = once(() => {
   const fw = 9;

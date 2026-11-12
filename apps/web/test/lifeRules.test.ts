@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   barOpen,
+  CAT_MEAL_CHANCE,
+  CAT_TREAT_CHANCE,
+  catAnswer,
+  catBegLabel,
+  catBegLine,
   catCount,
+  catMealFor,
   findClearedSession,
   forcedSky,
   happyHour,
@@ -57,6 +63,33 @@ describe("office life rules", () => {
   });
   test("one cat per two people on top of the first, at most ten", () => {
     expect([0, 1, 2, 3, 7, 18, 19, 30].map(catCount)).toEqual([1, 1, 2, 2, 4, 10, 10, 10]);
+  });
+  test("Cece and Jess know their mealtimes", () => {
+    expect(catMealFor(7)).toBe("breakfast");
+    expect(catMealFor(8.99)).toBe("breakfast");
+    expect(catMealFor(10)).toBe(null);
+    expect(catMealFor(12)).toBe("lunch");
+    expect(catMealFor(13.5)).toBe(null);
+    expect(catMealFor(18)).toBe("dinner");
+    expect(catMealFor(23)).toBe(null);
+  });
+  test("begging cats ask for treats, at mealtimes for the meal", () => {
+    expect(catBegLine(null, 0)).toBe("TREAT?");
+    expect(catBegLine("dinner", 0)).toBe("DINNER!");
+    for (const r of [0, 0.5, 0.999999]) {
+      expect(catBegLine(null, r).length).toBeGreaterThan(0);
+      expect(catBegLine("lunch", r).length).toBeGreaterThan(0);
+    }
+    expect(catBegLabel(null, "Anna")).toBe("begging Anna for treats");
+    expect(catBegLabel("lunch", "Anna")).toBe("begging Anna for lunch");
+  });
+  test("agents give in more often at mealtimes", () => {
+    const r = (CAT_TREAT_CHANCE + CAT_MEAL_CHANCE) / 2;
+    expect(catAnswer(null, "Jess", r, 0).give).toBe(false);
+    expect(catAnswer("dinner", "Jess", r, 0).give).toBe(true);
+    expect(catAnswer(null, "Jess", 0, 0)).toEqual({ give: true, text: "OK, ONE TREAT" });
+    expect(catAnswer(null, "Cece", 0.99, 0)).toEqual({ give: false, text: "CECE, YOU JUST ATE!" });
+    expect(catAnswer("lunch", "Cece", 0, 0).text).toBe("LUNCH, COMING UP");
   });
   test("tombstone label", () => {
     expect(ripLabel("web", 42 * 60_000)).toBe("web 42M");

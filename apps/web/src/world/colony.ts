@@ -1,15 +1,18 @@
 /**
  * The office cats: one, plus one for every two people (`catCount`), up to MAX_CATS. Every
  * viewer sees cat #k with the same name and coat; new cats walk in through the main door and
- * surplus cats walk out of it. Also owns the cat toys viewers drop: food bowls, yarn balls and
- * the laser dot.
+ * surplus cats walk out of it. On top of those live Cece and Jess (`RESIDENTS`, slots MAX_CATS
+ * and up), always in, always hungry: they take turns begging working agents for treats and, at
+ * mealtimes, for a proper meal. Also owns the cat toys viewers drop: food bowls, yarn balls
+ * and the laser dot.
  */
-import { MAX_CATS, seededRandom } from "@agent-office/protocol";
+import { CAT_SLOTS, MAX_CATS, seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
-import { bowlTextures, laserTextures, yarnTextures } from "../art/fun.ts";
-import { CAT_COATS } from "../art/fx.ts";
+import { bowlTextures, laserTextures, treatTexture, yarnTextures } from "../art/fun.ts";
+import { CAT_COATS, type CatCoat, RESIDENT_COATS } from "../art/fx.ts";
 import { OfficeCat, type Perch, type WaitSpot } from "./cat.ts";
 import type { Effects } from "./effects.ts";
+import { catAnswer, catBegLabel, catBegLine, catMealFor } from "./lifeRules.ts";
 import { type OfficeMap, type Point, TILE } from "./map.ts";
 
 export const CAT_NAMES = [
@@ -40,6 +43,15 @@ const HOME_TILES: readonly Point[] = [
   { x: 54, y: 24 },
 ];
 
+/** The resident cats, in slot order from MAX_CATS; they hang around the fridge. */
+export const RESIDENTS: readonly { name: string; coat: CatCoat; home: Point }[] = [
+  { name: "Cece", coat: RESIDENT_COATS.cece, home: { x: 35, y: 5 } },
+  { name: "Jess", coat: RESIDENT_COATS.jess, home: { x: 36, y: 6 } },
+];
+
+/** An agent a resident cat can beg from: a seated person with a working or waiting agent. */
+export type BegTarget = WaitSpot;
+
 export type ColonyHooks = {
   idleSpots: () => Point[];
   waitSpots: () => WaitSpot[];
@@ -48,7 +60,19 @@ export type ColonyHooks = {
   personName: (personId: string) => string;
   /** a sent cat arrived at someone's desk */
   onVisit?: (personId: string) => void;
+  /** agents the resident cats beg from (`id` = session id) */
+  begTargets?: () => BegTarget[];
+  /** who sits at that agent (for the cat card) */
+  agentName?: (sessionId: string) => string;
+  /** the agent's person answers a begging cat */
+  agentSays?: (sessionId: string, text: string) => void;
 };
+
+/** Seconds between two begging rounds of a resident cat (after giving up a bit sooner). */
+const BEG_GAP: readonly [number, number] = [10, 22];
+const BEG_GAP_REFUSED: readonly [number, number] = [5, 10];
+/** How long a resident cat sits up next to an agent before it answers. */
+const BEG_STAY: readonly [number, number] = [8, 13];
 
 type Bowl = { sprite: Sprite; food: number; t: number; emptyAt: number | null };
 type Yarn = {
@@ -81,7 +105,7 @@ const LASER_S = 7;
 
 export class CatColony {
   /** cat per slot (null = no cat in that slot right now) */
-  private slots: (OfficeCat | null)[] = Array.from({ length: MAX_CATS }, () => null);
+  private slots: (OfficeCat | null)[] = Array.from({ length: CAT_SLOTS }, () => null);
   /** cats walking out of the office */
   private leaving: OfficeCat[] = [];
   private bowls: Bowl[] = [];
@@ -92,6 +116,12 @@ export class CatColony {
   /** chance a finished helper nearby gets eaten, and how far a cat dashes for one */
   private eatChance = 0.25;
   private eatRange = 220;
+  /** resident slot -> seconds until it goes begging again */
+  private begIn = new Map<number, number>();
+  /** resident slot -> the agent (session id) it begs from or just begged from */
+  private begAt = new Map<number, string>();
+  /** office hour (mealtimes); main.ts wires the office clock */
+  clock: () => number = () => 10;
 
   constructor(
     private readonly objects: Container,
@@ -101,6 +131,10 @@ export class CatColony {
     private readonly hooks: ColonyHooks,
   ) {
     this.spawn(0, false);
+    RESIDENTS.forEach((_, i) => {
+      this.spawn(MAX_CATS + i, false);
+      this.begIn.set(MAX_CATS + i, 6 + i * 7 + this.rand() * 6);
+    });
   }
 
   /** How hungry the cats are for finished helper bots (the party demo makes them greedy). */
@@ -151,13 +185,17 @@ export class CatColony {
   }
 
   private spawn(slot: number, walkIn: boolean) {
-    const t = this.nearestWalkable(HOME_TILES[slot]!);
+    const resident = slot >= MAX_CATS ? RESIDENTS[slot - MAX_CATS]! : null;
+    const t = this.nearestWalkable(resident?.home ?? HOME_TILES[slot]!);
     const home =
       slot === 0
         ? { x: t.x * TILE + 4, y: t.y * TILE + 12 }
         : { x: t.x * TILE + 8, y: t.y * TILE + 12 };
+    const spec = resident
+      ? { slot, name: resident.name, coat: resident.coat, home, hungry: true }
+      : { slot, name: CAT_NAMES[slot]!, coat: CAT_COATS[SLOT_COATS[slot]!]!, home };
     const cat = new OfficeCat(
-      { slot, name: CAT_NAMES[slot]!, coat: CAT_COATS[SLOT_COATS[slot]!]!, home },
+      spec,
       this.objects,
       this.fx,
       this.map,
@@ -403,7 +441,80 @@ export class CatColony {
     this.dot = null;
   }
 
+  // ---- Cece and Jess ----------------------------------------------------------------------
+  /** Free resident cats whose break is over go and beg the next agent. */
+  private updateBegging(dt: number) {
+    const targets = this.hooks.begTargets;
+    if (!targets) return;
+    for (const [slot, left] of this.begIn) {
+      const cat = this.get(slot);
+      if (!cat || cat.busy || cat.guarding || cat.heading) continue;
+      if (left > 0) {
+        this.begIn.set(slot, left - dt);
+        continue;
+      }
+      this.begIn.set(slot, this.between(BEG_GAP));
+      this.beg(cat, targets());
+    }
+  }
+
+  private between([lo, hi]: readonly [number, number]) {
+    return lo + this.rand() * (hi - lo);
+  }
+
+  /** Pick an agent the other resident isn't working on (not the last one, if possible). */
+  private beg(cat: OfficeCat, all: BegTarget[]) {
+    const last = this.begAt.get(cat.slot);
+    const taken = new Set<string>();
+    for (const [slot, id] of this.begAt) {
+      if (slot === cat.slot) continue;
+      const other = this.get(slot);
+      if (other?.busy) taken.add(id);
+    }
+    const free = all.filter((t) => !taken.has(t.id));
+    const fresh = free.filter((t) => t.id !== last);
+    const pool = fresh.length > 0 ? fresh : free;
+    if (pool.length === 0) return;
+    const target = pool[Math.floor(this.rand() * pool.length)]!;
+    const meal = catMealFor(this.clock());
+    const who = this.hooks.agentName?.(target.id) ?? "an agent";
+    const ok = cat.assign({
+      kind: "beg",
+      seat: { x: target.x, y: target.y },
+      label: catBegLabel(meal, who),
+      ask: () => catBegLine(meal, this.rand()),
+      stay: this.between(BEG_STAY),
+      still: () => (this.hooks.begTargets?.() ?? []).some((t) => t.id === target.id),
+      onDone: (c, asked) => {
+        if (asked) this.answer(c, target, catMealFor(this.clock()));
+      },
+    });
+    if (ok) this.begAt.set(cat.slot, target.id);
+  }
+
+  /** The agent gives in (a treat tossed over, or a full bowl at mealtimes), or doesn't. */
+  private answer(cat: OfficeCat, agent: BegTarget, meal: ReturnType<typeof catMealFor>) {
+    const a = catAnswer(meal, cat.name, this.rand(), this.rand());
+    this.hooks.agentSays?.(agent.id, a.text);
+    if (!a.give) {
+      this.begIn.set(cat.slot, this.between(BEG_GAP_REFUSED));
+      this.effects.after(1.2, () => cat.pout());
+      return;
+    }
+    if (meal) {
+      this.effects.after(0.8, () => {
+        if (!cat.busy && !cat.leaving) this.feed(cat.slot, this.dropSpot(cat.slot));
+      });
+      return;
+    }
+    this.effects.after(0.5, () => {
+      const to = { x: cat.x + (agent.x < cat.x ? -3 : 3), y: cat.y - 2 };
+      this.effects.lob(treatTexture(), agent.x, agent.y - 14, to.x, to.y, () => cat.snack());
+    });
+  }
+
   update(dt: number, time: number) {
+    this.updateBegging(dt);
     for (const c of this.cats()) c.update(dt, time);
     for (let i = this.leaving.length - 1; i >= 0; i--) {
       const c = this.leaving[i]!;

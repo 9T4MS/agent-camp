@@ -23,6 +23,7 @@ import {
   catTextures,
   dotsTextures,
   kittenTextures,
+  RESIDENT_COATS,
 } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
 import {
@@ -170,12 +171,20 @@ export function showGallery(app: Application) {
     AGENTS.forEach((agent, k) => {
       kittenTextures(agent, coat).forEach((t, i) => {
         const s = new Sprite(t);
-        s.position.set(4 + 8 * 20 + 8 + k * 28 + i * 13, y3 + 18 + row * 16);
+        s.position.set(4 + 10 * 20 + 8 + k * 28 + i * 13, y3 + 18 + row * 16);
         root.addChild(s);
       });
     });
   });
-  let x4 = 4 + 8 * 20 + 8;
+  // the resident cats (Cece and Jess) below the colony coats
+  Object.values(RESIDENT_COATS).forEach((coat, k) => {
+    catTextures(coat).forEach((t, i) => {
+      const s = new Sprite(t);
+      s.position.set(4 + i * 20, y3 + (CAT_COATS.length + k) * 16);
+      root.addChild(s);
+    });
+  });
+  let x4 = 4 + 10 * 20 + 8;
   for (const t of [...bowlTextures(), ...yarnTextures(), ...laserTextures()]) {
     const s = new Sprite(t);
     s.position.set(x4, y3);

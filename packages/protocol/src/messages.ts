@@ -338,12 +338,19 @@ export function needsSpot(kind: InteractionKind): boolean {
 }
 /** At most this many office cats (one more for every two people, see the web client). */
 export const MAX_CATS = 10;
-/** Which office cat (slot 0 is the original one). */
+/**
+ * Cats who live in the office whoever is in (Cece and Jess, see the web client). They take the
+ * cat ids right after the MAX_CATS colony slots.
+ */
+export const RESIDENT_CATS = 2;
+/** Every cat id there is: the colony slots, then the residents. */
+export const CAT_SLOTS = MAX_CATS + RESIDENT_CATS;
+/** Which office cat (slot 0 is the original one, MAX_CATS.. are the residents). */
 export const CatId = z
   .number()
   .int()
   .min(0)
-  .max(MAX_CATS - 1);
+  .max(CAT_SLOTS - 1);
 /** A floor spot in world pixels. */
 export const WorldCoord = z.number().int().min(0).max(8192);
 /** Short name a viewer signs pokes with; viewers are otherwise anonymous. */

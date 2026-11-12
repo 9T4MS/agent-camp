@@ -39,6 +39,8 @@ type Throw = {
   onHit: () => void;
   /** a tomato splats on impact instead of bouncing */
   splat?: boolean;
+  /** a treat just lands (and is gone: eaten) */
+  land?: boolean;
 };
 
 export class Effects {
@@ -200,6 +202,24 @@ export class Effects {
     });
   }
 
+  /** Something small (a treat) lobbed in an arc; it is gone where it lands (`onLand`). */
+  lob(tex: Texture, fx: number, fy: number, tx: number, ty: number, onLand: () => void = () => {}) {
+    const s = new Sprite(tex);
+    s.anchor.set(0.5);
+    s.position.set(Math.round(fx), Math.round(fy));
+    this.layer.addChild(s);
+    const dur = Math.min(0.9, 0.4 + Math.hypot(tx - fx, ty - fy) / 260);
+    this.throws.push({
+      sprite: s,
+      from: { x: fx, y: fy },
+      to: { x: tx, y: ty },
+      t: 0,
+      dur,
+      onHit: onLand,
+      land: true,
+    });
+  }
+
   after(seconds: number, fn: () => void) {
     this.later.push({ t: seconds, fn });
   }
@@ -218,6 +238,11 @@ export class Effects {
       if (k < 1) continue;
       this.throws.splice(i, 1);
       b.onHit();
+      if (b.land) {
+        this.layer.removeChild(b.sprite);
+        b.sprite.destroy();
+        continue;
+      }
       if (b.splat) {
         this.burst(b.to.x, b.to.y, [C.red, C.wine, C.pink], {
           count: 14,

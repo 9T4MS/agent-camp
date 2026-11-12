@@ -206,11 +206,19 @@ export function botTextures(agent: AgentKind): Texture[] {
   return frames;
 }
 
-export const CAT = { sleep: [0, 1], sit: [2, 3], walkLeft: [4, 5], walkRight: [6, 7] } as const;
+export const CAT = {
+  sleep: [0, 1],
+  sit: [2, 3],
+  walkLeft: [4, 5],
+  walkRight: [6, 7],
+  /** up on the hind legs, front paws reaching out (frame 9: paws higher, meowing) */
+  beg: [8, 9],
+} as const;
 
 /**
  * A cat's fur: main coat, stripes/shade, belly and chin, eyes, and optional markings: calico
- * spots, or siamese points (a dark mask over the face).
+ * spots, or siamese points (a dark mask over the face), or a bicolor `bib` (white muzzle, chest
+ * and paws; `blaze` adds a white stripe up the face).
  */
 export type CatCoat = {
   id: string;
@@ -220,6 +228,15 @@ export type CatCoat = {
   belly: string;
   eye: string;
   patch?: { color: string; style: "spots" | "points" };
+  /**
+   * bicolor: white muzzle, chin, chest and front legs; `blaze` = a white V up the face,
+   * `belly` = white underneath too, `socks` = how high (px) the hind legs are white
+   */
+  bib?: { color: string; blaze: boolean; belly: boolean; socks: 1 | 2 };
+  /** a mottled tabby: extra stripes on the back and the head, a ringed tail */
+  tabby?: boolean;
+  /** a lighter head than the body (its tabby stripes then come in `main`) */
+  head?: string;
 };
 /** Coats of the office cats; slot 0 (the original cat) is the orange tabby. */
 export const CAT_COATS: readonly CatCoat[] = [
@@ -262,29 +279,64 @@ export const CAT_COATS: readonly CatCoat[] = [
   },
 ];
 
+/**
+ * The two resident cats, always in the office and always hungry (drawn from photos of them):
+ * Cece, a mottled brown tabby with a lighter head, a white V up her face, white chest, belly
+ * and paws and a ringed tail; Jess, jet black with a white muzzle and chest, white front legs
+ * and tall white hind socks.
+ */
+export const RESIDENT_COATS = {
+  cece: {
+    id: "cece",
+    label: "brown tabby & white",
+    main: C.bark,
+    stripe: C.cocoa,
+    belly: C.white,
+    eye: C.leaf,
+    bib: { color: C.white, blaze: true, belly: true, socks: 1 },
+    tabby: true,
+    head: C.wood,
+  },
+  jess: {
+    id: "jess",
+    label: "tuxedo",
+    main: C.night,
+    stripe: C.ink,
+    belly: C.white,
+    eye: C.leaf,
+    bib: { color: C.white, blaze: false, belly: false, socks: 2 },
+  },
+} as const satisfies Record<string, CatCoat>;
+
 const catFrames = new Map<string, Texture[]>();
-/** One cat in a coat, 18x14 frames (sleep x2, sit x2, walk left x2, walk right x2). */
+/** One cat in a coat, 18x14 frames (sleep x2, sit x2, walk left x2, walk right x2, beg x2). */
 export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
   const hit = catFrames.get(coat.id);
   if (hit) return hit;
   const fw = 18;
   const fh = 14;
-  const pc = new PixelCanvas(fw * 8, fh);
+  const pc = new PixelCanvas(fw * 10, fh);
   const O = coat.main;
   const S = coat.stripe;
   const B = coat.belly;
   const E = coat.eye;
   const P = coat.patch?.color;
   const spots = coat.patch?.style === "spots";
+  const W = coat.bib?.color;
+  const blaze = coat.bib?.blaze === true;
+  const socks = coat.bib?.socks ?? 1;
+  const tabby = coat.tabby === true;
+  const H = coat.head ?? O;
+  const HS = coat.head ? O : S;
   const drawWalk = (f: number) => {
     const step = f % 2;
     pc.rect(5, 5, 9, 4, O); // body
     pc.hline(7, 5, 1, S);
     pc.hline(10, 5, 1, S);
     pc.rect(6, 8, 7, 1, B);
-    pc.rect(1, 2, 6, 5, O); // head
-    pc.set(1, 1, O);
-    pc.set(5, 1, O);
+    pc.rect(1, 2, 6, 5, H); // head
+    pc.set(1, 1, H);
+    pc.set(5, 1, H);
     if (P && spots) {
       pc.rect(9, 5, 3, 2, P);
       pc.set(1, 1, P);
@@ -305,6 +357,29 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
     pc.vline(9 - step, 9, 3, S);
     pc.vline(11 + step, 9, 3, O);
     pc.vline(13 - step, 9, 3, S);
+    if (tabby) {
+      pc.set(8, 6, S);
+      pc.set(11, 6, S);
+      pc.set(12, 7, S);
+      pc.set(9, 7, S);
+      pc.set(2, 2, HS);
+      pc.set(4, 2, HS);
+      pc.set(6, 3, HS);
+      pc.set(14, 4, S);
+    }
+    if (W) {
+      // white muzzle, chin and chest, white front legs, white hind socks
+      pc.set(2, 5, W);
+      pc.set(4, 5, W);
+      pc.rect(2, 6, 3, 1, W);
+      pc.rect(5, 6, 2, 3, W);
+      if (blaze) pc.vline(3, 3, 2, W);
+      pc.hline(6, 8, 7, coat.bib?.belly ? W : O);
+      pc.vline(6 + step, 9, 3, W);
+      pc.vline(9 - step, 9, 3, W);
+      pc.vline(11 + step, 12 - socks, socks, W);
+      pc.vline(13 - step, 12 - socks, socks, W);
+    }
   };
   for (let f = 0; f < 6; f++) {
     pc.at(f * fw + 1, 1);
@@ -316,14 +391,27 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
       pc.hline(5, 5 - b, 2, S);
       pc.hline(9, 5 - b, 2, S);
       if (P && spots) pc.rect(9, 6 - b, 3, 2, P);
-      pc.rect(1, 6, 5, 4, O);
-      pc.set(1, 5, O);
-      pc.set(4, 5, O);
+      pc.rect(1, 6, 5, 4, H);
+      pc.set(1, 5, H);
+      pc.set(4, 5, H);
       if (P && spots) pc.set(1, 5, P);
       else if (P) {
         pc.rect(1, 7, 5, 2, P);
         pc.set(1, 5, P);
         pc.set(4, 5, P);
+      }
+      if (tabby) {
+        pc.set(7, 6 - b, S);
+        pc.set(11, 6 - b, S);
+        pc.set(2, 6, HS);
+        pc.set(4, 6, HS);
+      }
+      if (W) {
+        // white chin and tucked-in front paws
+        pc.hline(2, 9, 3, W);
+        pc.set(6, 10, W);
+        pc.set(7, 10, W);
+        if (blaze) pc.set(3, 7, W);
       }
       pc.hline(2, 8, 1, C.night);
       pc.hline(4, 8, 1, C.night);
@@ -332,7 +420,7 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
       // sitting, tail flick
       pc.rect(4, 5, 6, 7, O);
       pc.rect(5, 8, 4, 4, B);
-      pc.rect(3, 0, 8, 6, O);
+      pc.rect(3, 0, 8, 6, H);
       pc.set(3, 0, C.night);
       pc.set(10, 0, C.night);
       if (P && spots) {
@@ -351,10 +439,32 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
       pc.hline(5, 4, 4, B);
       pc.hline(4, 6, 1, S);
       pc.hline(9, 6, 1, S);
-      if (f === 2) pc.rect(10, 10, 4, 2, O);
-      else {
+      if (tabby) {
+        pc.set(4, 1, HS);
+        pc.set(9, 1, HS);
+        pc.set(5, 0, HS);
+        pc.set(8, 0, HS);
+        pc.set(3, 3, HS);
+        pc.set(10, 3, HS);
+        pc.set(4, 8, S);
+        pc.set(9, 9, S);
+      }
+      if (W) {
+        // white V face, chin, chest and front legs
+        pc.rect(6, 5, 2, 3, W);
+        pc.hline(5, 4, 4, W);
+        pc.set(5, 3, W);
+        pc.set(8, 3, W);
+        if (blaze) pc.rect(6, 1, 2, 2, W);
+        pc.rect(5, 8, 4, 4, W);
+      }
+      if (f === 2) {
+        pc.rect(10, 10, 4, 2, O);
+        if (tabby) pc.set(12, 10, S);
+      } else {
         pc.rect(10, 9, 2, 3, O);
         pc.set(12, 8, O);
+        if (tabby) pc.set(11, 9, S);
       }
     } else {
       drawWalk(f);
@@ -363,7 +473,75 @@ export function catTextures(coat: CatCoat = CAT_COATS[0]!): Texture[] {
     pc.outline(f * fw, 0, fw, fh);
   }
   for (let f = 6; f < 8; f++) pc.mirrorFrom((f - 2) * fw, 0, fw, fh, f * fw, 0);
-  const frames = framesOf(pc, fw, fh, 8);
+  for (let f = 8; f < 10; f++) {
+    // begging: up on the hind legs facing left, front paws reaching out, tail on the floor
+    const open = f === 9;
+    const paw = W ?? O;
+    pc.at(f * fw + 1, 1);
+    if (open) {
+      pc.hline(10, 10, 4, O);
+      pc.set(14, 9, S);
+    } else {
+      pc.hline(10, 10, 3, O);
+      pc.vline(13, 8, 3, O);
+      pc.set(13, 8, S);
+    }
+    pc.rect(6, 7, 4, 3, O); // haunch
+    pc.vline(6, 10, 2, O);
+    pc.vline(9, 10, 2, S);
+    pc.set(5, 11, O);
+    pc.rect(4, 3, 4, 5, O); // body, upright
+    pc.vline(4, 4, 4, B);
+    pc.set(6, 4, S);
+    pc.set(7, 6, S);
+    pc.rect(1, 1, 5, 4, H); // head, chin up
+    pc.set(1, 0, H);
+    pc.set(5, 0, H);
+    if (P && spots) {
+      pc.rect(5, 4, 2, 2, P);
+      pc.set(1, 0, P);
+      pc.rect(1, 1, 2, 1, P);
+    } else if (P) {
+      pc.rect(1, 2, 5, 2, P);
+      pc.set(1, 0, P);
+      pc.set(5, 0, P);
+      pc.hline(11, 10, 2, P);
+    }
+    pc.set(2, 2, E);
+    pc.set(4, 2, E);
+    pc.set(3, 3, C.pink);
+    pc.hline(2, 4, 3, B);
+    if (tabby) {
+      pc.set(5, 5, S);
+      pc.set(8, 8, S);
+      pc.set(2, 1, HS);
+      pc.set(4, 1, HS);
+      pc.set(5, 3, HS);
+      pc.set(12, 10, S);
+    }
+    if (W) {
+      pc.set(2, 3, W);
+      pc.set(4, 3, W);
+      pc.hline(2, 4, 3, W);
+      if (blaze) pc.set(3, 2, W);
+      pc.vline(4, 4, 4, W);
+      pc.set(5, 11, W);
+      pc.vline(6, 12 - socks, socks, W);
+      pc.vline(9, 12 - socks, socks, W);
+    }
+    if (open) pc.set(3, 4, C.red); // "MEOW!"
+    // front legs reaching for the treat, up higher while meowing
+    if (open) {
+      pc.set(3, 6, paw);
+      pc.set(2, 5, paw);
+      pc.set(1, 5, paw);
+    } else {
+      pc.hline(1, 6, 3, paw);
+    }
+    pc.at(0, 0);
+    pc.outline(f * fw, 0, fw, fh);
+  }
+  const frames = framesOf(pc, fw, fh, 10);
   catFrames.set(coat.id, frames);
   return frames;
 }

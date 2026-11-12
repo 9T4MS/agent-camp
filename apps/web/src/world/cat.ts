@@ -3,7 +3,9 @@
  * next to anyone waiting for 5+ minutes), meows and purrs hearts when clicked, and now and
  * then pounces on a finished helper bot (crunch). Viewers can also give it something to do
  * (`CatTask`): eat from a bowl, chase a laser dot or a yarn ball, or go and sit on someone's
- * desk. `CatColony` (colony.ts) owns all the cats and the toys.
+ * desk. A `hungry` cat (the residents Cece and Jess) also sits up and begs next to working
+ * agents, snaps up tossed treats and is never full for long. `CatColony` (colony.ts) owns all
+ * the cats and the toys.
  */
 import { seededRandom } from "@agent-office/protocol";
 import { type Container, Sprite } from "pixi.js";
@@ -31,17 +33,33 @@ export type CatTask =
       onReach: (cat: OfficeCat) => void;
     }
   /** sit by (or on the desk of) someone for a while */
-  | { kind: "visit"; perch: Perch; who: string; stay: number; onArrive?: () => void };
+  | { kind: "visit"; perch: Perch; who: string; stay: number; onArrive?: () => void }
+  /**
+   * sit up next to someone's agent and beg (`ask()` says what for) for `stay` seconds, or until
+   * `still()` turns false; then `onDone` (the agent answers)
+   */
+  | {
+      kind: "beg";
+      seat: Point;
+      label: string;
+      ask: () => string;
+      stay: number;
+      still: () => boolean;
+      onDone: (cat: OfficeCat, asked: boolean) => void;
+    };
 
-export type CatSpec = { slot: number; name: string; coat: CatCoat; home: Point };
+/** `hungry`: one of the resident cats (Cece, Jess), never full for long. */
+export type CatSpec = { slot: number; name: string; coat: CatCoat; home: Point; hungry?: boolean };
 
-type Mode = "sleep" | "sit" | "walk" | "pounce" | "smug" | "eat" | "perch";
+type Mode = "sleep" | "sit" | "walk" | "pounce" | "smug" | "eat" | "perch" | "beg";
 
 export class OfficeCat {
   readonly sprite: Sprite;
   readonly slot: number;
   readonly name: string;
   readonly coat: CatCoat;
+  /** always hungry: begs agents for treats and meals, and is never full for long */
+  readonly hungry: boolean;
   private zzz: Sprite;
   x: number;
   y: number;
@@ -55,6 +73,8 @@ export class OfficeCat {
   heading: string | null = null;
   private prey: { sprite: Sprite; x: number; y: number } | null = null;
   private meowCooldown = 0;
+  /** begging: seconds until the next "TREAT?" */
+  private askT = 0;
   private tie: Sprite;
   /** Friday meeting: where the boss sits (null = an ordinary cat) */
   private boss: Point | null = null;
@@ -95,6 +115,7 @@ export class OfficeCat {
     this.slot = spec.slot;
     this.name = spec.name;
     this.coat = spec.coat;
+    this.hungry = spec.hungry === true;
     this.home = spec.home;
     // the first cat keeps the seed it always had
     this.rand = seededRandom(spec.slot === 0 ? "cat" : `cat-${spec.slot}`);
@@ -175,6 +196,7 @@ export class OfficeCat {
     if (this.prey) return "hunting a helper bot";
     if (this.task?.kind === "eat") return this.mode === "eat" ? "eating" : "off to the food bowl";
     if (this.task?.kind === "chase") return this.task.label;
+    if (this.task?.kind === "beg") return this.task.label;
     if (this.task?.kind === "visit")
       return this.mode === "perch" ? `sitting with ${this.task.who}` : `off to ${this.task.who}`;
     if (this.guarding || this.heading) return "keeping a waiting human company";
@@ -203,6 +225,9 @@ export class OfficeCat {
     } else if (task.kind === "visit") {
       const floor = this.beside(task.perch.seat) ?? task.perch.seat;
       if (!this.goTo(floor)) return this.fail();
+    } else if (task.kind === "beg") {
+      const floor = this.beside(task.seat);
+      if (!floor || !this.goTo(floor)) return this.fail();
     } else {
       this.mode = "walk";
     }
@@ -292,7 +317,9 @@ export class OfficeCat {
   meow() {
     if (this.meowCooldown > 0) return;
     this.meowCooldown = 1.2;
-    const lines = ["MRRP?", "MEOW!", "PRRR", "MRRRP"];
+    const lines = this.hungry
+      ? ["TREAT?", "FOOD?", "MEOW!", "SNACK?", "PRRR"]
+      : ["MRRP?", "MEOW!", "PRRR", "MRRRP"];
     this.say(lines[Math.floor(this.rand() * lines.length)]!);
     for (let i = 0; i < 3; i++) {
       this.effects.after(0.25 + i * 0.35, () =>
@@ -303,6 +330,31 @@ export class OfficeCat {
       this.mode = "sit";
       this.timer = 6;
     }
+  }
+
+  /** Begged and got nothing: a short, offended remark. */
+  pout() {
+    if (this.leaving || this.boss || this.task) return;
+    const lines = ["HMPF", "RUDE.", "...FINE", "I'LL BE BACK"];
+    this.say(lines[Math.floor(this.rand() * lines.length)]!, C.ink, 1.8);
+  }
+
+  /** A treat landed right in front of the cat: gone in one bite, and it wants another. */
+  snack() {
+    if (this.leaving || this.boss) return;
+    this.say("NOM!", C.bark, 1.4);
+    for (let i = 0; i < 2; i++) {
+      this.effects.after(0.3 + i * 0.3, () =>
+        this.effects.floater(heartTexture(), this.x - 2 + i * 4, this.y - 10, 1.4, 16, 2),
+      );
+    }
+    if (this.task) return;
+    this.mode = "smug";
+    this.timer = 3;
+    if (this.hungry)
+      this.effects.after(2.6, () => {
+        if (!this.task && !this.leaving) this.say("MORE?");
+      });
   }
 
   hit(wx: number, wy: number) {
@@ -387,6 +439,13 @@ export class OfficeCat {
     }
     if (task?.kind === "chase") {
       if (!this.chaseStuck) this.repath = 0;
+      return;
+    }
+    if (task?.kind === "beg") {
+      this.mode = "beg";
+      this.dir = task.seat.x < this.x ? -1 : 1;
+      this.timer = task.stay;
+      this.askT = 0;
       return;
     }
     if (this.heading) {
@@ -509,11 +568,40 @@ export class OfficeCat {
           floor: task.bowl.y,
         });
       if (this.timer <= 0 || !food) {
-        // food coma
         this.task = null;
-        this.mode = "sleep";
-        this.timer = 20 + this.rand() * 15;
-        if (this.rand() < 0.5) this.say("PRRR");
+        if (this.hungry) {
+          // never full for long
+          this.mode = "sit";
+          this.timer = 4 + this.rand() * 3;
+          this.effects.after(0.6, () => {
+            if (!this.task) this.say(this.rand() < 0.5 ? "MORE?" : "STILL HUNGRY");
+          });
+        } else {
+          // food coma
+          this.mode = "sleep";
+          this.timer = 20 + this.rand() * 15;
+          if (this.rand() < 0.5) this.say("PRRR");
+        }
+      }
+    } else if (this.mode === "beg") {
+      const task = this.task;
+      this.askT -= dt;
+      // the mouth stays open for a moment after every "TREAT?"
+      const meowing = this.askT > 1.9;
+      this.sprite.texture = frames[meowing ? CAT.beg[1] : CAT.beg[Math.floor(time * 1.2) % 2]!]!;
+      this.timer -= dt;
+      if (task?.kind !== "beg") {
+        this.mode = "sit";
+        this.timer = 2;
+      } else if (this.timer <= 0 || !task.still()) {
+        const asked = this.timer <= 0;
+        this.task = null;
+        this.mode = "sit";
+        this.timer = 3 + this.rand() * 3;
+        task.onDone(this, asked);
+      } else if (this.askT <= 0) {
+        this.askT = 2.6 + this.rand() * 1.2;
+        this.say(task.ask(), C.plum, 2);
       }
     } else if (this.mode === "perch") {
       this.sprite.texture = frames[CAT.sit[Math.floor(time * 0.5) % 2]!]!;

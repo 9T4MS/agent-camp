@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AvatarSpec,
   avatarFromSeed,
+  CAT_SLOTS,
   CONNECTOR_TO_SERVER_TYPES,
   coerceAvatar,
   compareVersions,
@@ -261,7 +262,10 @@ describe("cat interactions", () => {
     expect(ok({ kind: "cat", catId: 2, personId: "anna" })).toBe(true);
   });
   test("cat ids and spots are bounded", () => {
-    expect(ok({ kind: "pet", catId: MAX_CATS })).toBe(false);
+    expect(ok({ kind: "pet", catId: CAT_SLOTS })).toBe(false);
+    // the resident cats (Cece and Jess) come right after the colony slots
+    expect(ok({ kind: "pet", catId: MAX_CATS })).toBe(true);
+    expect(ok({ kind: "feed", catId: CAT_SLOTS - 1, x: 10, y: 10 })).toBe(true);
     expect(ok({ kind: "pet", catId: -1 })).toBe(false);
     expect(ok({ kind: "pet", catId: 1.5 })).toBe(false);
     expect(ok({ kind: "laser", x: -1, y: 10 })).toBe(false);

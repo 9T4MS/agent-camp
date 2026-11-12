@@ -205,6 +205,13 @@ async function boot() {
       const c = chars.charactersOf(personId)[0];
       if (c) effects.after(0.6, () => chars.say(c, "AWW, A CAT!"));
     },
+    // Cece and Jess beg the people at working agents for treats and meals
+    begTargets: () => chars.pageable(),
+    agentName: (sessionId) => {
+      const personId = model.sessions.get(sessionId)?.personId;
+      return (personId && model.people.get(personId)?.name) || "an agent";
+    },
+    agentSays: (sessionId, text) => chars.answerPage(sessionId, text),
   });
   chars.catEats = (sprite, x, y) => colony.tryEat(sprite, x, y);
   const queen = new OfficeQueen(
@@ -224,6 +231,7 @@ async function boot() {
   const hourValue =
     hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : feierabend ? 17.5 : null;
   const living = new Living(scene, model, hourValue);
+  colony.clock = () => living.hour;
   const weatherParam = params.get("weather");
   const life = new OfficeLife(
     scene,
@@ -634,7 +642,8 @@ async function boot() {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(src, frame.frame.x, frame.frame.y, 18, 14, 0, 0, 72, 56);
     }
-    return { slot, name: cat.name, coat: cat.coat.label, status: cat.status(), portrait };
+    const coat = cat.hungry ? `${cat.coat.label}, always hungry` : cat.coat.label;
+    return { slot, name: cat.name, coat, status: cat.status(), portrait };
   };
   if (!kiosk)
     hud.onCatAction = async (action: CatAction, slot, from) => {
