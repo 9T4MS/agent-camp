@@ -46,9 +46,9 @@ describe("HD character painter", () => {
   const sheet = paintSheet(lookFor(tracht, "claude", null));
   const front = colours(sheet, 0);
 
-  test("sheet is 35 frames of 32×48 texels", () => {
-    expect(SPECS.length).toBe(35);
-    expect(sheet.width).toBe(35 * 32);
+  test("sheet is 36 frames of 32×48 texels", () => {
+    expect(SPECS.length).toBe(36);
+    expect(sheet.width).toBe(36 * 32);
     expect(sheet.height).toBe(48);
   });
 

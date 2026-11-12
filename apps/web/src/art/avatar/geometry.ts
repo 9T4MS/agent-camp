@@ -34,6 +34,8 @@ export type FrameSpec = {
   posed?: boolean;
   /** frame index this one mirrors (walk/idle right) */
   mirror?: number;
+  /** bowing: the head drops this many texels more than the torso */
+  bow?: number;
 };
 
 const F = (view: View, seat: Seat, phase: number, arms: Arms, bob = 0): FrameSpec => ({
@@ -80,6 +82,7 @@ export const SPECS: FrameSpec[] = [
   /* 32 idle right */ { ...F("left", "none", 0, "down"), mirror: 31 },
   /* 33-34 busy standing (arcade, whiteboard) */ F("up", "none", 0, "type0"),
   F("up", "none", 0, "type1"),
+  /* 35 bowing, seen from behind */ { ...F("up", "none", 0, "down", 2), bow: 4 },
 ];
 
 export const ANIM = {
@@ -98,6 +101,7 @@ export const ANIM = {
   idleLeft: [31],
   idleRight: [32],
   play: [33, 34],
+  bow: [35],
 } as const;
 export type AnimName = keyof typeof ANIM;
 

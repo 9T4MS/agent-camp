@@ -133,8 +133,12 @@ describe("integrated avatar costumes", () => {
   test("all 35 HD frames of seeded catalog looks retain their pixel checksums", () => {
     const sheetHash = (avatar: Avatar) => {
       let hash = 2166136261;
-      for (const pixel of paintSheet(lookFor(avatar, "codex", null)).data)
-        hash = Math.imul(hash ^ pixel, 16777619) >>> 0;
+      const sheet = paintSheet(lookFor(avatar, "codex", null));
+      // the first 35 frames; the bow frame came later
+      const w = 35 * 32;
+      for (let y = 0; y < sheet.height; y++)
+        for (let x = 0; x < w; x++)
+          hash = Math.imul(hash ^ sheet.data[y * sheet.width + x]!, 16777619) >>> 0;
       return hash;
     };
     const got: Record<string, number> = {};

@@ -378,6 +378,7 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/?kiosk=1&gifs=0`   | The kiosk without head GIFs (nothing is loaded from Giphy on that screen). |
 | `/?toons=0`          | No portal characters on this screen. They are off on the kiosk by default; `/?kiosk=1&toons=1` brings them back there. |
+| `/?bow=1`            | The hourly bow at the head desk every minute instead of on the full hour (demos, screenshots). |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |

@@ -117,6 +117,26 @@ export const mugTextures = once(() => {
   return framesOf(pc, fw, fh, 2);
 });
 
+/** A plate of Eierspeis from the kitchen, still steaming (2 frames, 7x11, same frame as the mug). */
+export const plateTextures = once(() => {
+  const fw = 7;
+  const fh = 11;
+  const pc = new PixelCanvas(fw * 2, fh);
+  for (let f = 0; f < 2; f++) {
+    pc.at(f * fw, 0);
+    pc.set(f ? 3 : 2, 3, C.white, 170);
+    pc.set(f ? 2 : 3, 4, C.white, 200);
+    pc.rect(0, 7, 7, 2, C.white);
+    pc.hline(1, 9, 5, C.silver);
+    pc.rect(1, 6, 5, 2, C.lemon);
+    pc.set(2, 6, C.amber);
+    pc.set(4, 7, C.leaf);
+    pc.at(0, 0);
+    pc.outline(f * fw, 5, fw, fh - 5);
+  }
+  return framesOf(pc, fw, fh, 2);
+});
+
 /** A glass of lager in hand, foam bubbling (2 frames, 7x11, same frame as the mug). */
 export const beerTextures = once(() => {
   const fw = 7;

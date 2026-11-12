@@ -1,5 +1,5 @@
 /**
- * The HD paper-doll painter: one 35-frame sheet (32×48 texels per frame) for a RenderLook.
+ * The HD paper-doll painter: one 36-frame sheet (32×48 texels per frame) for a RenderLook.
  * Pure PixelCanvas (no Pixi, no DOM), so tests and preview scripts can run it headless.
  */
 import { PixelCanvas } from "../pixel.ts";
@@ -92,7 +92,7 @@ function paintFrame(pc: PixelCanvas, r: RenderLook, f: FrameSpec, after: (() => 
       drawArmsBack(c, b, f.arms, f.phase);
       drawExtras(c, b, f.arms, f.phase);
     }
-    drawHead(c, c.view, c.dy);
+    drawHead(c, c.view, c.dy + (f.bow ?? 0));
     if (c.view === "down") drawRaisedHand(c, b, f.arms);
     return;
   }
@@ -116,7 +116,7 @@ function paintFrame(pc: PixelCanvas, r: RenderLook, f: FrameSpec, after: (() => 
   drawRaisedHand(c, b, f.arms);
 }
 
-/** Paint all 35 frames side by side (32×48 each), 2-texel outline, mirrored right frames. */
+/** Paint all frames side by side (32×48 each), 2-texel outline, mirrored right frames. */
 export function paintSheet(r: RenderLook): PixelCanvas {
   const pc = new PixelCanvas(FW * SPECS.length, FH);
   SPECS.forEach((spec, i) => {

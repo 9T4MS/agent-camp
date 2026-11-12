@@ -7,6 +7,9 @@ banner after a deploy.
 
 ## 2026-11-12
 
+- 🍳 The head of sales moved in: he cooks Eierspeis in the kitchen (grab a plate while he's at the stove) and runs out to his stand in the garden whenever a client shows up, to talk the price up
+- ⏱️ The head of development got her own head desk with a time clock: people punch their hours there, and she walks over to anyone who hasn't
+- 🙇 Every full hour all agents jump up, run to the head desk, line up and bow to her one by one
 - The office no longer jumps or changes size while the camera zooms
 - 🐈 Cece and Jess moved in: two office cats who are always hungry and go from desk to desk begging the agents for treats and, at mealtimes, for a proper meal
 - 🙂 "Who are you?" in the top bar: confirm once with a code from your Mac, then your portrait sits there with Customize look and your desk; office games and pokes now go out as you

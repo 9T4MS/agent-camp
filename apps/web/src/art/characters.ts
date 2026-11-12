@@ -3,7 +3,7 @@
  * the avatar's own `look`, or one derived from its catalog fields (`resolveLook`).
  *
  * Frames are 32×48 texels at 2× density and shown at 16×24 world px (texture resolution 2),
- * so layout, seats, hit-testing and animations are unchanged. One sheet (35 frames) per
+ * so layout, seats, hit-testing and animations are unchanged. One sheet (36 frames) per
  * RenderLook; sheets are cached so siblings and re-joins reuse them.
  */
 import { CanvasSource, Rectangle, Texture } from "pixi.js";

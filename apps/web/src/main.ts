@@ -75,6 +75,7 @@ import { CharacterManager } from "./world/characters.ts";
 import { CatColony } from "./world/colony.ts";
 import { Effects } from "./world/effects.ts";
 import { HeadGifs } from "./world/gifs.ts";
+import { HeadDev } from "./world/headDev.ts";
 import { OfficeLife } from "./world/life.ts";
 import { catCount, SEASONS, type Season, seasonFor } from "./world/lifeRules.ts";
 import { Living } from "./world/living.ts";
@@ -92,6 +93,7 @@ import { OfficeScene } from "./world/office.ts";
 import { PartyWorld } from "./world/party.ts";
 import { PortalDuo } from "./world/portalCharacters.ts";
 import { OfficeQueen } from "./world/queen.ts";
+import { SalesChef } from "./world/salesChef.ts";
 
 type OfficeApi = {
   ready: boolean;
@@ -232,6 +234,33 @@ async function boot() {
     hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : feierabend ? 17.5 : null;
   const living = new Living(scene, model, hourValue);
   colony.clock = () => living.hour;
+  const chef = new SalesChef(scene.objects, scene.map, effects);
+  const headDev = new HeadDev(
+    scene.objects,
+    scene.map,
+    effects,
+    {
+      rallyable: () => chars.rallyable(),
+      rallyTo: (c, spot) => chars.rallyTo(c, spot),
+      rallied: (c) => chars.rallied(c),
+      inLine: (c) => chars.inLine(c),
+      bow: (c, s) => chars.bow(c, s),
+      release: (c) => chars.release(c),
+      nagTargets: () => chars.pageable(),
+      answer: (id, text) => chars.answerPage(id, text),
+    },
+    () => living.hour,
+  );
+  chars.snackOpen = () => chef.cooking;
+  chars.onSnack = (x, y) => chef.served(x, y);
+  chars.onPunch = (x, y) => headDev.punched(x, y);
+  const bowParam = params.get("bow");
+  if (bowParam && !["0", "false", "off"].includes(bowParam)) headDev.bowEvery = 60;
+  if (party) {
+    chef.clientEvery = 25;
+    chef.clientIn = 6;
+    headDev.nagEvery = 25;
+  }
   const weatherParam = params.get("weather");
   const life = new OfficeLife(
     scene,
@@ -327,6 +356,8 @@ async function boot() {
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     colony.setMap(scene.map);
     queen.setMap(scene.map);
+    chef.setMap(scene.map);
+    headDev.setMap(scene.map);
     duo?.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
@@ -905,6 +936,14 @@ async function boot() {
       queen.poke();
       return;
     }
+    if (chef.hit(wx, wy) && (!c || chef.y > c.y)) {
+      chef.poke();
+      return;
+    }
+    if (headDev.hit(wx, wy) && (!c || headDev.y > c.y)) {
+      headDev.poke();
+      return;
+    }
     if (c) {
       openSession(c.sessionId);
       return;
@@ -1161,6 +1200,8 @@ async function boot() {
       scene.doorWanted = colony.nearDoor({ x: (d.x + 1) * 16, y: (d.y + 1) * 16 });
     }
     queen.update(dt, time);
+    chef.update(dt, time);
+    headDev.update(dt, time);
     duo?.update(dt, time);
     life.update(dt, time);
     effects.update(dt);

@@ -46,6 +46,7 @@ import {
   jointTextures,
   mugTextures,
   pileTextures,
+  plateTextures,
   ringTextures,
   textBubbleTexture,
   toastTexture,
@@ -111,6 +112,9 @@ import type { OfficeScene } from "./office.ts";
 import { findPath, findPathPx } from "./pathing.ts";
 
 const WALK_SPEED = 44;
+/** the hourly bow: everybody runs */
+const RUN_SPEED = 92;
+const HOP_S = 0.35;
 const BUBBLE_SECONDS = 2.6;
 /** seats sort by their bottom edge, 5 px below a sitter's feet */
 const SEAT_LIFT = 6;
@@ -131,16 +135,17 @@ export type Moment = {
 /** Seconds between `person.joined` and the door/confetti, so an auto camera can get there. */
 const JOIN_LEAD = 1.8;
 
-/** What someone carries around after a break: a coffee, a beer from the bar, a joint from the shop. */
-type Carry = "coffee" | "beer" | "joint";
+/** What someone carries around after a break: a coffee, a beer, a joint, a plate from the kitchen. */
+type Carry = "coffee" | "beer" | "joint" | "plate";
 const CARRY_TEXTURES: Record<Carry, () => Texture[]> = {
   coffee: mugTextures,
   beer: beerTextures,
   joint: jointTextures,
+  plate: plateTextures,
 };
 
 type Mode = "queued" | "walking" | "seated" | "poi" | "waving" | "leaving" | "zapped" | "carried";
-type Goal = "desk" | "poi" | "exit" | "chat" | "lunch" | "evac";
+type Goal = "desk" | "poi" | "exit" | "chat" | "lunch" | "evac" | "rally";
 type Crater = { crater: Sprite; sign: Sprite; t: number };
 type Rebellion = { cool: number; t: number; c: SessionCharacter | null; seat: Point };
 type Ghost = EndedDesk & { sheet: CharacterSheet };
@@ -221,6 +226,11 @@ export class SessionCharacter {
   zombieT = 8;
   /** standing outside during a fire alarm */
   evac = false;
+  /** lined up for the hourly bow at the head desk (the line runs them) */
+  rally = false;
+  /** seconds left of the bow / of the jump up from the chair */
+  bowT = 0;
+  hopT = 0;
   chat: Chat | null = null;
   chatCooldown = 8;
   chatCheck = 0;
@@ -306,6 +316,12 @@ export class CharacterManager {
   lunchSpot: () => { x: number; y: number } | null = () => null;
   /** a character just picked up a coffee */
   onCoffee: (personId: string) => void = () => {};
+  /** the cook is at the stove: plates at the kitchen pass */
+  snackOpen: () => boolean = () => false;
+  /** someone got a plate (at x, y) */
+  onSnack: (x: number, y: number) => void = () => {};
+  /** someone punched their hours at the time clock (at x, y) */
+  onPunch: (x: number, y: number) => void = () => {};
   private hits = new HitCounter();
   private craters: Crater[] = [];
   private rebels = new Map<string, Rebellion>();
@@ -396,6 +412,7 @@ export class CharacterManager {
         if (
           s.activity !== "idle" &&
           !c.evac &&
+          !c.rally &&
           (c.mode === "poi" || (c.mode === "walking" && (c.goal === "poi" || c.goal === "lunch")))
         ) {
           this.goToDesk(c);
@@ -415,6 +432,7 @@ export class CharacterManager {
           break;
         }
         c.bubbleT = Math.min(c.bubbleT, 0.25);
+        c.rally = false;
         if (c.chat) this.endChat(c);
         if (c.mode === "poi" || (c.mode === "walking" && c.goal !== "exit")) this.goToDesk(c);
         break;
@@ -810,7 +828,7 @@ export class CharacterManager {
     const { moved, promoted } = this.fillDeskGaps(c.personId);
     this.syncSlots(moved);
     for (const m of promoted) {
-      if (!m.evac && (m.mode === "poi" || m.mode === "walking")) this.goToDesk(m);
+      if (!m.evac && !m.rally && (m.mode === "poi" || m.mode === "walking")) this.goToDesk(m);
     }
   }
 
@@ -968,6 +986,15 @@ export class CharacterManager {
       const spot = all.find((p) => p.id === b);
       if (other && other !== c.sessionId && spot && this.rand() < 0.6) return take(spot);
     }
+    // without their own odds these two would be one POI in sixty
+    if (c.mugT <= 0 && this.rand() < 0.15) {
+      const snack = all.find((p) => p.id === "snack");
+      if (snack) return take(snack);
+    }
+    if (this.rand() < 0.1) {
+      const clock = all.find((p) => p.id === "timeclock");
+      if (clock) return take(clock);
+    }
     // a coffee run
     if (c.mugT <= 0 && this.rand() < 0.3) {
       const coffee = all.find((p) => p.id === "coffee");
@@ -986,6 +1013,7 @@ export class CharacterManager {
 
   /** Bar spots only while the bar is open, the shop's inside only while the shop is open. */
   private isOpen(p: Poi): boolean {
+    if (p.id === "snack") return this.snackOpen();
     if (isBarPoi(p)) return this.scene.barOpen;
     if (isShopPoi(p)) return this.scene.shopOpen;
     return true;
@@ -1002,6 +1030,7 @@ export class CharacterManager {
     return (
       !o.removed &&
       o.mode === "poi" &&
+      !o.rally &&
       !o.chat &&
       o.chatCooldown <= 0 &&
       this.activityOf(o) === "idle"
@@ -1117,7 +1146,8 @@ export class CharacterManager {
   }
 
   private place(c: SessionCharacter) {
-    c.sprite.position.set(Math.round(c.x), Math.round(c.y));
+    const hop = c.hopT > 0 ? Math.round(Math.sin((1 - c.hopT / HOP_S) * Math.PI) * 5) : 0;
+    c.sprite.position.set(Math.round(c.x), Math.round(c.y) - hop);
     c.sprite.zIndex =
       c.y + (c.mode === "poi" && c.poi?.spot && c.poi.pose === "sit" ? SEAT_LIFT : 0);
     // at the bar counter (stool, back to the camera) the glass stands on the counter beside them
@@ -1534,6 +1564,8 @@ export class CharacterManager {
       if (c.removed || this.isOffline(c)) continue;
       if (spot) {
         if (["zapped", "queued", "waving", "leaving"].includes(c.mode) || c.evac) continue;
+        c.rally = false;
+        c.bowT = 0;
         if (c.mode === "carried") this.sit(c);
         if (c.mode === "seated") this.resetChair(c);
         if (this.walkToSpot(c, spot, "evac", 40)) c.evac = true;
@@ -1543,6 +1575,68 @@ export class CharacterManager {
         else this.idleWander(c);
       }
     }
+  }
+
+  /** The hourly bow: everyone online who can drop what they are doing right now. */
+  rallyable(): SessionCharacter[] {
+    return [...this.chars.values()].filter(
+      (c) =>
+        !c.removed &&
+        !c.evac &&
+        c.sprite.visible &&
+        !this.isOffline(c) &&
+        !["zapped", "queued", "waving", "leaving"].includes(c.mode),
+    );
+  }
+
+  /** Jump up and run to a spot in the line (again: move up a place). False when there is no way. */
+  rallyTo(c: SessionCharacter, spot: Point): boolean {
+    if (c.removed || this.isOffline(c)) return false;
+    const map = this.scene.map;
+    const tile = { x: Math.floor(spot.x / TILE), y: Math.floor(spot.y / TILE) };
+    const from = { x: Math.floor(c.x / TILE), y: Math.floor((c.y - 4) / TILE) };
+    const tiles = findPath(map, from, tile);
+    if (!tiles) return false;
+    if (!c.rally) {
+      c.rally = true;
+      c.hopT = HOP_S;
+      if (c.mode === "carried") this.sit(c);
+      if (c.mode === "seated") this.resetChair(c);
+      this.releasePoi(c);
+      this.endChat(c);
+      c.chatTarget = null;
+    }
+    c.bowT = 0;
+    c.path = tiles.slice(1).map(tileCenter);
+    c.path.push(spot);
+    c.goal = "rally";
+    c.mode = "walking";
+    return true;
+  }
+
+  /** In the line and standing still at its spot. */
+  rallied(c: SessionCharacter): boolean {
+    return c.rally && !c.removed && c.mode === "poi" && c.goal === "rally";
+  }
+
+  inLine(c: SessionCharacter): boolean {
+    return c.rally && !c.removed;
+  }
+
+  bow(c: SessionCharacter, seconds: number) {
+    if (!c.rally) return;
+    c.facing = "up";
+    c.bowT = seconds;
+  }
+
+  /** Done bowing (or the line broke up): back to work. */
+  release(c: SessionCharacter) {
+    if (!c.rally) return;
+    c.rally = false;
+    c.bowT = 0;
+    if (c.removed) return;
+    if (c.hasDesk) this.goToDesk(c);
+    else this.idleWander(c);
   }
 
   /**
@@ -1659,6 +1753,7 @@ export class CharacterManager {
 
   private step(c: SessionCharacter, dt: number, time: number) {
     if (c.mugT > 0) c.mugT -= dt;
+    if (c.hopT > 0) c.hopT -= dt;
     const activity = this.activityOf(c);
     c.marker.visible = false;
     c.ring.visible = false;
@@ -1683,7 +1778,7 @@ export class CharacterManager {
               : c.facing === "up"
                 ? "walkUp"
                 : "walkDown";
-        this.setAnim(c, walkAnim, zombie ? 4 : 8, time);
+        this.setAnim(c, walkAnim, zombie ? 4 : c.rally ? 14 : 8, time);
         if (c.path.length === 0) this.arrive(c);
         break;
       }
@@ -1701,7 +1796,11 @@ export class CharacterManager {
         else if (pose === "sitBack") this.setAnim(c, "sitIdle", 0.8, time);
         else if (pose === "play" && c.facing === "up") this.setAnim(c, "play", 5, time);
         else this.setAnim(c, standAnim(c.facing), 1.2, time);
-        if (c.evac) break;
+        if (c.rally && c.bowT > 0) {
+          c.bowT -= dt;
+          this.setAnim(c, "bow", 1, time);
+        }
+        if (c.evac || c.rally) break;
         this.setMonitorFor(c, "idle");
         if (activity !== "idle") {
           this.goToDesk(c);
@@ -1746,6 +1845,13 @@ export class CharacterManager {
           } else if (c.poi?.id === "tap") {
             // a fresh beer: off to a stool or a standing table
             this.hold(c, "beer", 60 + this.rand() * 60);
+            this.idleWander(c);
+          } else if (c.poi?.id === "snack") {
+            this.hold(c, "plate", 50 + this.rand() * 40);
+            this.onSnack(c.x, c.y);
+            this.idleWander(c);
+          } else if (c.poi?.id === "timeclock") {
+            this.onPunch(c.x, c.y);
             this.idleWander(c);
           } else if (c.poi?.id === "shop-counter") {
             // bought something: straight to the smokers' corner
@@ -1879,7 +1985,7 @@ export class CharacterManager {
   }
 
   private walkStep(c: SessionCharacter, dt: number) {
-    let budget = WALK_SPEED * dt;
+    let budget = (c.rally ? RUN_SPEED : WALK_SPEED) * dt;
     while (budget > 0 && c.path.length > 0) {
       const wp = c.path[0]!;
       const dx = wp.x - c.x;
@@ -1920,7 +2026,12 @@ export class CharacterManager {
     } else if (c.goal === "poi") {
       c.mode = "poi";
       c.facing = c.poi?.face ?? "down";
-      const quick = c.poi?.id === "coffee" || c.poi?.id === "tap" || c.poi?.id === "shop-counter";
+      const quick =
+        c.poi?.id === "coffee" ||
+        c.poi?.id === "tap" ||
+        c.poi?.id === "shop-counter" ||
+        c.poi?.id === "snack" ||
+        c.poi?.id === "timeclock";
       c.timer = quick ? 3 + this.rand() * 2 : (10 + this.rand() * 15) * this.dwell;
       // a seat at the counter comes with a beer (it stands on the counter beside them)
       if (c.poi && isBarStool(c.poi) && (c.carry !== "beer" || c.mugT < c.timer + 5))
@@ -1935,6 +2046,11 @@ export class CharacterManager {
       c.icon.texture = chatIconTextures()[CHAT_ICONS.indexOf("pizza")]!;
       c.icon.visible = true;
       c.iconT = 3;
+    } else if (c.goal === "rally") {
+      c.mode = "poi";
+      c.poi = null;
+      c.timer = Number.POSITIVE_INFINITY;
+      c.facing = "up";
     } else if (c.goal === "evac") {
       c.mode = "poi";
       c.poi = null;

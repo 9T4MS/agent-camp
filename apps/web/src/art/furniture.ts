@@ -837,6 +837,104 @@ export const ART: Partial<Record<ObjectKind, Art>> = {
       pc.set(7, 2, C.orange);
     },
   },
+  // ---- the two residents without an agent ------------------------------------------------
+  stove: {
+    w: 16,
+    h: 24,
+    frames: 2,
+    outline: false,
+    draw(pc, _v, f) {
+      pc.rect(0, 0, 16, 8, C.silver);
+      pc.rect(1, 1, 14, 6, C.ink);
+      pc.ellipse(2, 2, 6, 4, C.slate);
+      pc.ellipse(9, 2, 6, 4, f ? C.orange : C.red);
+      pc.set(11, 3, f ? C.lemon : C.amber);
+      pc.ellipse(1, 0, 8, 5, C.slate);
+      pc.ellipse(2, 1, 6, 3, C.cream);
+      pc.set(4, 1, f ? C.amber : C.lemon);
+      pc.set(5, 2, C.lemon);
+      pc.hline(9, 2, 4, C.bark);
+      pc.rect(0, 8, 16, 15, C.silver);
+      pc.rect(2, 11, 12, 8, C.grey);
+      pc.rect(3, 12, 10, 6, C.ink);
+      pc.hline(3, 12, 10, f ? C.orange : C.wine);
+      pc.hline(4, 10, 8, C.slate);
+      pc.vline(15, 8, 15, C.grey);
+      pc.hline(0, 22, 16, C.bark);
+    },
+  },
+  headDesk: {
+    w: 48,
+    h: 30,
+    dy: 2,
+    draw(pc) {
+      pc.rect(0, 0, 48, 13, C.wood);
+      pc.hline(0, 0, 48, C.tan);
+      pc.rect(0, 13, 48, 13, C.bark);
+      pc.hline(0, 13, 48, C.cocoa);
+      pc.rect(2, -8, 13, 10, C.ink);
+      pc.rect(7, 2, 3, 2, C.slate);
+      pc.rect(36, 3, 8, 6, C.white);
+      pc.hline(37, 5, 6, C.silver);
+      pc.hline(37, 7, 6, C.silver);
+      pc.rect(37, 1, 6, 3, C.cream);
+      pc.rect(29, 4, 3, 4, C.red);
+      pc.rect(28, 8, 5, 1, C.ink);
+      pc.rect(1, 16, 46, 8, C.amber);
+      pc.hline(1, 23, 46, C.orange);
+      drawText(pc, Math.floor((48 - measureText("HEAD OF DEV")) / 2), 18, "HEAD OF DEV", C.cocoa);
+      pc.rect(1, 26, 3, 4, C.night);
+      pc.rect(44, 26, 3, 4, C.night);
+    },
+  },
+  timeClock: {
+    w: 12,
+    h: 18,
+    dy: -3,
+    z: -1000,
+    frames: 2,
+    draw(pc, _v, f) {
+      pc.rect(0, 0, 12, 18, C.slate);
+      pc.rect(1, 1, 10, 16, C.grey);
+      pc.ellipse(2, 2, 8, 8, C.white);
+      pc.set(6, 3, C.ink);
+      pc.set(6, 4, C.ink);
+      pc.set(6, 5, C.ink);
+      pc.set(f ? 7 : 5, f ? 6 : 5, C.red);
+      pc.rect(3, 11, 6, 2, C.ink);
+      pc.rect(4, 8, 4, 4, C.cream);
+      pc.hline(4, 9, 4, C.red);
+      pc.rect(2, 14, 2, 2, f ? C.neon : C.forest);
+      pc.rect(8, 14, 2, 2, C.red);
+    },
+  },
+  salesStand: {
+    w: 32,
+    h: 28,
+    dy: 2,
+    draw(pc) {
+      pc.rect(0, 0, 32, 8, C.tan);
+      pc.hline(0, 0, 32, C.sand);
+      pc.hline(0, 7, 32, C.wood);
+      pc.rect(20, -4, 9, 8, C.slate);
+      pc.rect(21, -3, 7, 3, C.ink);
+      pc.hline(22, -2, 4, C.neon);
+      pc.rect(3, 2, 5, 4, C.white);
+      pc.rect(5, 1, 5, 4, C.sky);
+      pc.hline(6, 2, 3, C.white);
+      pc.ellipse(13, 2, 4, 3, C.amber);
+      pc.set(14, 1, C.lemon);
+      for (let x = 0; x < 32; x += 4) {
+        pc.rect(x, 8, 2, 16, C.red);
+        pc.rect(x + 2, 8, 2, 16, C.white);
+      }
+      pc.rect(4, 11, 24, 9, C.navy);
+      drawText(pc, Math.floor((32 - measureText("DEALS")) / 2), 13, "DEALS", C.lemon);
+      pc.hline(0, 23, 32, C.wine);
+      pc.rect(1, 24, 2, 4, C.bark);
+      pc.rect(29, 24, 2, 4, C.bark);
+    },
+  },
 };
 
 const cache = new Map<string, Texture[]>();

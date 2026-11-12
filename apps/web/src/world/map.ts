@@ -257,9 +257,20 @@ export const FOOTPRINTS = {
   greenCross: { w: 1, h: 1, solid: false },
   openSign: { w: 2, h: 1, solid: false },
   ashtray: { w: 1, h: 1, solid: true },
+  stove: { w: 1, h: 1, solid: true },
+  headDesk: { w: 3, h: 1, solid: true },
+  timeClock: { w: 1, h: 1, solid: false },
+  salesStand: { w: 2, h: 1, solid: true },
 } as const;
 export type ObjectKind = keyof typeof FOOTPRINTS;
 export type MapObject = { kind: ObjectKind; x: number; y: number; variant?: number };
+
+/** Left tile of the head of development's desk (3 wide, she sits behind it facing the room). */
+export const HEAD_DESK: Point = { x: 46, y: 14 };
+/** Left tile of the sales stand in the garden (2 wide, the seller stands behind it). */
+export const SALES_STAND: Point = { x: 52, y: 22 };
+/** Where the cook stands at the stove. */
+export const STOVE_SPOT: Point = { x: 35, y: 4 };
 
 const o = (kind: ObjectKind, x: number, y: number, variant?: number): MapObject =>
   variant === undefined ? { kind, x, y } : { kind, x, y, variant };
@@ -267,7 +278,8 @@ const o = (kind: ObjectKind, x: number, y: number, variant?: number): MapObject 
 const BASE_OBJECTS: readonly MapObject[] = [
   // kitchen
   o("fridge", 34, 3),
-  ...[35, 36, 37, 38, 39, 40].map((x) => o("counter", x, 3)),
+  o("stove", 35, 3),
+  ...[36, 37, 38, 39, 40].map((x) => o("counter", x, 3)),
   o("coffee", 37, 3),
   o("sink", 39, 3),
   o("cooler", 41, 3),
@@ -294,6 +306,8 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("plant", 49, 13, 1),
   o("plantBig", 49, 19),
   o("floorLamp", 34, 19),
+  o("headDesk", HEAD_DESK.x, HEAD_DESK.y),
+  o("timeClock", 45, 12),
   // game corner
   o("arcade", 35, 22, 0),
   o("arcade", 36, 22, 1),
@@ -319,6 +333,7 @@ const BASE_OBJECTS: readonly MapObject[] = [
   o("flowers", 60, 6, 2),
   o("lampPost", 54, 6),
   o("lampPost", 57, 21),
+  o("salesStand", SALES_STAND.x, SALES_STAND.y),
   o("parasol", 58, 19),
   o("bush", 62, 11),
   o("bush", 51, 26, 1),
@@ -408,6 +423,9 @@ const BASE_POIS: readonly Poi[] = [
   poi("bistro-l", "kitchen", 36, 7, "right", "stand"),
   poi("bistro-r", "kitchen", 38, 7, "left", "stand"),
   poi("fridge", "kitchen", 34, 4, "up", "stand"),
+  // the snack pass is only open while the cook is at the stove
+  poi("snack", "kitchen", 36, 4, "up", "stand"),
+  poi("timeclock", "meeting", 45, 13, "up", "play"),
   poi("sofa-1", "lounge", 44, 5, "down", "sit", seat(44, 4)),
   poi("sofa-2", "lounge", 45, 5, "down", "sit", seat(45, 4)),
   poi("sofa-3", "lounge", 46, 5, "down", "sit", seat(46, 4)),
