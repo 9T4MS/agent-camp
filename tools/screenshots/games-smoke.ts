@@ -161,8 +161,16 @@ try {
     await ctx.addCookies([session, ...(me ? [await confirm(me)] : [])]);
     const page = await ctx.newPage();
     page.on("pageerror", (e) => errors.push(`${me ?? "guest"}: ${e.message}`));
+    // refused requests are listed with their path (the console only says "429")
+    page.on("response", (r) => {
+      if (r.status() >= 400)
+        errors.push(
+          `${me ?? "guest"}: ${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}`,
+        );
+    });
     page.on("console", (e) => {
-      if (e.type() === "error") errors.push(`${me ?? "guest"}: ${e.text()}`);
+      if (e.type() === "error" && !e.text().startsWith("Failed to load resource"))
+        errors.push(`${me ?? "guest"}: ${e.text()}`);
     });
     await page.goto(`${base}/?zoom=fit`);
     await page.waitForFunction(
