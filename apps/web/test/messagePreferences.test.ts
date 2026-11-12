@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { defaultPresentation, messagePreferences } from "../src/state/messagePreferences.ts";
 
 describe("message presentation migration", () => {
-  test("fresh browsers see clear overlay without a legacy preference", () => {
+  test("fresh browsers see a dark full-card overlay without a legacy preference", () => {
+    expect(defaultPresentation.background).toBe(85);
     expect(messagePreferences(null, null)).toEqual({
       version: 1,
       visible: true,
@@ -21,6 +22,12 @@ describe("message presentation migration", () => {
       appearance: { ...defaultPresentation, mode: "popup", size: 20, background: 85 },
     } as const;
     expect(messagePreferences(JSON.stringify(saved), null)).toEqual(saved);
+  });
+  test("an explicitly saved Clear background remains a user choice", () => {
+    expect(
+      messagePreferences(JSON.stringify({ version: 1, appearance: { background: 0 } }), null)
+        .appearance.background,
+    ).toBe(0);
   });
   test.each(["{", "null", "[]", '{"version":2}'])("rejects invalid envelope %s", (raw) => {
     expect(messagePreferences(raw, null).appearance).toEqual(defaultPresentation);

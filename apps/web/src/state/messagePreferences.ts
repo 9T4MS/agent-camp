@@ -22,7 +22,7 @@ export const defaultPresentation: MessagePresentation = {
   height: 280,
   size: 16,
   font: "readable",
-  background: 0,
+  background: 85,
   icons: true,
   timestamps: true,
   emotes: true,

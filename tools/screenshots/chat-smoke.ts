@@ -46,10 +46,10 @@ export async function checkChatOverlay(
     check(
       await panel.evaluate(
         (el) =>
-          getComputedStyle(el).backgroundColor === "rgba(0, 0, 0, 0)" ||
-          getComputedStyle(el).backgroundColor.endsWith("/ 0)"),
+          el.style.getPropertyValue("--chat-fill") === "85%" &&
+          getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)",
       ),
-      "unused panel space is transparent",
+      "default full card, including unused space, has an 85% fill",
     );
     check((await page.locator(".messages-log img").count()) >= 6, "six local emotes render inline");
     check(
@@ -66,7 +66,17 @@ export async function checkChatOverlay(
       await panel.evaluate((el) => !el.contains(document.activeElement)),
       "boot does not steal focus",
     );
-    await shoot(page, "18-chat-clear-bright");
+    check(
+      await page
+        .locator(
+          ".messages-log, .messages-log article, .messages-log article p, .messages-byline b, .messages-byline time",
+        )
+        .evaluateAll((rows) =>
+          rows.every((row) => getComputedStyle(row).backgroundColor === "rgba(0, 0, 0, 0)"),
+        ),
+      "rows and text have no separate backings",
+    );
+    await shoot(page, "18-chat-card-bright");
     await panel.press("Escape");
     check(await panel.isVisible(), "idle Escape does not hide persistent feed");
     await page.locator(".messages-log").evaluate((el) => {
@@ -139,6 +149,29 @@ export async function checkChatOverlay(
         await panel.evaluate((el) => getComputedStyle(el).opacity === "1"),
         `background ${fill}% never fades text`,
       );
+      check(
+        await panel.evaluate((el, fill) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d")!;
+          context.fillStyle = getComputedStyle(el).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return (
+            Math.abs(
+              context.getImageData(0, 0, 1, 1).data[3]! - Math.round((Number(fill) / 100) * 255),
+            ) <= 1
+          );
+        }, fill),
+        `background ${fill}% is applied to the whole card`,
+      );
+      check(
+        await page
+          .locator(".messages-log article p, .messages-byline b, .messages-byline time")
+          .evaluateAll((rows) =>
+            rows.every((row) => getComputedStyle(row).backgroundColor === "rgba(0, 0, 0, 0)"),
+          ),
+        `background ${fill}% never adds per-row backings`,
+      );
     }
     for (const size of ["16", "18", "20"]) {
       await page.getByLabel("Text size", { exact: true }).selectOption(size);
@@ -149,7 +182,7 @@ export async function checkChatOverlay(
         `live text-size sample ${size}px`,
       );
     }
-    await page.getByLabel("Overlay background", { exact: true }).selectOption("0");
+    await page.getByLabel("Overlay background", { exact: true }).selectOption("85");
     await page.getByLabel("Text size", { exact: true }).selectOption("16");
     await page.getByRole("button", { name: "Done", exact: true }).click();
     check(
@@ -324,7 +357,7 @@ export async function checkChatOverlay(
     await page.goto(`${http}/?hour=23`);
     await page.waitForFunction(() => window.__office?.ready);
     await page.locator(".messages-log article").last().waitFor();
-    await shoot(page, "18-chat-clear-dark");
+    await shoot(page, "18-chat-card-dark");
     await page.route("**/emotes/office/coffee.svg", (route) => route.abort());
     await page.reload();
     await page.waitForFunction(() => window.__office?.ready);

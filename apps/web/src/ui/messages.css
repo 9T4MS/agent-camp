@@ -267,7 +267,7 @@
   }
 }
 
-/* A clear scene surface. Fill never changes the opacity of text or controls. */
+/* One continuous card surface. Fill never changes the opacity of text or controls. */
 .messages-overlay {
   width: min(
     var(--chat-width),
@@ -333,7 +333,7 @@
 }
 .messages-overlay .messages-log p,
 .messages-sample {
-  /* Small local text support, leaving the unused scene/log area genuinely clear. */
+  /* Outlines keep the optional Clear/Soft card presets legible without row backings. */
   color: #fff5d6;
   text-shadow:
     -1px -1px #181425,
@@ -343,12 +343,7 @@
     0 0 3px #181425;
 }
 .messages-overlay .messages-log p {
-  background: #181425e6;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
   display: inline;
-  padding: 2px 4px;
-  border-radius: 3px;
 }
 .messages-byline {
   flex-direction: row;
@@ -364,7 +359,6 @@
 }
 .messages-overlay .messages-byline b,
 .messages-overlay .messages-byline time {
-  background: #181425e6;
   padding: 1px 3px;
 }
 .messages-sender-icon {

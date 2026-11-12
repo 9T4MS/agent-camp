@@ -480,12 +480,14 @@ with `/timelapse?day=YYYY-MM-DD`; an invalid date falls back to All.
 
 ### Office Messages
 
-New browsers show a persistent **Office chat** feed over the office, with clear unused space
-and small dark text backings for readability. **Write a message…** expands the composer;
+New browsers show a persistent **Office chat** feed over the office, with one continuous
+85% dark card background—not separate row backings. **Write a message…** expands the composer;
 **History** opens filters/older history. Existing browsers keep their saved button/popup mode.
 Use **Chat settings** to switch between **Chat overlay** and **Button + popup**, choose left/right
 placement, width, feed height, 16/18/20px readable or pixel text, background fill (0/20/85/100%),
-sender initials, timestamps and image/text emotes. Settings and Hide are local to this browser;
+sender initials, timestamps and image/text emotes. Fill covers the whole card, including unused
+space; Clear removes that fill without adding row backgrounds. Saved fill choices are preserved.
+Settings and Hide are local to this browser;
 Reset appearance does not clear a draft, recipients, read progress or Mac-alert choice.
 On phones the resting feed shows the newest message in a compact strip. Cards/games can
 temporarily reduce or move the feed; look editing occludes it without discarding a draft.
