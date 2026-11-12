@@ -268,6 +268,18 @@ describe("games: playing", () => {
     expect(t.game(g.id).players[1]).toBe("anna");
   });
 
+  test("an invite cannot be given up: nothing lands in the records before a game started", async () => {
+    const t = setup();
+    const g = await t.challenge("anna", "tom", "four-in-a-row", true);
+    for (const who of ["anna", "tom"]) {
+      const r = await t.act(who, { action: "resign", id: g.id });
+      expect(r.status).toBe(409);
+      expect(r.body.error).toBe("the invite is not accepted yet");
+    }
+    expect(t.game(g.id).status).toBe("invited");
+    expect(t.state().stats).toEqual({});
+  });
+
   test("resigning gives the other side the win", async () => {
     const t = setup();
     const id = await fourGame(t);
@@ -514,6 +526,19 @@ describe("games: notifications on the Mac", () => {
     expect(t.pokes).toEqual([]);
     expect((await t.read("tom", g.id)).body.notices).toBe(false);
     expect((await t.ok("tom", { action: "notices", on: true })).notices).toBe(true);
+  });
+
+  test("the switch also holds for a nudge: it shows on the page, not on the Mac", async () => {
+    const t = setup();
+    await t.ok("tom", { action: "notices", on: false });
+    const id = await fourGame(t); // Tom is to move
+    t.advance(GAME_NUDGE_AFTER_MS);
+    t.pokes.length = 0;
+    const nudged = await t.ok("anna", { action: "nudge", id });
+    expect(nudged.game!.nudgedAt).toBe(t.now());
+    t.advance(GAME_NOTICE_DELAY_MS);
+    t.alarm();
+    expect(t.pokes).toEqual([]);
   });
 
   test("a 'this is me' code is never swallowed by a game notification", async () => {

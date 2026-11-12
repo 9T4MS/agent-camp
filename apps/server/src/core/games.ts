@@ -386,6 +386,8 @@ export class Games {
         break;
       }
       case "resign":
+        // an invite is taken back or declined; giving up is for a game that has started
+        if (g.status === "invited") return fail(409, "the invite is not accepted yet");
         this.finish(g, "resigned", other, now);
         this.notice(g, other, now, `${name} gave up: you win (${label})`);
         break;
@@ -398,8 +400,10 @@ export class Games {
           return fail(409, "you already asked today");
         g.nudgedAt = now;
         g.updatedAt = now;
-        // asked for by a person: no "maybe they are looking at the office" delay
-        g.notices[other] = { at: now, text: `${name} is waiting for your move (${label})` };
+        // asked for by a person: no "maybe they are looking at the office" delay. Somebody
+        // who switched game notices off still gets none: the page shows "… is waiting"
+        if (!this.data.people[g.players[other]]?.noticesOff)
+          g.notices[other] = { at: now, text: `${name} is waiting for your move (${label})` };
         break;
       }
       case "claim":
