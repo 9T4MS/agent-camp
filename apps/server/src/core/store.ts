@@ -45,7 +45,20 @@ export interface Store {
   addSnapshot(ts: number, png: Uint8Array): number;
   listSnapshots(): Omit<SnapshotMeta, "url">[];
   getSnapshot(id: number): Uint8Array | null;
+  /** Raw table dump for moving the office to another server (SQL stores only). */
+  exportTables?(): ExportTable[];
+  exportRows?(table: string, afterRowid: number, limit: number): ExportRow[];
 }
+
+export type ExportColumn = { name: string; type: string; notNull: boolean; pk: number };
+export type ExportTable = {
+  name: string;
+  sql: string;
+  columns: ExportColumn[];
+  indexes: string[];
+  rows: number;
+};
+export type ExportRow = { rowid: number; values: unknown[] };
 
 export class MemoryStore implements Store {
   private messageSeq = 0;
@@ -350,4 +363,44 @@ export class SqlStore implements Store {
     const r = this.run("SELECT png FROM snapshots WHERE id = ?", id)[0];
     return r ? toBytes(r.png) : null;
   }
+  private userTables(): { name: string; sql: string }[] {
+    // _cf_* are Cloudflare's own tables and cannot be read from a Durable Object
+    return this.run(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
+    ).map((t) => ({ name: String(t.name), sql: String(t.sql ?? "") }));
+  }
+  private columns(table: string): ExportColumn[] {
+    return this.run(`PRAGMA table_info(${quoteIdent(table)})`).map((c) => ({
+      name: String(c.name),
+      type: String(c.type ?? ""),
+      notNull: Number(c.notnull) === 1,
+      pk: Number(c.pk ?? 0),
+    }));
+  }
+  exportTables(): ExportTable[] {
+    return this.userTables().map((t) => ({
+      ...t,
+      columns: this.columns(t.name),
+      indexes: this.run(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL ORDER BY name",
+        t.name,
+      ).map((i) => String(i.sql)),
+      rows: Number(this.run(`SELECT COUNT(*) AS n FROM ${quoteIdent(t.name)}`)[0]?.n ?? 0),
+    }));
+  }
+  exportRows(table: string, afterRowid: number, limit: number): ExportRow[] {
+    if (!this.userTables().some((t) => t.name === table)) throw new Error(`unknown table ${table}`);
+    const columns = this.columns(table);
+    const list = columns.map((c) => quoteIdent(c.name)).join(", ");
+    return this.run(
+      `SELECT rowid AS "__rowid", ${list} FROM ${quoteIdent(table)} WHERE rowid > ? ORDER BY rowid LIMIT ?`,
+      afterRowid,
+      limit,
+    ).map((r) => ({
+      rowid: Number(r.__rowid),
+      values: columns.map((c) => toBytes(r[c.name]) ?? r[c.name] ?? null),
+    }));
+  }
 }
+
+const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;
