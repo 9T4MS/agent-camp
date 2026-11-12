@@ -345,7 +345,7 @@ function randomLook(rnd: () => number): CharacterLook {
       expression: pick(E.EXPRESSIONS),
       cheeks: pick(E.CHEEKS),
     },
-    hair: { cut: pick(E.HAIR_CUTS), ramp: ramp(), sheen: bool() },
+    hair: { cut: pick(E.HAIR_CUTS), ramp: ramp(), sheen: bool(), clips: pick(E.HAIR_CLIPS) },
     facialHair: { style: pick(E.FACIAL_HAIR_STYLES), color: hx() },
     eyewear: {
       style: pick(E.EYEWEAR_STYLES),
@@ -368,6 +368,7 @@ function randomLook(rnd: () => number): CharacterLook {
       sleeves: pick(E.SLEEVES),
       buttons: buttons(),
       peeksAtWaist: bool(),
+      length: pick(E.SHIRT_LENGTHS),
     },
     vest: {
       kind: pick(E.VEST_KINDS),
@@ -460,6 +461,70 @@ describe("painter robustness", () => {
     pc.rect(-4, 0, 40, 4, "#ff0000");
     expect(pc.data.slice(0, 32).every((v) => v === 0)).toBe(true);
     expect(pc.get(0, 0)).not.toBe(0);
+  });
+});
+
+describe("hairband, shirt length, hair clips", () => {
+  const cat = lookFromCatalog(avatarFromSeed("probe"));
+  const plain: CharacterLook = {
+    ...cat,
+    hair: { ...cat.hair, cut: "long", clips: undefined },
+    headwear: { ...cat.headwear, style: "none" },
+    vest: { ...cat.vest, kind: "none" },
+    outer: { ...cat.outer, kind: "none" },
+    shirt: { ...cat.shirt, kind: "turtleneck", length: undefined },
+  };
+  const spec = (look: CharacterLook): AvatarSpec => ({ ...avatarFromSeed("probe"), look });
+  const sheetOf = (look: CharacterLook) => paintSheet(lookFor(spec(look), "pi", null));
+  const back = ANIM.sitType[0]!;
+  const band = "#ff00ff";
+  const withBand: CharacterLook = {
+    ...plain,
+    headwear: {
+      ...plain.headwear,
+      style: "hairband",
+      ramp: { base: band, shadow: band, light: band },
+    },
+  };
+
+  test("the hairband curves over the head in front and is hidden from behind", () => {
+    const front = colours(sheetOf(withBand), 0);
+    expect(front.get(band) ?? 0).toBeGreaterThan(20);
+    expect(frameBytes(sheetOf(withBand), back)).toBe(frameBytes(sheetOf(plain), back));
+    // curved: the band's middle sits higher than its ends above the temples
+    const pc = sheetOf(withBand);
+    const rowOf = (x: number) => {
+      for (let y = 0; y < 20; y++) if (hex(pc.data[y * pc.width + x]!) === band) return y;
+      return -1;
+    };
+    expect(rowOf(15)).toBeGreaterThan(-1);
+    expect(rowOf(9)).toBeGreaterThan(rowOf(15));
+  });
+
+  test("a long shirt reaches further down than the default, which is unchanged", () => {
+    const rows = (look: CharacterLook) =>
+      [...colours(sheetOf(look), 0, 30, 40).entries()]
+        .filter(([h]) => h === look.shirt.ramp.base || h === look.shirt.ramp.shadow)
+        .reduce((n, [, k]) => n + k, 0);
+    expect(rows({ ...plain, shirt: { ...plain.shirt, length: "long" } })).toBeGreaterThan(
+      rows(plain),
+    );
+    // stated as what the kind did anyway: pixel-identical
+    expect(frameBytes(sheetOf({ ...plain, shirt: { ...plain.shirt, length: "tucked" } }), 0)).toBe(
+      frameBytes(sheetOf(plain), 0),
+    );
+  });
+
+  test("clips: none paints like a look without the field, few < many", () => {
+    const count = (clips?: "none" | "few" | "many") => {
+      const c = colours(sheetOf({ ...plain, hair: { ...plain.hair, clips } }), back);
+      return c.get("#ffffff") ?? 0; // every clip has one white highlight texel
+    };
+    expect(frameBytes(sheetOf({ ...plain, hair: { ...plain.hair, clips: "none" } }), 0)).toBe(
+      frameBytes(sheetOf(plain), 0),
+    );
+    expect(count("few")).toBe(count() + 3);
+    expect(count("many")).toBe(count() + 8);
   });
 });
 

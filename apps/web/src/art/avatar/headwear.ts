@@ -162,6 +162,51 @@ function drawBrimHat(
   }
 }
 
+/** First opaque row of column x between rows y0..y1 (the top of the hair or head), or null. */
+function topAt(pc: PixelCanvas, x: number, y0: number, y1: number): number | null {
+  for (let y = y0; y <= y1; y++) if (pc.get(x, y) >>> 24 !== 0) return y;
+  return null;
+}
+
+/**
+ * Alice band: a thin band that follows the top of the hair (so it curves with every cut) a
+ * little behind the hairline, its ends running down to the ears. It sits over the crown and
+ * ends behind the ears, so from behind the hair hides it.
+ */
+function drawHairband(pc: PixelCanvas, L: CharacterLook, view: View, hy: number) {
+  if (view === "up") return;
+  const { base, shadow, light } = L.headwear.ramp;
+  const ear = 14 + hy;
+  if (view === "left") {
+    // seen from the side: the band crosses the crown in front of the ear, leaning back
+    for (let y = hy; y < ear; y++) {
+      const x = y < 9 + hy ? 13 : y < 12 + hy ? 14 : 15;
+      const top = topAt(pc, x, hy, ear);
+      if (top === null || y < top + 1) continue;
+      pc.set(x, y, y === top + 1 ? light : base);
+      pc.set(x + 1, y, shadow);
+    }
+    return;
+  }
+  const [fl, fr] = faceSides(L.face.shape);
+  const xl = fl - 1;
+  const xr = fr + 1;
+  const cx = (xl + xr) / 2;
+  const half = (xr - xl) / 2;
+  for (let x = xl; x <= xr; x++) {
+    const top = topAt(pc, x, hy, ear);
+    if (top === null) continue;
+    // a little hair shows above it, and it bends down towards the ears even on flat tops
+    const t = (x - cx) / half;
+    const y = top + 3 + Math.round(t * t * 3);
+    if (y >= ear) continue;
+    pc.set(x, y, x < (xl + xr) / 2 - 3 && x > xl + 2 ? light : base);
+    pc.set(x, y + 1, shadow);
+    // the two ends run down over the hair to the ears
+    if (x === xl || x === xr) for (let yy = y + 1; yy < ear; yy++) pc.set(x, yy, base);
+  }
+}
+
 export function drawHeadwear(
   pc: PixelCanvas,
   L: CharacterLook,
@@ -218,6 +263,9 @@ export function drawHeadwear(
       pc.hline(l, 11 + hy, r - l + 1, shadow);
       break;
     }
+    case "hairband":
+      drawHairband(pc, L, view, hy);
+      break;
     case "bow":
       pc.sprite(0, hy, up2(`bow/${view}`, ACC.bow[view]), { R: base, r: hw.accent });
       break;
