@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { seededRandom } from "@agent-office/protocol";
-import { buildOfficeMap, HEAD_DESK, SALES_STAND, STOVE_SPOT } from "../src/world/map.ts";
+import { buildOfficeMap, HEAD_DESK, KURT_DESK, SALES_STAND, STOVE_SPOT } from "../src/world/map.ts";
 import { findPath } from "../src/world/pathing.ts";
-import { haggle, hourCrossed, lineSpots } from "../src/world/residentRules.ts";
+import { haggle, hourCrossed, kurtTalk, kurtWifi, lineSpots } from "../src/world/residentRules.ts";
 
 const grid = (x0: number, y0: number, x1: number, y1: number) => ({
   isWalkable: (x: number, y: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1,
@@ -91,4 +91,55 @@ describe("haggling at the sales stand", () => {
     expect(deals).toBeGreaterThan(100);
     expect(deals).toBeLessThan(200);
   });
+});
+
+describe("asking Kurt", () => {
+  test("a dev asks for the Klima ticket or a contract; it's hard, this and that, takes time", () => {
+    const rand = seededRandom("kurt");
+    const topics = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const { topic, lines } = kurtTalk(rand);
+      topics.add(topic);
+      expect(lines.map((l) => l.who)).toEqual(["dev", "kurt", "kurt", "kurt", "dev"]);
+      expect(lines[0]!.text).toMatch(topic === "klima" ? /KLIMA TICKET/ : /CONTRACT/);
+      expect(lines[1]!.text).toMatch(/HARD|TRICKY|DIFFICULT/);
+      expect(lines[2]!.text).toMatch(/THIS.*THAT/);
+      expect(lines[3]!.text).toMatch(/TIME/);
+      for (const l of lines) expect(l.text).toMatch(/^[A-Z0-9 .,!?':]+$/);
+    }
+    expect([...topics].sort()).toEqual(["contract", "klima"]);
+  });
+  test("out of his office he asks where the wifi is, someone answers, he has the last word", () => {
+    const rand = seededRandom("wifi");
+    const answers = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      const w = kurtWifi(rand);
+      expect(w.ask).toBe("WHERE IS THE WIFI?!");
+      answers.add(w.answer);
+      for (const t of [w.ask, w.answer, w.thanks]) expect(t).toMatch(/^[A-Z0-9 .,!?':]+$/);
+    }
+    expect(answers.size).toBeGreaterThan(3);
+  });
+  for (const rows of [4, 6]) {
+    test(`his office is only reachable through its door (${rows} pod rows)`, () => {
+      const map = buildOfficeMap(rows);
+      const room = map.areas.find((a) => a.name === "kurt")!;
+      const visit = map.pois.find((p) => p.id === "kurt")!;
+      const inRoom = (t: { x: number; y: number }) =>
+        t.x >= room.x && t.x < room.x + room.w && t.y >= room.y && t.y < room.y + room.h;
+      expect(inRoom(visit.tile)).toBe(true);
+      expect(visit.tile).toEqual({ x: KURT_DESK.x, y: KURT_DESK.y + 1 });
+      expect(map.isWalkable(visit.tile.x, visit.tile.y)).toBe(true);
+      expect(findPath(map, map.spawn, visit.tile)).not.toBeNull();
+      // his chair behind the desk is free floor
+      expect(map.isWalkable(KURT_DESK.x, KURT_DESK.y - 1)).toBe(true);
+      // close the door: nobody gets in any more
+      const door = [];
+      for (let y = room.y; y < room.y + room.h; y++)
+        if (map.isWalkable(room.x - 1, y)) door.push(y);
+      expect(door).toEqual([25, 26]);
+      for (const y of door) map.setWalkable(room.x - 1, y, false);
+      expect(findPath(map, map.spawn, visit.tile)).toBeNull();
+    });
+  }
 });

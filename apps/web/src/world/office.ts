@@ -210,7 +210,7 @@ export class OfficeScene {
         const g = new Sprite(glowTexture(30, C.neon));
         g.anchor.set(0.5);
         g.visible = false;
-        g.position.set((game.x + 3 + i * 3.5) * TILE, (game.y + 2.5) * TILE);
+        g.position.set((game.x + 1.5 + (i * (game.w - 3)) / 3) * TILE, (game.y + 2.5) * TILE);
         this.glows.addChild(g);
         this.partyGlows.push({ sprite: g, y: g.y });
       }

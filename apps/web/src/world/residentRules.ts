@@ -1,6 +1,7 @@
 /**
- * Pure rules of the two residents without an agent: when the hourly bow starts, where the
- * lines in front of the head desk form, and how a haggle at the sales stand goes.
+ * Pure rules of the residents without an agent: when the hourly bow starts, where the lines
+ * in front of the head desk form, how a haggle at the sales stand goes and what Kurt says
+ * when someone asks him for something.
  */
 import type { Point } from "./map.ts";
 
@@ -107,4 +108,60 @@ export function haggle(rand: () => number): { lines: HaggleLine[]; deal: boolean
     deal ? { who: "seller", text: pick(rand, THANKS) } : { who: "seller", text: pick(rand, LATER) },
   ];
   return { lines, deal };
+}
+
+export type KurtTopic = "klima" | "contract";
+export type KurtLine = { who: "kurt" | "dev"; text: string };
+
+const ASKS: Record<KurtTopic, readonly string[]> = {
+  klima: ["KLIMA TICKET?", "MY KLIMA TICKET?", "ANY NEWS ON THE KLIMA TICKET?"],
+  contract: ["MY CONTRACT?", "CONTRACT READY?", "CAN I SIGN MY CONTRACT?"],
+};
+const HARD = ["HMM. THAT'S HARD.", "OH, THAT'S TRICKY.", "DIFFICULT, DIFFICULT."];
+const THIS_AND_THAT = [
+  "I'M DOING THIS AND THAT.",
+  "RIGHT NOW: THIS AND THAT.",
+  "FIRST THIS, THEN THAT.",
+];
+const TAKES_TIME = ["IT WILL TAKE TIME.", "THAT TAKES TIME.", "GIVE IT TIME."];
+const REACTIONS: Record<KurtTopic, readonly string[]> = {
+  klima: ["OK... BY BIKE THEN.", "SINCE MARCH?", "OK...", "SIGH."],
+  contract: ["OK... I'LL WAIT.", "SINCE MARCH?", "OK...", "SIGH."],
+};
+
+/**
+ * One visit at Kurt's desk: a dev asks for the Klima ticket or a contract, Kurt says it's
+ * hard, he's doing this and that, it will take time; the dev gives up.
+ */
+export function kurtTalk(rand: () => number): { topic: KurtTopic; lines: KurtLine[] } {
+  const topic: KurtTopic = rand() < 0.5 ? "klima" : "contract";
+  return {
+    topic,
+    lines: [
+      { who: "dev", text: pick(rand, ASKS[topic]) },
+      { who: "kurt", text: pick(rand, HARD) },
+      { who: "kurt", text: pick(rand, THIS_AND_THAT) },
+      { who: "kurt", text: pick(rand, TAKES_TIME) },
+      { who: "dev", text: pick(rand, REACTIONS[topic]) },
+    ],
+  };
+}
+
+const WIFI_ANSWERS = [
+  "SAME AS YESTERDAY.",
+  "IT'S ON THE ROUTER.",
+  "ASK RICHARD!",
+  "PASSWORD'S ON THE FRIDGE.",
+  "TURN IT OFF AND ON?",
+  "IT'S ALWAYS BEEN THERE.",
+];
+const WIFI_THANKS = ["AH. THANKS!", "STILL NOTHING.", "THIS AND THAT, THEN.", "OK. WHICH ROUTER?"];
+
+/** Kurt out of his office: "WHERE IS THE WIFI?!", someone answers, he gives his verdict. */
+export function kurtWifi(rand: () => number): { ask: string; answer: string; thanks: string } {
+  return {
+    ask: "WHERE IS THE WIFI?!",
+    answer: pick(rand, WIFI_ANSWERS),
+    thanks: pick(rand, WIFI_THANKS),
+  };
 }
