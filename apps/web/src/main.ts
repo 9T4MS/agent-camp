@@ -17,6 +17,8 @@
  *   ?focus=<personId>  start focused on that person's desk pod
  *   ?look=tracht|b64:<base64url AvatarSpec JSON>  demo: the first person wears this avatar
  *   ?gallery=look[&look=…][&gscale=N]  detailed-look gallery (sets window.__galleryReady)
+ *   ?toons=0|1    The portal characters off / on (default: on, off on the kiosk)   ?gifs=0  no head GIFs
+ *   ?gallery=toons[&gscale=N]  every portal character frame and the portal
  */
 import "./ui/theme.css";
 import "./ui/office.css";
@@ -88,6 +90,7 @@ import {
 } from "./world/map.ts";
 import { OfficeScene } from "./world/office.ts";
 import { PartyWorld } from "./world/party.ts";
+import { PortalDuo } from "./world/portalCharacters.ts";
 import { OfficeQueen } from "./world/queen.ts";
 
 type OfficeApi = {
@@ -112,6 +115,8 @@ type OfficeApi = {
   characters(): number;
   /** office cats right now (not counting the ones walking out) */
   cats(): number;
+  /** where the lead stands and what the two portal characters are up to (null: away / off) */
+  portalCharacters(): { x: number; y: number; mode: string } | null;
   /** slow down / freeze the world clock (screenshots of short moments); 1 = normal */
   setSpeed(k: number): void;
 };
@@ -126,6 +131,10 @@ const flag = (k: string) => params.get(k) === "1" || params.get(k) === "true";
 const kiosk = flag("kiosk");
 // `?gifs=0`: this screen shows no head GIFs (e.g. the wall); client-only, nothing is sent
 const showGifs = !["0", "false", "off"].includes(params.get("gifs") ?? "");
+// `?toons=0|1`: The portal characters off / on for this screen (default: on, off on the kiosk);
+// client-only, nothing is sent and no toon textures are built while off
+const toonsParam = params.get("toons");
+const showToons = toonsParam === null ? !kiosk : !["0", "false", "off"].includes(toonsParam);
 const nohud = flag("nohud");
 const recorder = flag("recorder");
 const demo = parseDemoMode(params.get("demo"));
@@ -205,9 +214,12 @@ async function boot() {
     () => chars.pageable(),
     (id, text) => chars.answerPage(id, text),
   );
+  // two characters portal in, stroll around and portal somewhere else every half minute
+  const duo = showToons ? new PortalDuo(scene.objects, scene.fx, scene.map, effects) : null;
   if (party) {
     colony.setHunting(0.6, 900);
     queen.pageEvery = 12;
+    if (duo) duo.hopEvery = 10;
   }
   const hourValue =
     hourParam !== null ? Number(hourParam) : demo === "party" ? 12.2 : feierabend ? 17.5 : null;
@@ -280,6 +292,8 @@ async function boot() {
     },
   );
   camera.attach(app.canvas);
+  // ambient: a real agent event always wins the auto-pilot camera over a portal
+  if (duo) duo.onPortal = (x, y) => camera.notify(x, y, { zoom: 3, hold: 8, ambient: true });
   // wall screens and the fit view frame the office (64 columns); the east street block joins
   // the frame only while someone is there, so tiles stay big on a 1080p wall
   camera.fitWidth = () =>
@@ -305,6 +319,7 @@ async function boot() {
     scene.rebuild(buildOfficeMap(podRowsFor(need)));
     colony.setMap(scene.map);
     queen.setMap(scene.map);
+    duo?.setMap(scene.map);
     life.reattach();
     minimap.setTerrain(scene.terrainCanvas);
     chars.syncSlots();
@@ -872,6 +887,11 @@ async function boot() {
       return;
     }
     const c = chars.pick(wx, wy);
+    const toon = duo?.hit(wx, wy);
+    if (duo && toon && (!c || duo.depth(toon) > c.y)) {
+      duo.poke(toon);
+      return;
+    }
     if (queen.hit(wx, wy) && (!c || queen.y > c.y)) {
       queen.poke();
       return;
@@ -1132,6 +1152,7 @@ async function boot() {
       scene.doorWanted = colony.nearDoor({ x: (d.x + 1) * 16, y: (d.y + 1) * 16 });
     }
     queen.update(dt, time);
+    duo?.update(dt, time);
     life.update(dt, time);
     effects.update(dt);
     living.update(dt);
@@ -1193,6 +1214,7 @@ async function boot() {
     },
     characters: () => chars.chars.size,
     cats: () => colony.cats().length,
+    portalCharacters: () => duo?.where() ?? null,
     setSpeed: (k) => {
       speed = Math.max(0, k);
     },

@@ -27,6 +27,8 @@ const TOUR_STOPS: readonly (AreaName | "all")[] = [
   "all",
 ];
 const FOLLOW_S = 9;
+/** ambient notifies (office flavour) wait this long after a real agent event */
+export const AMBIENT_QUIET_S = 60;
 const MAX_ZOOM = 6;
 
 type View = { x: number; y: number; zoom: number };
@@ -178,14 +180,35 @@ export class Camera {
   /**
    * Something happened at (x, y): the auto-pilot goes there for a while. `rush` pans there
    * quickly (e.g. a join, so the door + confetti are in view when they happen).
+   *
+   * `ambient` marks office flavour (the portal visitors): it never interrupts a look at a real
+   * agent event, waits AMBIENT_QUIET_S after one, and any real event takes the camera from it.
    */
-  notify(x: number, y: number, opts: { zoom?: number; hold?: number; rush?: boolean } = {}) {
-    if (!this.auto) return;
-    this.followT = Math.max(this.followT, opts.hold ?? FOLLOW_S);
+  notify(
+    x: number,
+    y: number,
+    opts: { zoom?: number; hold?: number; rush?: boolean; ambient?: boolean } = {},
+  ) {
+    if (!this.auto) return false;
+    if (opts.ambient) {
+      if (this.followT > 0 || this.clock - this.lastEventAt < AMBIENT_QUIET_S) return false;
+      this.followT = opts.hold ?? FOLLOW_S;
+    } else {
+      this.lastEventAt = this.clock;
+      // a real event replaces an ambient look instead of adding to it
+      this.followT = Math.max(this.ambientFollow ? 0 : this.followT, opts.hold ?? FOLLOW_S);
+    }
+    this.ambientFollow = !!opts.ambient;
     if (opts.rush) this.rushT = 1.6;
     this.set({ x, y, zoom: opts.zoom ?? 3 });
+    return true;
   }
   private rushT = 0;
+  /** seconds the camera has been running (update dt), for AMBIENT_QUIET_S */
+  private clock = 0;
+  private lastEventAt = -Infinity;
+  /** the current follow is an ambient one (a real event may take over at once) */
+  private ambientFollow = false;
 
   screenToWorld(sx: number, sy: number) {
     const s = this.screen();
@@ -199,6 +222,7 @@ export class Camera {
     this.lastInput = performance.now();
     this.hold = false;
     this.followT = 0;
+    this.ambientFollow = false;
     // panned / zoomed by hand: no longer the fit view (no re-fit when the east block changes)
     this.fitted = false;
   }
@@ -361,6 +385,7 @@ export class Camera {
   }
 
   update(dt: number) {
+    this.clock += dt;
     if (this.auto) this.tour(dt);
     // someone walked into (or left) the east block: a fitted view eases to the new frame
     if (this.fitted && Math.min(this.worldSize().width, this.fitWidth()) !== this.fitW)

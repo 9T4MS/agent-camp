@@ -377,6 +377,7 @@ It writes desktop/mobile screenshots to `/private/tmp/agent-office-party-shots` 
 | `/`                  | The office. Drag to pan, wheel/pinch to zoom. Click a character for its agent card, a nameplate for the person. Both have buttons to wave, ask for a coffee, cheer, open Office Messages with that person selected, send a cat to sit on their desk, or throw a paper ball (office only). There is one office cat, plus one for every two people (up to 10): click one to pet it and open its card, then feed it, toss it a yarn ball, or get out the laser pointer and tap the floor. |
 | `/?kiosk=1`          | Wall/iPad mode: no chrome, bigger text, auto camera tour. Add it to the iPad home screen; it also records the timelapse (`&recorder=1`). |
 | `/?kiosk=1&gifs=0`   | The kiosk without head GIFs (nothing is loaded from Giphy on that screen). |
+| `/?toons=0`          | No portal characters on this screen. They are off on the kiosk by default; `/?kiosk=1&toons=1` brings them back there. |
 | `/?kiosk=1&view=overview` | Big wall screen: the whole office most of the time, a 12 s close-up of the busiest pod (or whoever waits) every 2 min (`&every=<seconds>`); events still get a short look. |
 | `/stats`             | Weekday × hour heatmap, leaderboards, Claude vs Codex vs Pi, CSV export. |
 | `/timelapse`         | Snapshots of the office every 15 minutes, with a play button.          |

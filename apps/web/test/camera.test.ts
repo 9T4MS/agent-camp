@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Container } from "pixi.js";
-import { Camera } from "../src/camera.ts";
+import { AMBIENT_QUIET_S, Camera } from "../src/camera.ts";
 import { buildOfficeMap, OFFICE_COLS, TILE } from "../src/world/map.ts";
 
 /** Just enough of a Pixi container for Camera.apply(). */
@@ -121,5 +121,42 @@ describe("the tour keeps the agents in view", () => {
     }
     expect(deskVisits.slice(0, 4)).toEqual([busy[0]!, busy[1]!, busy[0]!, busy[1]!]);
     expect(deskFrames / frames).toBeGreaterThan(0.55);
+  });
+});
+
+describe("ambient camera notifies (the portal characters)", () => {
+  const run = (cam: Camera, seconds: number) => {
+    for (let t = 0; t < seconds; t += 0.5) cam.update(0.5);
+  };
+  // well inside the hold time, so the tour has not moved on yet
+  const settle = (cam: Camera) => run(cam, 6);
+
+  test("a portal never interrupts a look at a real agent event", () => {
+    const { cam } = camera();
+    expect(cam.notify(500, 300, { hold: 9 })).toBe(true);
+    run(cam, 2);
+    expect(cam.notify(900, 300, { hold: 8, ambient: true })).toBe(false);
+    settle(cam);
+    expect(cam.x).toBeCloseTo(500, -1);
+  });
+
+  test("a portal waits a while after a real event, then may take a look", () => {
+    const { cam } = camera();
+    cam.notify(100, 100, { hold: 2 });
+    run(cam, 5);
+    expect(cam.notify(900, 300, { ambient: true })).toBe(false);
+    run(cam, AMBIENT_QUIET_S);
+    expect(cam.notify(900, 300, { hold: 8, ambient: true })).toBe(true);
+  });
+
+  test("a real event takes the camera straight from a portal look", () => {
+    const { cam } = camera();
+    expect(cam.notify(900, 300, { hold: 8, ambient: true })).toBe(true);
+    run(cam, 1);
+    expect(cam.notify(500, 250, { hold: 9 })).toBe(true);
+    settle(cam);
+    expect(cam.x).toBeCloseTo(500, -1);
+    // and it holds the real event for its own time, not the portal's leftover
+    expect(cam.notify(900, 300, { ambient: true })).toBe(false);
   });
 });

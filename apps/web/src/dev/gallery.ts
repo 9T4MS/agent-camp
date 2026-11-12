@@ -25,6 +25,14 @@ import {
   kittenTextures,
 } from "../art/fx.ts";
 import { C } from "../art/palette.ts";
+import {
+  leadSheet,
+  PORTAL_R,
+  portalGlowTexture,
+  portalTexture,
+  RES,
+  sidekickSheet,
+} from "../art/portalCharacters.ts";
 import { queenTextures } from "../art/queen.ts";
 import { parseLookParam } from "../demo/demoFeed.ts";
 import type { ObjectKind } from "../world/map.ts";
@@ -79,6 +87,10 @@ export function showGallery(app: Application) {
       parseLookParam(params.get("look"), LOOK_FIXTURES) ?? LOOK_FIXTURES.tracht,
       params,
     );
+    return;
+  }
+  if (params.get("gallery") === "toons") {
+    showToonGallery(app, Number(params.get("gscale")) || 4);
     return;
   }
   const root = new Container();
@@ -248,4 +260,42 @@ function showLookGallery(app: Application, avatar: AvatarSpec, params: URLSearch
       window.__galleryReady = true;
     }),
   );
+}
+
+/** ?gallery=toons[&gscale=N]: every portal character frame, a pixel avatar for scale, a portal. */
+function showToonGallery(app: Application, scale: number) {
+  const root = new Container();
+  root.scale.set(scale);
+  app.stage.addChild(root);
+  let y = 4;
+  for (const sheet of [leadSheet(), sidekickSheet()]) {
+    sheet.frames.forEach((f, i) => {
+      const s = new Sprite(f);
+      s.scale.set(1 / RES);
+      s.position.set(4 + i * (sheet.w + 2), y);
+      root.addChild(s);
+    });
+    y += sheet.h + 4;
+  }
+  const doll = new Sprite(
+    characterSheet(lookFor(avatarFromSeed("anna"), "claude", null)).frames[0]!,
+  );
+  doll.position.set(4, y + 6);
+  root.addChild(doll);
+  const glow = new Sprite(portalGlowTexture());
+  glow.scale.set(1 / RES);
+  glow.anchor.set(0.5);
+  glow.position.set(60, y + 6 + PORTAL_R * 2);
+  const oval = new Container();
+  oval.position.set(60, y + 6 + PORTAL_R);
+  oval.scale.set(0.5, 1);
+  const disc = new Sprite(portalTexture());
+  disc.anchor.set(0.5);
+  disc.scale.set(1 / RES);
+  oval.addChild(disc);
+  root.addChild(glow, oval);
+  app.ticker.add((t) => {
+    disc.rotation -= t.deltaMS / 250;
+  });
+  window.__galleryReady = true;
 }
