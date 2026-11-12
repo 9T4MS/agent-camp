@@ -341,6 +341,9 @@ export class Hud {
     open(id: string): void;
     answer(id: string, accept: boolean): void;
     challengeBox(person: PersonState): HTMLElement;
+    /** whether "your turn" notifications go to my Mac; null = not known */
+    notices(): boolean | null;
+    setNotices(on: boolean): void;
   } | null = null;
   private meChip: HTMLButtonElement | null = null;
   private meChipKey = "";
@@ -775,7 +778,7 @@ export class Hud {
     if (!this.meMenuOpen || this.claiming) return;
     if (!this.me) this.renderMeMenu();
     else {
-      const key = JSON.stringify(this.games?.waiting() ?? []);
+      const key = this.meMenuKey();
       if (key !== this.meGamesKey && !this.meMenu.contains(document.activeElement))
         this.renderMeMenu();
     }
@@ -1311,6 +1314,11 @@ export class Hud {
     }
   }
 
+  /** What my menu shows of the games: when it changes, the open menu is redrawn. */
+  private meMenuKey(): string {
+    return JSON.stringify([this.games?.waiting() ?? [], this.games?.notices() ?? null]);
+  }
+
   /** What waits for me in the turn-based games: up to three rows, invites with their answer. */
   private fillMeGames(box: HTMLElement) {
     const games = this.games;
@@ -1398,7 +1406,7 @@ export class Hud {
   private renderMeMenu() {
     const menu = this.meMenu;
     const me = this.me;
-    this.meGamesKey = JSON.stringify(this.games?.waiting() ?? []);
+    this.meGamesKey = this.meMenuKey();
     if (me) {
       const name = this.myName();
       menu.setAttribute("aria-label", "Me");
@@ -1412,6 +1420,11 @@ export class Hud {
                <button type="button" class="pixel-btn me-card">My desk</button>`
             : '<div class="me-note dim">You are not in the office right now.</div>'
         }
+        ${
+          this.games && this.games.notices() !== null
+            ? `<button type="button" class="link-btn me-notices" aria-pressed="${this.games.notices()}">"Your turn" on my Mac: ${this.games.notices() ? "on" : "off"}</button>`
+            : ""
+        }
         <button type="button" class="link-btn me-forget" title="This browser stops being you (e.g. a shared iPad)">Not ${esc(name ?? "you")}? Forget this device</button>`;
       const portrait = this.miniPortrait(me);
       if (portrait) menu.querySelector(".portrait-slot")!.replaceWith(portrait);
@@ -1423,6 +1436,11 @@ export class Hud {
       menu.querySelector(".me-card")?.addEventListener("click", () => {
         this.closeMeMenu();
         this.onOpenMe(me);
+      });
+      menu.querySelector(".me-notices")?.addEventListener("click", () => {
+        this.games?.setNotices(!this.games.notices());
+        this.renderMeMenu();
+        this.meMenu.querySelector<HTMLElement>(".me-notices")?.focus();
       });
       menu.querySelector(".me-forget")!.addEventListener("click", () => {
         void (this.onClaim?.forget() ?? Promise.resolve()).then(() => {

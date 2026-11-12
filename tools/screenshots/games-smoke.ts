@@ -35,7 +35,7 @@ const server = Bun.spawn([process.execPath, "apps/server/src/dev/bun-server.ts"]
 let browser: Browser | undefined;
 const sockets: WebSocket[] = [];
 /** game notifications the fake Macs got */
-const notices: string[] = [];
+const macNotices: string[] = [];
 /** latest "this is me" code each fake Mac got */
 const macCodes = new Map<string, string>();
 let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -88,7 +88,7 @@ try {
           data?: { text?: string; from?: string };
         };
         if (msg.type === "connector.poked" && msg.data?.from === "Office games")
-          notices.push(`${name}: ${msg.data.text}`);
+          macNotices.push(`${name}: ${msg.data.text}`);
         const code = msg.type === "connector.poked" && /\b(\d{6})\b/.exec(msg.data?.text ?? "");
         if (code) macCodes.set(name, code[1]!);
         if (msg.type === "connector.welcomed") {
@@ -475,8 +475,24 @@ try {
     "PASS: Battleship: rated invite, placement, typed coordinates, phone tabs, hidden fleets, result",
   );
 
+  // the switch in the Me menu: no "your turn" on my Mac
+  await anna.keyboard.press("Escape");
+  await anna.locator(".me-chip").click();
+  const notices = anna.locator(".me-menu .me-notices");
+  assert.equal(await notices.textContent(), '"Your turn" on my Mac: on');
+  await notices.click();
+  await anna.locator('.me-menu .me-notices[aria-pressed="false"]').waitFor();
+  assert.equal(await notices.textContent(), '"Your turn" on my Mac: off');
+  assert.equal(
+    ((await ask(anna, id)) as { notices?: boolean }).notices,
+    false,
+    "the server remembers the switch",
+  );
+  await anna.screenshot({ path: `${out}/games-me-menu-laptop.png` });
+  await anna.keyboard.press("Escape");
+
   // both players had the office open the whole time: nothing went to their Macs
-  assert.deepEqual(notices, [], "no Mac notification for players who are looking at the office");
+  assert.deepEqual(macNotices, [], "no Mac notification for players who are looking at the office");
   // 403s of the guest's refused challenge would show up here too
   assert.deepEqual(errors, [], "zero browser errors");
   console.log(`PASS: games smoke; 0 browser errors, 0 Mac notices. Screenshots: ${out}`);

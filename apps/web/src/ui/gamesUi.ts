@@ -88,6 +88,8 @@ export class GamesUi {
   private mine = new Map<string, BattleshipView>();
   private board: Board | null = null;
   private notice = "";
+  /** whether game notifications reach my Mac; null = not known (yet) */
+  private noticesOn: boolean | null = null;
   /** what I already told the server I saw: game id -> its `updatedAt` */
   private told = new Map<string, number>();
   private challengeBoxes = new Map<string, { root: HTMLElement; update: () => void }>();
@@ -123,6 +125,12 @@ export class GamesUi {
     this.me = me;
     this.mine.clear();
     this.told.clear();
+    this.noticesOn = null;
+    if (me)
+      void this.client.settings().then((r) => {
+        if (r.ok && this.me === me) this.noticesOn = r.res.notices ?? null;
+        this.onWaitingChange();
+      });
     this.challengeBoxes.clear();
     if (this.board) this.loadBoard();
     this.refresh();
@@ -144,6 +152,21 @@ export class GamesUi {
         line: gameLine(g, this.me),
         invite: g.status === "invited",
       }));
+  }
+
+  /** Whether "your turn" notifications go to my Mac; null while unknown. */
+  notices(): boolean | null {
+    return this.noticesOn;
+  }
+
+  setNotices(on: boolean): void {
+    this.noticesOn = on;
+    void this.client.post({ action: "notices", on }).then((r) => {
+      if (r.ok) this.noticesOn = r.res.notices ?? on;
+      else this.noticesOn = !on;
+      this.onWaitingChange();
+    });
+    this.onWaitingChange();
   }
 
   /** The first game that waits for me (`?game=next`); false when there is none. */
@@ -419,7 +442,11 @@ export class GamesUi {
     root.addEventListener("pointerdown", (e) => {
       if (e.target === root) this.close();
     });
-    root.addEventListener("keydown", (e) => this.onKey(e));
+    // capture on the window: Esc and Tab belong to the board wherever the focus ended up (a
+    // button that was just used may be gone), and never reach the panel underneath
+    window.addEventListener("keydown", this.onKey, true);
+    // what the board handled does not go on to the office's shortcuts
+    root.addEventListener("keydown", (e) => e.stopPropagation());
     this.board = {
       id,
       root,
@@ -438,30 +465,37 @@ export class GamesUi {
     this.opts.onBoard(true);
     this.loadBoard();
     this.renderBoard();
-    (
-      root.querySelector<HTMLElement>(".cell[tabindex='0'], .four-col") ??
-      root.querySelector<HTMLElement>("button")
-    )?.focus();
+    this.focusBoard();
   }
 
   close(restore = true): void {
     const b = this.board;
     if (!b) return;
+    window.removeEventListener("keydown", this.onKey, true);
     b.root.remove();
     this.board = null;
     this.opts.onBoard(false);
     if (restore && b.opener?.isConnected) b.opener.focus();
   }
 
-  private onKey(e: KeyboardEvent): void {
+  private onKey = (e: KeyboardEvent): void => {
     const b = this.board;
     if (!b) return;
-    e.stopPropagation();
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopImmediatePropagation();
       this.close();
       return;
     }
+    if (!b.root.contains(document.activeElement)) {
+      // the focus fell out (its button went away): the next key brings it back, and the
+      // office underneath does not get it
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.focusBoard();
+      return;
+    }
+    // inside, keys go on to the grid's own handling (arrows, typed coordinates)
     if ((e.key === "r" || e.key === "R") && b.placing && !e.ctrlKey && !e.metaKey) {
       this.rotate();
       return;
@@ -479,6 +513,19 @@ export class GamesUi {
     if (at >= 0 && next >= 0 && next < stops.length) return;
     e.preventDefault();
     stops[next < 0 ? stops.length - 1 : 0]!.focus();
+  };
+
+  /** Put the focus on the board: the grid, else the first thing that can be used. */
+  private focusBoard(): void {
+    const root = this.board?.root;
+    if (!root) return;
+    const box = root.querySelector<HTMLElement>(".game-box");
+    (
+      root.querySelector<HTMLElement>(".cell[tabindex='0'], .four-col") ??
+      root.querySelector<HTMLElement>("button:not([disabled])") ??
+      box
+    )?.focus();
+    if (!root.contains(document.activeElement)) box?.focus();
   }
 
   private rotate(): void {
@@ -500,6 +547,7 @@ export class GamesUi {
     const focused = (document.activeElement as HTMLElement | null)?.dataset.key;
     const had = b.root.contains(document.activeElement);
     const box = el("div", "game-box pixel-box");
+    box.tabIndex = -1;
     const head = el("header", "game-head");
     const title = el("h2", undefined, GAME_NAME[g.kind]);
     title.id = "game-title";
@@ -560,12 +608,10 @@ export class GamesUi {
     box.append(head, status, body, error, foot);
     b.root.replaceChildren(box);
     if (had) {
-      const again = focused
-        ? b.root.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)
-        : null;
-      (
-        again ?? b.root.querySelector<HTMLElement>(".cell[tabindex='0'], .four-col, button")
-      )?.focus();
+      if (focused)
+        b.root.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+      // the button that had it may be gone or switched off now
+      if (!b.root.contains(document.activeElement)) this.focusBoard();
     }
   }
 
