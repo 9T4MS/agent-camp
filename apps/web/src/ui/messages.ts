@@ -86,6 +86,8 @@ export class MessagesPanel {
   private rosterKey = "";
   private filterKey = "";
   private atBottom = true;
+  private restoringScroll = false;
+  private readingAnchor: { id: string; offset: number; top: number } | null = null;
   private preferences = messagePreferences(stored(MESSAGE_PRESENTATION_KEY), stored(EXPANDED_KEY));
   private view: "chat" | "history" | "compose" = "chat";
   private settings: HTMLElement | null = null;
@@ -156,6 +158,7 @@ export class MessagesPanel {
     this.olderButton = button("Load older", () => void this.loadOlder());
     this.log.append(this.olderButton, this.rows);
     this.log.onscroll = () => {
+      if (this.restoringScroll || !this.log.getClientRects().length) return;
       this.atBottom = this.isAtBottom();
       this.read();
       this.updateBadge();
@@ -444,7 +447,6 @@ export class MessagesPanel {
         this.preferences.appearance = value;
         this.preferences.visible = true;
         if (changedMode && !this.overlay) this.onOpen();
-        if (changedMode) this.atBottom = this.isAtBottom();
         this.lastRendered = "";
         this.applyPresentation();
         this.refresh();
@@ -456,9 +458,42 @@ export class MessagesPanel {
     this.applyPresentation();
     this.settings.querySelector("select")?.focus();
   }
+  private captureReadingPosition(): void {
+    if (this.atBottom || !this.log.getClientRects().length) return;
+    const top = this.log.getBoundingClientRect().top;
+    const row = [...this.rows.querySelectorAll<HTMLElement>("article")].find(
+      (row) => row.getBoundingClientRect().bottom > top,
+    );
+    if (row)
+      this.readingAnchor = {
+        id: row.dataset.messageId!,
+        offset: row.getBoundingClientRect().top - top,
+        top: this.log.scrollTop,
+      };
+  }
+  private restoreReadingPosition(): void {
+    if (!this.log.getClientRects().length) return;
+    if (this.atBottom) {
+      this.log.scrollTop = this.log.scrollHeight;
+      return;
+    }
+    const anchor = this.readingAnchor;
+    if (!anchor) return;
+    this.restoringScroll = true;
+    requestAnimationFrame(() => {
+      this.restoringScroll = false;
+    });
+    const row = [...this.rows.querySelectorAll<HTMLElement>("article")].find(
+      (row) => row.dataset.messageId === anchor.id,
+    );
+    if (row)
+      this.log.scrollTop +=
+        row.getBoundingClientRect().top - this.log.getBoundingClientRect().top - anchor.offset;
+    else this.log.scrollTop = anchor.top;
+  }
   private applyPresentation(): void {
+    this.captureReadingPosition();
     const a = this.preferences.appearance;
-    const top = this.log.scrollTop;
     this.panel.classList.toggle("messages-overlay", this.overlay);
     this.panel.classList.toggle(
       "messages-resting",
@@ -483,7 +518,7 @@ export class MessagesPanel {
       this.view === "history" ? "Back to chat" : "Show message history",
     );
     this.launcher.setAttribute("aria-expanded", String(this.expanded));
-    this.log.scrollTop = top;
+    this.restoreReadingPosition();
     remember(MESSAGE_PRESENTATION_KEY, JSON.stringify(this.preferences));
     if (!this.overlay) remember(EXPANDED_KEY, String(this.preferences.visible));
   }
@@ -522,6 +557,7 @@ export class MessagesPanel {
   }
   refresh(): void {
     const followBottom = this.atBottom && !this.loadingOlder;
+    if (!followBottom && !this.loadingOlder) this.captureReadingPosition();
     const roster = JSON.stringify(
       [...this.office.people.values()].map((p) => [
         p.personId,
@@ -659,6 +695,7 @@ export class MessagesPanel {
     this.olderButton.disabled = this.loadingOlder;
     this.updateSubmit();
     if (followBottom && this.expanded) this.scrollBottom();
+    else if (!this.loadingOlder) this.restoreReadingPosition();
     this.read();
     this.updateBadge();
   }
